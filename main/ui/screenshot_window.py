@@ -78,6 +78,36 @@ class ScreenshotShortcutHandler(ShortcutHandler):
         """中键走和键盘完全相同的那条 if 链，见 ShortcutHandler.handle_mouse。"""
         return self.handle_key(event)
 
+    def handle_hotkey(self, hotkey_id: int, callback) -> bool:
+        """截图会话活跃且有确认选区时，把钉图热键改为原地钉当前选区。
+
+        钉图热键（默认 Ctrl+2）注册的是 MainApp.pin_clipboard_image，
+        效果是把剪贴板里最新的一张图钉出来。截图遮罩盖着整个屏幕时这个
+        行为没有意义——用户此刻按下钉图热键的意图显然是「把框好的区域
+        钉住」。没有确认选区时不拦截，保持原有行为。
+        """
+        owner = getattr(callback, '__self__', None)
+        if owner is None or getattr(callback, '__name__', '') != 'pin_clipboard_image':
+            return False
+
+        w = self._window
+        scene = getattr(w, 'scene', None)
+        sel = getattr(scene, 'selection_model', None) if scene else None
+        if sel is None or not getattr(sel, 'is_confirmed', False):
+            return False
+
+        action_handler = getattr(w, 'action_handler', None)
+        if action_handler is None:
+            return False
+
+        try:
+            action_handler.handle_pin()
+        except Exception as e:
+            log_exception(e, T("剪贴板热键钉图失败"))
+            return False
+        log_debug(T("剪贴板热键在截图内已转为钉图"), "ScreenshotWindow")
+        return True
+
     def handle_key(self, event) -> bool:
         from core.shortcut_manager import event_is_auto_repeat, event_key
 
