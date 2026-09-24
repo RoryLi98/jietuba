@@ -1,70 +1,38 @@
 ﻿# -*- coding: utf-8 -*-
 """外观设置页 — Fluent Design"""
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QPushButton,
-    QScrollArea, QColorDialog, QWidgetAction,
+    QWidget, QVBoxLayout, QScrollArea, QColorDialog, QWidgetAction,
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
+from core.ui_scale import configure_dialog_controls, dialog_scaled
 from ui.fluent_lite import (
     SettingCard as FSettingCard, FluentIcon,
-    ComboBox, CaptionLabel, PushButton,
+    ComboBox, CaptionLabel, ColorSwatchButton,
 )
-from .components import (
-    SettingCardGroup, theme_menu_style, theme_color,
-)
-
-# 统一控件宽度
-_CTRL_W = 80
-_CTRL_H = 26
+from .components import SettingCardGroup, theme_menu_style
 
 
-def _update_color_btn(btn: QPushButton, color: QColor):
-    """更新色块按钮的背景颜色"""
-    r, g, b = color.red(), color.green(), color.blue()
-    border = theme_color("#C9CDD4", "#4A4F57")
-    hover_border = theme_color("#8A9099", "#B8BEC8")
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: rgb({r}, {g}, {b});
-            border: 1px solid {border};
-            border-radius: 3px;
-        }}
-        QPushButton:hover {{
-            border: 1px solid {hover_border};
-        }}
-    """)
-
-
-def _make_color_btn(dialog, size_w=_CTRL_W, size_h=_CTRL_H):
-    """创建统一尺寸的色块按钮"""
-    btn = PushButton(dialog)
-    btn.setFixedSize(size_w, size_h)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    return btn
+def _update_color_btn(btn, color: QColor):
+    """把色块按钮填成这个颜色。"""
+    btn.setFill(f"rgb({color.red()}, {color.green()}, {color.blue()})")
 
 
 # ================================================================
 # 剪贴板主题色块 — 色板取自 clipboard.ui.theme.themes.PRESET_THEME_SWATCHES
 # ================================================================
-def _apply_clip_theme_btn_style(btn: QPushButton, name: str):
-    """把主题按钮画成该主题的双色方块。建页与 refresh_settings 共用，不再各抄一份。"""
+def _apply_clip_theme_btn_style(btn, name: str):
+    """把主题按钮填成该主题的双色块。建页与 refresh_settings 共用，不再各抄一份。"""
     from clipboard.ui.theme.themes import PRESET_THEME_SWATCHES
     swatch = PRESET_THEME_SWATCHES.get(name)
     if swatch is None:
         return
     accent, bg = swatch
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                stop:0 {bg}, stop:0.5 {bg},
-                stop:0.5 {accent}, stop:1 {accent});
-            border: 2px solid {accent};
-            border-radius: 3px;
-        }}
-        QPushButton:hover {{ border: 2px solid {theme_color('#333333', '#F3F3F3')}; }}
-    """)
+    btn.setFill(
+        "qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+        f" stop:0 {bg}, stop:0.5 {bg}, stop:0.5 {accent}, stop:1 {accent})"
+    )
 
 
 def create_appearance_page(dialog) -> QWidget:
@@ -76,8 +44,8 @@ def create_appearance_page(dialog) -> QWidget:
     view = QWidget()
     view.setStyleSheet("background: transparent;")
     layout = QVBoxLayout(view)
-    layout.setContentsMargins(0, 0, 10, 0)
-    layout.setSpacing(20)
+    layout.setContentsMargins(0, 0, dialog_scaled(10), 0)
+    layout.setSpacing(dialog_scaled(20))
 
     # ── 应用界面 ──────────────────────────────────────
     grp_app = SettingCardGroup(dialog.tr("Application"), view)
@@ -99,7 +67,7 @@ def create_appearance_page(dialog) -> QWidget:
         dialog.tr("💡 Hint: Color changes take effect on the next screenshot."),
         view,
     )
-    hint.setStyleSheet("padding: 5px;")
+    hint.setStyleSheet(f"padding: {dialog_scaled(5)}px;")
     layout.addWidget(hint)
 
     layout.addStretch()
@@ -123,40 +91,54 @@ def _build_application_section(dialog, grp: SettingCardGroup):
         parent=grp,
     )
     dialog._ui_theme_combo = ComboBox(card)
-    dialog._ui_theme_combo.setFixedWidth(150)
     dialog._ui_theme_combo.addItem(dialog.tr("System"), userData="system")
     dialog._ui_theme_combo.addItem(dialog.tr("Light"), userData="light")
     dialog._ui_theme_combo.addItem(dialog.tr("Dark"), userData="dark")
     index = dialog._ui_theme_combo.findData(get_ui_theme().mode.value)
     dialog._ui_theme_combo.setCurrentIndex(max(0, index))
-    card.hBoxLayout.addWidget(
-        dialog._ui_theme_combo, 0, Qt.AlignmentFlag.AlignRight
-    )
-    card.hBoxLayout.addSpacing(16)
+    card.addControl(dialog._ui_theme_combo)
     grp.addSettingCard(card)
 
-    # ── 界面缩放 ──────────────────────────────────────
-    from core import ui_scale
+    _build_ui_scale_card(dialog, grp)
+    _build_dialog_scale_card(dialog, grp)
 
-    scale_card = FSettingCard(
-        FluentIcon.FONT_SIZE,
-        dialog.tr("UI Scale"),
-        dialog.tr("Adjust the size of interface text. Applied immediately."),
+
+def _build_ui_scale_card(dialog, grp: SettingCardGroup):
+    """工具栏与面板缩放：只作用于操作界面，不影响截图像素尺寸和绘制内容。"""
+    from core.ui_scale import get_ui_scale, UIScaleManager
+
+    card = FSettingCard(
+        FluentIcon.LAYOUT,
+        dialog.tr("Toolbar & Panel Scale"),
+        dialog.tr("Size of toolbars, tool panels and popups."),
         parent=grp,
     )
-    dialog._ui_scale_combo = ComboBox(scale_card)
-    dialog._ui_scale_combo.setFixedWidth(150)
-    for option in ui_scale.UI_SCALE_OPTIONS:
-        dialog._ui_scale_combo.addItem(f"{int(option * 100)}%", userData=option)
-    current_scale = get_tool_settings_manager().get_app_setting("ui_scale", 1.0)
-    scale_idx = dialog._ui_scale_combo.findData(float(current_scale))
-    if scale_idx >= 0:
-        dialog._ui_scale_combo.setCurrentIndex(scale_idx)
-    scale_card.hBoxLayout.addWidget(
-        dialog._ui_scale_combo, 0, Qt.AlignmentFlag.AlignRight
+    dialog._ui_scale_combo = ComboBox(card)
+    for percent in UIScaleManager.PERCENT_OPTIONS:
+        dialog._ui_scale_combo.addItem(f"{percent}%", userData=percent)
+    index = dialog._ui_scale_combo.findData(get_ui_scale().percent)
+    dialog._ui_scale_combo.setCurrentIndex(max(0, index))
+    card.addControl(dialog._ui_scale_combo)
+    grp.addSettingCard(card)
+
+
+def _build_dialog_scale_card(dialog, grp: SettingCardGroup):
+    """窗口界面缩放：独立业务窗口的字号与尺寸。"""
+    from core.ui_scale import get_dialog_scale
+
+    card = FSettingCard(
+        FluentIcon.FONT_SIZE,
+        dialog.tr("Window Scale"),
+        dialog.tr("Font and size of application windows."),
+        parent=grp,
     )
-    scale_card.hBoxLayout.addSpacing(16)
-    grp.addSettingCard(scale_card)
+    dialog._dialog_scale_combo = ComboBox(card)
+    for percent in get_dialog_scale().PERCENT_OPTIONS:
+        dialog._dialog_scale_combo.addItem(f"{percent}%", userData=percent)
+    index = dialog._dialog_scale_combo.findData(get_dialog_scale().percent)
+    dialog._dialog_scale_combo.setCurrentIndex(max(0, index))
+    card.addControl(dialog._dialog_scale_combo)
+    grp.addSettingCard(card)
 
 
 # ================================================================
@@ -164,7 +146,7 @@ def _build_application_section(dialog, grp: SettingCardGroup):
 # ================================================================
 
 def _build_screenshot_section(dialog, grp: SettingCardGroup):
-    """截图外观：主题色 + 遮罩色"""
+    """截图外观：主题色 + 遮罩色 + 选区边框与手柄"""
     from core.theme import get_theme
     theme = get_theme()
 
@@ -174,7 +156,7 @@ def _build_screenshot_section(dialog, grp: SettingCardGroup):
         dialog.tr("Theme Color"),
         parent=grp,
     )
-    dialog._theme_color_btn = _make_color_btn(dialog)
+    dialog._theme_color_btn = ColorSwatchButton(theme_card)
     dialog._appearance_theme_color = QColor(theme.theme_color)
     _update_color_btn(dialog._theme_color_btn, dialog._appearance_theme_color)
 
@@ -188,10 +170,7 @@ def _build_screenshot_section(dialog, grp: SettingCardGroup):
             _update_color_btn(dialog._theme_color_btn, color)
 
     dialog._theme_color_btn.clicked.connect(_pick_theme_color)
-    theme_card.hBoxLayout.addWidget(
-        dialog._theme_color_btn, 0, Qt.AlignmentFlag.AlignRight
-    )
-    theme_card.hBoxLayout.addSpacing(16)
+    theme_card.addControl(dialog._theme_color_btn)
     grp.addSettingCard(theme_card)
 
     # 遮罩色
@@ -200,7 +179,7 @@ def _build_screenshot_section(dialog, grp: SettingCardGroup):
         dialog.tr("Mask Color"),
         parent=grp,
     )
-    dialog._mask_color_btn = _make_color_btn(dialog)
+    dialog._mask_color_btn = ColorSwatchButton(mask_card)
     mc = theme.mask_color
     dialog._appearance_mask_color = QColor(mc.red(), mc.green(), mc.blue())
     _update_color_btn(dialog._mask_color_btn, dialog._appearance_mask_color)
@@ -215,11 +194,78 @@ def _build_screenshot_section(dialog, grp: SettingCardGroup):
             _update_color_btn(dialog._mask_color_btn, color)
 
     dialog._mask_color_btn.clicked.connect(_pick_mask_color)
-    mask_card.hBoxLayout.addWidget(
-        dialog._mask_color_btn, 0, Qt.AlignmentFlag.AlignRight
-    )
-    mask_card.hBoxLayout.addSpacing(16)
+    mask_card.addControl(dialog._mask_color_btn)
     grp.addSettingCard(mask_card)
+
+    _build_selection_border_card(dialog, grp)
+    _build_selection_handle_card(dialog, grp)
+    _build_selection_handle_size_card(dialog, grp)
+
+
+def _build_selection_border_card(dialog, grp: SettingCardGroup):
+    """选区边框笔宽。档位由主题管理器给出，设置页不自己列一遍。"""
+    from core.theme import ThemeManager, get_theme
+
+    card = FSettingCard(
+        FluentIcon.EDIT,
+        dialog.tr("Selection Border Width"),
+        dialog.tr("Thickness of the selection outline."),
+        parent=grp,
+    )
+    dialog._selection_border_combo = ComboBox(card)
+    for width in ThemeManager.BORDER_WIDTH_OPTIONS:
+        dialog._selection_border_combo.addItem(f"{width}px", userData=width)
+    index = dialog._selection_border_combo.findData(get_theme().selection_border_width)
+    dialog._selection_border_combo.setCurrentIndex(max(0, index))
+    card.addControl(dialog._selection_border_combo)
+    grp.addSettingCard(card)
+
+
+def _build_selection_handle_card(dialog, grp: SettingCardGroup):
+    """选区手柄显示档位。关掉只是不画，八个方向照样能拖。"""
+    from core.theme import ThemeManager, get_theme
+
+    card = FSettingCard(
+        FluentIcon.ALIGNMENT,
+        dialog.tr("Selection Handles"),
+        dialog.tr("Hidden handles can still be dragged to resize."),
+        parent=grp,
+    )
+    dialog._selection_handle_combo = ComboBox(card)
+    for value, label in (
+        (ThemeManager.HANDLES_ALL, dialog.tr("8 handles")),
+        (ThemeManager.HANDLES_CORNERS, dialog.tr("4 corners")),
+        (ThemeManager.HANDLES_NONE, dialog.tr("None")),
+    ):
+        dialog._selection_handle_combo.addItem(label, userData=value)
+    index = dialog._selection_handle_combo.findData(get_theme().selection_handle_style)
+    dialog._selection_handle_combo.setCurrentIndex(max(0, index))
+    card.addControl(dialog._selection_handle_combo)
+    grp.addSettingCard(card)
+
+
+def _build_selection_handle_size_card(dialog, grp: SettingCardGroup):
+    """选区手柄大小。圆点直径和外圈描边粗细是一体的观感，只给小/中/大三档，
+    不拆成两个像素级设置项。"""
+    from core.theme import ThemeManager, get_theme
+
+    card = FSettingCard(
+        FluentIcon.EDIT,
+        dialog.tr("Selection Handle Size"),
+        dialog.tr("Size of the selection handles."),
+        parent=grp,
+    )
+    dialog._selection_handle_size_combo = ComboBox(card)
+    for value, label in (
+        (ThemeManager.HANDLE_SIZE_SMALL, dialog.tr("Small")),
+        (ThemeManager.HANDLE_SIZE_MEDIUM, dialog.tr("Medium")),
+        (ThemeManager.HANDLE_SIZE_LARGE, dialog.tr("Large")),
+    ):
+        dialog._selection_handle_size_combo.addItem(label, userData=value)
+    index = dialog._selection_handle_size_combo.findData(get_theme().selection_handle_size)
+    dialog._selection_handle_size_combo.setCurrentIndex(max(0, index))
+    card.addControl(dialog._selection_handle_size_combo)
+    grp.addSettingCard(card)
 
 
 # ================================================================
@@ -241,9 +287,7 @@ def _build_clipboard_section(dialog, grp: SettingCardGroup):
         dialog.tr("Theme"),
         parent=grp,
     )
-    dialog._clip_theme_btn = PushButton(theme_card)
-    dialog._clip_theme_btn.setFixedSize(_CTRL_W, _CTRL_H)
-    dialog._clip_theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    dialog._clip_theme_btn = ColorSwatchButton(theme_card)
     dialog._clip_theme_name = current_theme_name
 
     _apply_clip_theme_btn_style(dialog._clip_theme_btn, current_theme_name)
@@ -251,29 +295,15 @@ def _build_clipboard_section(dialog, grp: SettingCardGroup):
     def _show_theme_popup():
         from PySide6.QtWidgets import QMenu
         menu = QMenu(dialog)
-        menu.setStyleSheet(theme_menu_style() + " QMenu { padding: 4px; }")
+        menu.setStyleSheet(theme_menu_style() + f" QMenu {{ padding: {dialog_scaled(4)}px; }}")
         theme_buttons = []
 
         def _update_btns(selected: str):
-            for n, btn, accent, bg in theme_buttons:
-                is_sel = n == selected
-                btn.setText("✓" if is_sel else "")
-                text_color = "#FFFFFF" if n == "dark" else theme_color("#333333", "#F3F3F3")
-                bw = 2 if is_sel else 1
-                bc = accent if is_sel else theme_color("#CCCCCC", "#4A4F57")
-                btn.setStyleSheet(f"""
-                    QPushButton {{
-                        background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                            stop:0 {bg}, stop:0.5 {bg},
-                            stop:0.5 {accent}, stop:1 {accent});
-                        border: {bw}px solid {bc};
-                        border-radius: 3px;
-                        color: {text_color};
-                        font-size: 12px; font-weight: bold;
-                        text-align: left; padding-left: 6px;
-                    }}
-                    QPushButton:hover {{ border: 2px solid {accent}; }}
-                """)
+            for name, btn, _accent, _bg in theme_buttons:
+                # 勾画在色板自己的底色上，深浅由色板决定，跟界面主题无关。
+                btn.setTextColor("#FFFFFF" if name == "dark" else "#333333")
+                btn.setText("✓" if name == selected else "")
+                btn.setSelected(name == selected)
 
         def _on_click(name: str):
             dialog._clip_theme_name = name
@@ -284,14 +314,17 @@ def _build_clipboard_section(dialog, grp: SettingCardGroup):
 
         for tname, (accent, bg) in PRESET_THEME_SWATCHES.items():
             wa = QWidgetAction(menu)
-            btn = PushButton(menu)
-            btn.setFixedSize(_CTRL_W, _CTRL_H)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn = ColorSwatchButton(menu)
+            btn.setFixedWidth(dialog._clip_theme_btn.width())
+            _apply_clip_theme_btn_style(btn, tname)
             btn.clicked.connect(lambda _c, n=tname: _on_click(n))
             wa.setDefaultWidget(btn)
             menu.addAction(wa)
             theme_buttons.append((tname, btn, accent, bg))
 
+        # 菜单和按钮是点开时才现建的，不在建页时那一轮 configure_dialog_controls
+        # 扫描范围内，弹出前单独扫一遍。
+        configure_dialog_controls(menu)
         _update_btns(dialog._clip_theme_name)
         pos = dialog._clip_theme_btn.mapToGlobal(
             dialog._clip_theme_btn.rect().bottomLeft()
@@ -299,10 +332,7 @@ def _build_clipboard_section(dialog, grp: SettingCardGroup):
         menu.popup(pos)
 
     dialog._clip_theme_btn.clicked.connect(_show_theme_popup)
-    theme_card.hBoxLayout.addWidget(
-        dialog._clip_theme_btn, 0, Qt.AlignmentFlag.AlignRight
-    )
-    theme_card.hBoxLayout.addSpacing(16)
+    theme_card.addControl(dialog._clip_theme_btn)
     grp.addSettingCard(theme_card)
 
     # ── 字体大小 ─────────────────────────────────────
@@ -312,7 +342,6 @@ def _build_clipboard_section(dialog, grp: SettingCardGroup):
         parent=grp,
     )
     dialog._clip_font_combo = ComboBox(font_card)
-    dialog._clip_font_combo.setFixedWidth(_CTRL_W)
 
     font_options = config.get_clipboard_font_size_options()
     current_font = config.get_clipboard_font_size()
@@ -329,10 +358,7 @@ def _build_clipboard_section(dialog, grp: SettingCardGroup):
             theme_mgr.notify_font_size_changed(size)
 
     dialog._clip_font_combo.currentIndexChanged.connect(_on_font_changed)
-    font_card.hBoxLayout.addWidget(
-        dialog._clip_font_combo, 0, Qt.AlignmentFlag.AlignRight
-    )
-    font_card.hBoxLayout.addSpacing(16)
+    font_card.addControl(dialog._clip_font_combo)
     grp.addSettingCard(font_card)
 
     # ── 透明度 ───────────────────────────────────────
@@ -342,7 +368,6 @@ def _build_clipboard_section(dialog, grp: SettingCardGroup):
         parent=grp,
     )
     dialog._clip_opacity_combo = ComboBox(opacity_card)
-    dialog._clip_opacity_combo.setFixedWidth(_CTRL_W)
 
     opacity_options = config.get_clipboard_window_opacity_options()
     current_opacity = config.get_clipboard_window_opacity()
@@ -360,9 +385,6 @@ def _build_clipboard_section(dialog, grp: SettingCardGroup):
             theme_mgr.notify_opacity_changed(percent)
 
     dialog._clip_opacity_combo.currentIndexChanged.connect(_on_opacity_changed)
-    opacity_card.hBoxLayout.addWidget(
-        dialog._clip_opacity_combo, 0, Qt.AlignmentFlag.AlignRight
-    )
-    opacity_card.hBoxLayout.addSpacing(16)
+    opacity_card.addControl(dialog._clip_opacity_combo)
     grp.addSettingCard(opacity_card)
  

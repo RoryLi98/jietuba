@@ -153,21 +153,8 @@ class TestApplySizeToLabel:
 
 
 # ============================================================================
-# page_hotkey：布局高度与同组冲突检测
+# page_hotkey：按键表与同组冲突检测
 # ============================================================================
-
-class TestStackPageHeight:
-
-    def test_no_rows_take_no_height(self):
-        assert page_hotkey._stack_page_height(0) == 0
-
-    def test_single_row_has_no_spacing(self):
-        assert page_hotkey._stack_page_height(1) == 46
-
-    def test_each_extra_row_adds_its_height_plus_one_gap(self):
-        for rows, expected in ((2, 100), (3, 154), (8, 424)):
-            assert page_hotkey._stack_page_height(rows) == expected, rows
-
 
 class TestShortcutKeyTables:
     """常量表是冲突检测和默认值回退的数据源，结构错了两处逻辑一起失效"""
@@ -190,6 +177,14 @@ class TestShortcutKeyTables:
         for table in (page_hotkey.SCREENSHOT_KEYS, page_hotkey.PIN_KEYS):
             keys = [entry[0] for entry in table]
             assert len(keys) == len(set(keys)), keys
+
+    def test_defaults_match_the_factory_settings(self):
+        """表里的默认值是 APP_DEFAULT_SETTINGS 的副本，两边对不上就会恢复出错"""
+        from settings.tool_settings import ToolSettingsManager
+
+        factory = ToolSettingsManager.APP_DEFAULT_SETTINGS
+        for cfg_key, _label, default in page_hotkey.INAPP_KEYS:
+            assert factory.get(cfg_key) == default, cfg_key
 
 
 def _factory_default(key):
@@ -223,7 +218,7 @@ class TestShortcutConflictDetection:
         edits = {"inapp_undo": _Edit("ctrl+z"), "inapp_redo": _Edit("ctrl+z")}
         dialog = _hotkey_dialog(edits, {"inapp_undo": "shot", "inapp_redo": "shot"})
         for text in ("", "   "):
-            page_hotkey._on_shortcut_changed(dialog, "inapp_redo", text, "")
+            page_hotkey._on_shortcut_changed(dialog, "inapp_redo", text)
         assert asked == []
 
     def test_half_typed_combination_is_ignored(self, monkeypatch):
@@ -232,7 +227,7 @@ class TestShortcutConflictDetection:
                             lambda *a, **k: asked.append(a) or True)
         edits = {"inapp_undo": _Edit("ctrl+"), "inapp_redo": _Edit("ctrl+")}
         dialog = _hotkey_dialog(edits, {"inapp_undo": "shot", "inapp_redo": "shot"})
-        page_hotkey._on_shortcut_changed(dialog, "inapp_redo", "ctrl+", "")
+        page_hotkey._on_shortcut_changed(dialog, "inapp_redo", "ctrl+")
         assert asked == []
 
     def test_distinct_shortcuts_raise_no_conflict(self, monkeypatch):
@@ -241,7 +236,7 @@ class TestShortcutConflictDetection:
                             lambda *a, **k: asked.append(a) or True)
         edits = {"inapp_undo": _Edit("ctrl+z"), "inapp_redo": _Edit("ctrl+y")}
         dialog = _hotkey_dialog(edits, {"inapp_undo": "shot", "inapp_redo": "shot"})
-        page_hotkey._on_shortcut_changed(dialog, "inapp_redo", "ctrl+y", "")
+        page_hotkey._on_shortcut_changed(dialog, "inapp_redo", "ctrl+y")
         assert asked == []
 
     def test_same_shortcut_in_a_different_group_is_allowed(self, monkeypatch):
@@ -255,7 +250,7 @@ class TestShortcutConflictDetection:
         edits = {"inapp_confirm": _Edit("ctrl+c"), "inapp_copy_pin": _Edit("ctrl+c")}
         dialog = _hotkey_dialog(
             edits, {"inapp_confirm": "shot", "inapp_copy_pin": "pin"})
-        page_hotkey._on_shortcut_changed(dialog, "inapp_copy_pin", "ctrl+c", "")
+        page_hotkey._on_shortcut_changed(dialog, "inapp_copy_pin", "ctrl+c")
         assert asked == []
 
     def test_comparison_ignores_case_and_padding(self, monkeypatch):
@@ -264,14 +259,14 @@ class TestShortcutConflictDetection:
                             lambda *a, **k: asked.append(a) or True)
         edits = {"inapp_undo": _Edit("  CTRL+Z  "), "inapp_redo": _Edit("x")}
         dialog = _hotkey_dialog(edits, {"inapp_undo": "shot", "inapp_redo": "shot"})
-        page_hotkey._on_shortcut_changed(dialog, "inapp_redo", " Ctrl+Z ", "")
+        page_hotkey._on_shortcut_changed(dialog, "inapp_redo", " Ctrl+Z ")
         assert len(asked) == 1
 
     def test_accepting_the_prompt_clears_the_older_binding(self, monkeypatch):
         monkeypatch.setattr(page_hotkey, "show_confirm_dialog", lambda *a, **k: True)
         edits = {"inapp_undo": _Edit("ctrl+z"), "inapp_redo": _Edit("ctrl+z")}
         dialog = _hotkey_dialog(edits, {"inapp_undo": "shot", "inapp_redo": "shot"})
-        page_hotkey._on_shortcut_changed(dialog, "inapp_redo", "ctrl+z", "")
+        page_hotkey._on_shortcut_changed(dialog, "inapp_redo", "ctrl+z")
         assert edits["inapp_undo"].set_texts == [""]
         assert edits["inapp_redo"].set_texts == []
 
@@ -281,7 +276,7 @@ class TestShortcutConflictDetection:
         dialog = _hotkey_dialog(
             edits, {"inapp_undo": "shot", "inapp_redo": "shot"},
             stored={"inapp_redo": "ctrl+shift+y"})
-        page_hotkey._on_shortcut_changed(dialog, "inapp_redo", "ctrl+z", "")
+        page_hotkey._on_shortcut_changed(dialog, "inapp_redo", "ctrl+z")
         assert edits["inapp_redo"].set_texts == ["ctrl+shift+y"]
         assert edits["inapp_undo"].set_texts == []
 
@@ -290,7 +285,7 @@ class TestShortcutConflictDetection:
         monkeypatch.setattr(page_hotkey, "show_confirm_dialog", lambda *a, **k: False)
         edits = {"inapp_undo": _Edit("ctrl+z"), "inapp_redo": _Edit("ctrl+z")}
         dialog = _hotkey_dialog(edits, {"inapp_undo": "shot", "inapp_redo": "shot"})
-        page_hotkey._on_shortcut_changed(dialog, "inapp_redo", "ctrl+z", "")
+        page_hotkey._on_shortcut_changed(dialog, "inapp_redo", "ctrl+z")
         # 表里 inapp_redo 的默认值
         assert edits["inapp_redo"].set_texts == ["ctrl+y"]
 
@@ -299,7 +294,7 @@ class TestShortcutConflictDetection:
         monkeypatch.setattr(page_hotkey, "show_confirm_dialog", lambda *a, **k: True)
         edits = {"inapp_undo": _Edit("ctrl+z"), "inapp_redo": _Edit("ctrl+z")}
         dialog = _hotkey_dialog(edits, {"inapp_undo": "shot", "inapp_redo": "shot"})
-        page_hotkey._on_shortcut_changed(dialog, "inapp_redo", "ctrl+z", "")
+        page_hotkey._on_shortcut_changed(dialog, "inapp_redo", "ctrl+z")
         for edit in edits.values():
             assert edit.block_calls == [True, False]
 
@@ -314,12 +309,12 @@ class TestShortcutConflictDetection:
         monkeypatch.setattr(page_hotkey, "show_confirm_dialog", _fake_confirm)
         edits = {"inapp_undo": _Edit("ctrl+z"), "inapp_redo": _Edit("ctrl+z")}
         dialog = _hotkey_dialog(edits, {"inapp_undo": "shot", "inapp_redo": "shot"})
-        page_hotkey._on_shortcut_changed(dialog, "inapp_redo", "ctrl+z", "")
+        page_hotkey._on_shortcut_changed(dialog, "inapp_redo", "ctrl+z")
         assert captured["title"] == "Shortcut Conflict"
         # 占位符必须被真正替换掉，而不是把 %1/%2 显示给用户
         assert "%1" not in captured["message"]
         assert "%2" not in captured["message"]
-        assert "CTRL+Z" in captured["message"]
+        assert "Ctrl + Z" in captured["message"]
         assert "Undo" in captured["message"]
 
 
@@ -342,71 +337,130 @@ class TestThemeColourTable:
         assert "dark" in PRESET_THEME_SWATCHES
 
     def test_theme_button_is_painted_with_its_swatch(self):
-        styles = []
-        button = SimpleNamespace(setStyleSheet=styles.append)
+        fills = []
+        button = SimpleNamespace(setFill=fills.append)
         page_appearance._apply_clip_theme_btn_style(button, "pink")
         accent, background = PRESET_THEME_SWATCHES["pink"]
-        assert accent in styles[-1] and background in styles[-1]
+        assert accent in fills[-1] and background in fills[-1]
 
     def test_unknown_theme_leaves_button_untouched(self):
-        styles = []
-        button = SimpleNamespace(setStyleSheet=styles.append)
+        fills = []
+        button = SimpleNamespace(setFill=fills.append)
         page_appearance._apply_clip_theme_btn_style(button, "no-such-theme")
-        assert styles == []
+        assert fills == []
 
 
 # ============================================================================
 # page_translation：服务商切换的控件显隐
 # ============================================================================
 
-PROVIDER_GROUPS = {
-    "deepl": "deepl_settings_group",
-    "amazon": "amazon_translate_settings_group",
-    "google": "google_translate_settings_group",
-    "azure": "azure_translate_settings_group",
-}
+def _registry():
+    """真实注册表。测试不自己列服务商名单，加一家会自动被下面的用例覆盖。"""
+    from translation.service import create_default_translation_service
+
+    class _Config:
+        def get_translation_provider(self):
+            return ""
+
+        def get_translation_provider_config(self, provider_id):
+            return {}
+
+    return create_default_translation_service(_Config()).registry
 
 
-def _translation_dialog(provider, with_optional=False):
+def _translation_dialog(provider, registry, with_optional=True):
+    """用假控件拼一个够 _update_provider_groups 用的 dialog。
+
+    刻意不用 MagicMock：源码用 getattr(dialog, ..., None) 做分支判断，
+    而 MagicMock 的任意属性都存在，会让所有分支恒为真、测出假的通过。
+    """
     dialog = SimpleNamespace(
-        translation_provider_combo=SimpleNamespace(currentData=lambda: provider))
-    for attr in PROVIDER_GROUPS.values():
-        setattr(dialog, attr, _Visibility())
+        translation_provider_combo=SimpleNamespace(
+            currentData=lambda: provider),
+        translation_registry=registry,
+        tr=lambda text: text,
+        provider_sections={
+            m.provider_id: _Visibility()
+            for m in registry.available_providers()
+        },
+    )
     if with_optional:
-        for attr in ("deepl_translation_info_label", "split_sentences_toggle",
-                     "preserve_formatting_toggle"):
-            setattr(dialog, attr, _Visibility())
+        dialog.request_option_cards = {
+            "split_sentences": _Visibility(),
+            "preserve_formatting": _Visibility(),
+        }
+        dialog.request_options_section = _Visibility()
+        dialog.translation_notice_label = _NoticeLabel()
     return dialog
+
+
+class _NoticeLabel(_Visibility):
+    def __init__(self):
+        super().__init__()
+        self.text_value = ""
+
+    def setText(self, value):
+        self.text_value = value
+
+    def text(self):
+        return self.text_value
 
 
 class TestProviderGroupVisibility:
 
-    def test_only_the_selected_provider_group_is_visible(self):
-        for provider, visible_attr in PROVIDER_GROUPS.items():
-            dialog = _translation_dialog(provider)
+    def test_only_the_selected_provider_section_is_visible(self):
+        registry = _registry()
+        for meta in registry.available_providers():
+            dialog = _translation_dialog(meta.provider_id, registry)
             page_translation._update_provider_groups(dialog)
-            for attr in PROVIDER_GROUPS.values():
-                expected = attr == visible_attr
-                assert getattr(dialog, attr).visible is expected, (provider, attr)
+            for pid, section in dialog.provider_sections.items():
+                expected = pid == meta.provider_id
+                assert section.visible is expected, (meta.provider_id, pid)
 
-    def test_an_unknown_provider_hides_every_group(self):
+    def test_an_unknown_provider_hides_every_section(self):
         """服务商列表由 registry 动态给出，出现未知值时不能留着上一个的输入框"""
+        registry = _registry()
         for provider in (None, "", "some_future_provider"):
-            dialog = _translation_dialog(provider)
+            dialog = _translation_dialog(provider, registry)
             page_translation._update_provider_groups(dialog)
-            for attr in PROVIDER_GROUPS.values():
-                assert getattr(dialog, attr).visible is False, (provider, attr)
+            for pid, section in dialog.provider_sections.items():
+                assert section.visible is False, (provider, pid)
 
-    def test_deepl_only_options_follow_the_deepl_selection(self):
-        for provider in ("deepl", "google", "amazon", "azure"):
-            dialog = _translation_dialog(provider, with_optional=True)
+    def test_request_options_follow_each_providers_declaration(self):
+        """通用选项显不显示，由 provider 自己声明的能力决定，不按名字特判。"""
+        registry = _registry()
+        for meta in registry.available_providers():
+            dialog = _translation_dialog(meta.provider_id, registry)
             page_translation._update_provider_groups(dialog)
-            expected = provider == "deepl"
-            assert dialog.deepl_translation_info_label.visible is expected, provider
-            assert dialog.split_sentences_toggle.visible is expected, provider
-            assert dialog.preserve_formatting_toggle.visible is expected, provider
+            for key, card in dialog.request_option_cards.items():
+                expected = key in meta.supported_request_options
+                assert card.visible is expected, (meta.provider_id, key)
+            assert dialog.request_options_section.visible is bool(
+                meta.supported_request_options
+            ), meta.provider_id
+
+    def test_at_least_one_provider_declares_request_options(self):
+        """否则上面那条用例会在「全都不支持」时空转、看起来也是绿的。"""
+        registry = _registry()
+        assert any(
+            m.supported_request_options
+            for m in registry.available_providers()
+        )
+
+    def test_notice_line_comes_from_the_active_providers_metadata(self):
+        registry = _registry()
+        for meta in registry.available_providers():
+            dialog = _translation_dialog(meta.provider_id, registry)
+            page_translation._update_provider_groups(dialog)
+            text = dialog.translation_notice_label.text()
+            if meta.help_url:
+                assert meta.help_url in text, meta.provider_id
+            if meta.notice:
+                assert meta.notice in text, meta.provider_id
 
     def test_optional_widgets_absent_before_the_page_is_built(self):
-        dialog = _translation_dialog("deepl", with_optional=False)
+        """页面还没建好就被调到时不能炸——构造顺序变动过好几次。"""
+        registry = _registry()
+        dialog = _translation_dialog("deepl", registry, with_optional=False)
         page_translation._update_provider_groups(dialog)
-        assert dialog.deepl_settings_group.visible is True
+        assert dialog.provider_sections["deepl"].visible is True

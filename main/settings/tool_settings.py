@@ -21,6 +21,12 @@ from PySide6.QtCore import QSettings, Signal, QObject
 from PySide6.QtGui import QColor
 
 
+# 智能选区的三档，顺序就是设置页下拉框的顺序。off 是总开关关掉，不作为
+# smart_selection_mode 的取值落盘，所以 STORED_… 从第二项起。
+SMART_SELECTION_MODES = ("off", "window", "element")
+STORED_SMART_SELECTION_MODES = SMART_SELECTION_MODES[1:]
+
+
 ANNOTATION_TOOL_SHORTCUTS = (
     ("inapp_tool_cursor", "cursor", "Select / Cursor", "s"),
     ("inapp_tool_pen", "pen", "Pen", "p"),
@@ -32,6 +38,14 @@ ANNOTATION_TOOL_SHORTCUTS = (
     ("inapp_tool_ellipse", "ellipse", "Ellipse", "o"),
     ("inapp_tool_text", "text", "Text", "t"),
     ("inapp_tool_eraser", "eraser", "Eraser", "e"),
+)
+
+# 自定义 OpenAI 兼容服务的三个保存位置，和 translation/providers/custom_llm.py
+# 的 CUSTOM_LLM_PROVIDERS 一一对应。第 1 个沿用单槽位时代的 custom_llm。
+CUSTOM_LLM_PROVIDER_IDS = ("custom_llm", "custom_llm_2", "custom_llm_3")
+_CUSTOM_LLM_TEXT_KEYS = (
+    "name", "base_url", "api_key", "model", "temperature", "timeout",
+    "instructions", "extra_body",
 )
 
 
@@ -130,7 +144,7 @@ class ToolSettingsManager(QObject):
             "stroke_width": 9,
             "opacity": 1.0,
             "arrow_size": 9,  # 箭头大小
-            "arrow_style": "single",  # 箭头样式：single（单头）或 double（双头）
+            "arrow_style": "single",  # 箭头样式，取值见 ArrowItem.STYLES
         },
         "text": {
             "color": "#000000",  # 黑色
@@ -140,6 +154,12 @@ class ToolSettingsManager(QObject):
             "background_enabled": False,
             "background_color": "#FFFFFF",  # 文字背景默认白色
             "background_opacity": 255,
+            # 描边/阴影：与 TextItem 的 DEFAULT_* 一致（这里不能 import canvas）
+            "outline_enabled": False,
+            "outline_color": "#FFFFFF",
+            "outline_width": 0.07,  # 必须是 TextItem.OUTLINE_WIDTH_LEVELS 里的档位之一（字号的比例）
+            "shadow_enabled": False,
+            "shadow_color": "#66000000",  # #AARRGGBB，alpha 即阴影不透明度
         },
         "number": {
             "color": "#FF0000",  # 红色
@@ -159,12 +179,12 @@ class ToolSettingsManager(QObject):
         # ==================== 1. 快捷键 ====================
         "hotkey": "ctrl+1",                        # 截图热键
         "hotkey_2": "",                            # 截图备用热键
-        "pin_hotkey": "ctrl+2",                    # 全局钉图热键（截图外：钉剪贴板最新；截图内：钉当前选区）
-        "pin_hotkey_2": "",                        # 全局钉图备用热键
-        "translation_hotkey": "ctrl+3",            # 翻译主热键
-        "translation_hotkey_2": "",                # 翻译备用热键
-        "clipboard_hotkey": "ctrl+4",              # 剪贴板管理器的快捷键
+        "clipboard_hotkey": "ctrl+2",              # 剪贴板管理器的快捷键
         "clipboard_hotkey_2": "",                  # 剪贴板管理器的备用快捷键
+        "pin_clipboard_hotkey": "",                # 钉住剪贴板图片的快捷键（默认不占键，需手动设置）
+        "pin_clipboard_hotkey_2": "",              # 钉住剪贴板图片的备用快捷键
+        "translation_hotkey": "",                  # 翻译主热键
+        "translation_hotkey_2": "",                # 翻译备用热键
         "global_hotkeys_disabled": False,           # 是否禁用全局热键
 
         # 应用内快捷键
@@ -173,12 +193,16 @@ class ToolSettingsManager(QObject):
         "inapp_undo": "ctrl+z",                # 撤销
         "inapp_redo": "ctrl+y",                # 重做
         "inapp_delete": "delete",              # 删除选中图元
+        "inapp_restore_last_region": "l",      # 选区未确认/无绘制工具激活时，还原为上次截图的区域
         "inapp_copy_pin": "ctrl+c",            # 复制钉图内容
+        "inapp_copy_pin_text": "ctrl+shift+c", # 复制钉图识别到的全部文字
+        "inapp_pin_reset_size": "mousemiddle", # 钉图恢复 100% 大小
         "inapp_thumbnail": "r",                # 切换缩略图模式
         "inapp_toggle_toolbar": "space",       # 切换工具栏
         "inapp_zoom_in": "pageup",             # 放大镜放大
         "inapp_zoom_out": "pagedown",          # 放大镜缩小
         "inapp_translate": "shift+c",          # 截图翻译
+        "inapp_text_recognize": "shift+t",     # 文字识别
         "inapp_cursor_move_mode": "both",      # 鼠标微移模式: both / arrows / wasd
         **{key: default for key, _tool, _label, default in ANNOTATION_TOOL_SHORTCUTS},
         # ==================== 2. 截图 ====================
@@ -189,13 +213,18 @@ class ToolSettingsManager(QObject):
         "screenshot_toolbar_layout": "",      # 截图工具栏按钮排布（JSON，空 = 默认排布，见 ui/toolbar_layout.py）
 
         # 智能选择
-        "smart_selection": True,              # 智能选区（窗口/控件识别）
+        "smart_selection": True,              # 智能选区总开关
+        # 默认只到窗口：控件检测要把整棵无障碍树扫回来，耗时和稳定性都由目标
+        # 程序的提供方决定，不该是所有人默认承担的。
+        "smart_selection_mode": "window",     # window / element，见 SMART_SELECTION_MODES
+        "smart_selection_animation": False,   # 换窗口时补间而不是瞬间跳变
 
         # 截图保存
         "screenshot_save_enabled": True,       # 自动保存截图
         "screenshot_save_path": os.path.join(os.path.expanduser("~"), "Pictures", "jietuba_photos"),  # 默认保存路径
         "screenshot_format": "PNG",            # 保存格式: PNG / JPG / BMP / WEBP / PDF
         "screenshot_quality": 85,              # 有损格式质量 (1-100, PNG/BMP忽略)
+        "clipboard_file_reference_enabled": True,  # 复制时同时写入文件路径（CF_HDROP），需自动保存截图开启才生效
 
         # 截图圆角
         "screenshot_rounded_enabled": False,   # 圆角截图开关
@@ -222,8 +251,11 @@ class ToolSettingsManager(QObject):
         # ==================== 3. 剪贴板 ====================
         "clipboard_enabled": True,             # 剪贴板监听启用
         "clipboard_auto_paste": True,          # 选择后自动粘贴（发送 Ctrl+V）
+        "clipboard_close_after_paste": True,   # 粘贴后关闭窗口（关掉则窗口常驻，可连续粘贴）
         "clipboard_history_limit": 1000,        # 历史记录数量限制（0 为不限制）
         "clipboard_auto_cleanup": True,        # 自动清理超出限制的记录
+        "clipboard_foreground_scan_interval_ms": 200,  # 前台窗口取样频率（毫秒），仅面板打开时生效
+        "clipboard_foreground_scan_interval_options": [100, 200, 300, 400, 500, 600],  # 频率可选项
         "clipboard_window_width": 450,         # 剪贴板窗口默认宽度
         "clipboard_window_height": 750,        # 剪贴板窗口默认高度
         "clipboard_window_opacity": 20,         # 剪贴板窗口透明度（0=不透明）
@@ -241,8 +273,20 @@ class ToolSettingsManager(QObject):
 
         # ==================== 4. 外观 ====================
         "ui_theme_mode": "system",             # 界面主题（system/light/dark）
-        "ui_scale": 1.0,                       # 界面缩放系数（1.0-2.0，放大界面文字）
+        # 工具栏与面板缩放百分比，档位见 core/ui_scale.UIScaleManager.PERCENT_OPTIONS。
+        # 100 = 当前发布版本的实际显示大小，只作用于操作界面，不改内容数据
+        "ui_scale_percent": 100,
+        # 独立业务窗口缩放百分比，档位同上
+        "dialog_scale_percent": 100,
         "theme_color": "#40E0D0",              # 主题色（青绿色 Turquoise）
+        # 选区边框笔宽（物理像素），档位见 core/theme.ThemeManager.BORDER_WIDTH_OPTIONS
+        "selection_border_width": 4,
+        # 选区手柄显示：all=八个 / corners=四角 / none=不显示。
+        # 只管画不画，八个方向照样能拖动调整选区，见 canvas/items/selection_item.py
+        "selection_handle_style": "all",
+        # 选区手柄大小：small/medium/large，同时决定圆点直径和外圈描边宽度，
+        # 档位见 core/theme.ThemeManager.HANDLE_SIZE_OPTIONS
+        "selection_handle_size": "small",
         "mask_color_r": 0,                     # 遮罩色 R（0-255）
         "mask_color_g": 0,                     # 遮罩色 G（0-255）
         "mask_color_b": 0,                     # 遮罩色 B（0-255）
@@ -260,8 +304,19 @@ class ToolSettingsManager(QObject):
         "azure_translate_api_key": "",
         "azure_translate_region": "",
         "azure_translate_endpoint": "",
-        "baidu_translate_app_id": "",          # 百度翻译 APP ID
-        "baidu_translate_secret_key": "",      # 百度翻译密钥
+        "baidu_translate_appid": "",
+        "baidu_translate_secret_key": "",
+        "deepseek_api_key": "",
+        "deepseek_model": "",          # 空=用 provider 里的默认模型
+        "deepseek_base_url": "",       # 空=用官方地址
+        # 自定义 OpenAI 兼容服务。温度、超时留空表示用服务端 / provider 的默认值，
+        # extra_body 是 JSON 对象，原样并入请求体
+        **{
+            f"{slot}_{key}": ""
+            for slot in CUSTOM_LLM_PROVIDER_IDS
+            for key in _CUSTOM_LLM_TEXT_KEYS
+        },
+        **{f"{slot}_json_mode": True for slot in CUSTOM_LLM_PROVIDER_IDS},
         "translation_target_lang": "",         # 翻译目标语言（空为跟随系统语言）
         "translation_split_sentences": True,   # 自动分句
         "translation_preserve_formatting": True,  # 保留格式
@@ -275,7 +330,14 @@ class ToolSettingsManager(QObject):
         # ==================== 7. 其他 ====================
         "show_main_window": False,             # 运行后自动弹出窗口显示（默认后台启动）
         "language": "en",                      # 界面语言（ja/en/zh/ko）
-        "magnifier_color_copy_format": "rgb_hex",  # 放大镜复制颜色信息格式（rgb_hex/rgb/hex）
+        "magnifier_enabled": True,             # 截图时是否显示放大镜
+        "magnifier_grid": False,               # 放大镜上画像素网格线
+        "magnifier_swatch": True,              # 放大图右上角显示取到的颜色
+        "magnifier_hint": True,                # 放大镜信息区显示取色快捷键提示行
+        # 放大镜的颜色格式列表（JSON，见 settings/color_formats.py）。空串表示还没
+        # 存过，那时会按下面这个旧的单选键迁移出一份。
+        "magnifier_color_formats": "",
+        "magnifier_color_copy_format": "rgb_hex",  # 旧版单选的格式，只用于迁移
         "magnifier_zoom": 4.0,                 # 放大镜默认倍率（1.0 ~ 10.0）
         "magnifier_zoom_min": 2.0,             # 放大镜最小倍率
         "magnifier_zoom_max": 10.0,            # 放大镜最大倍率
@@ -308,7 +370,7 @@ class ToolSettingsManager(QObject):
         self.qsettings = qsettings if qsettings is not None else QSettings("Jietuba", "ToolSettings")
         self._tool_settings: Dict[str, ToolSettings] = {}
         self._initialize_tools()
-    
+
     @property
     def settings(self):
         """返回 QSettings 实例。"""
@@ -374,14 +436,16 @@ class ToolSettingsManager(QObject):
             tool_setting.set(key, value)
     
     def _save_tool_settings(self, tool_setting: ToolSettings):
-        """保存工具设置到 QSettings"""
+        """保存工具设置到 QSettings。
+
+        不手动 sync()：setValue() 之后 QSettings 会在下一轮事件循环自己落盘。拖动滑块、
+        Ctrl+滚轮这类连续调整每一步都会走到这里，手动 sync() 只会在自动落盘之外再多刷一次。
+        """
         tool_id = tool_setting.tool_id
-        
+
         for key, value in tool_setting.to_dict().items():
             setting_key = f"tools/{tool_id}/{key}"
             self.qsettings.setValue(setting_key, value)
-        
-        self.qsettings.sync()
     
     def get_tool_settings(self, tool_id: str) -> Optional[ToolSettings]:
         """获取工具的设置对象"""
@@ -630,6 +694,30 @@ class ToolSettingsManager(QObject):
     def set_clipboard_hotkey_2(self, value: str):
         """设置剪贴板管理器备用快捷键"""
         self.qsettings.setValue("clipboard/hotkey_2", value)
+    
+    def get_pin_clipboard_hotkey(self) -> str:
+        """获取「钉住剪贴板图片」快捷键"""
+        return self.qsettings.value(
+            "clipboard/pin_hotkey",
+            self.APP_DEFAULT_SETTINGS["pin_clipboard_hotkey"],
+            type=str,
+        )
+    
+    def set_pin_clipboard_hotkey(self, value: str):
+        """设置「钉住剪贴板图片」快捷键"""
+        self.qsettings.setValue("clipboard/pin_hotkey", value)
+    
+    def get_pin_clipboard_hotkey_2(self) -> str:
+        """获取「钉住剪贴板图片」备用快捷键"""
+        return self.qsettings.value(
+            "clipboard/pin_hotkey_2",
+            self.APP_DEFAULT_SETTINGS["pin_clipboard_hotkey_2"],
+            type=str,
+        )
+    
+    def set_pin_clipboard_hotkey_2(self, value: str):
+        """设置「钉住剪贴板图片」备用快捷键"""
+        self.qsettings.setValue("clipboard/pin_hotkey_2", value)
 
     def get_translation_hotkey(self) -> str:
         """获取智能翻译全局快捷键。"""
@@ -655,30 +743,6 @@ class ToolSettingsManager(QObject):
         """保存智能翻译备用全局快捷键。"""
         self.qsettings.setValue("app/translation_hotkey_2", value)
 
-    def get_pin_hotkey(self) -> str:
-        """获取全局钉图热键。"""
-        return self.qsettings.value(
-            "app/pin_hotkey",
-            self.APP_DEFAULT_SETTINGS["pin_hotkey"],
-            type=str,
-        )
-
-    def set_pin_hotkey(self, value: str):
-        """保存全局钉图热键。"""
-        self.qsettings.setValue("app/pin_hotkey", value)
-
-    def get_pin_hotkey_2(self) -> str:
-        """获取全局钉图备用热键。"""
-        return self.qsettings.value(
-            "app/pin_hotkey_2",
-            self.APP_DEFAULT_SETTINGS["pin_hotkey_2"],
-            type=str,
-        )
-
-    def set_pin_hotkey_2(self, value: str):
-        """保存全局钉图备用热键。"""
-        self.qsettings.setValue("app/pin_hotkey_2", value)
-
     # ---------- 应用内快捷键 ----------
     def get_inapp_shortcut(self, key: str) -> str:
         """获取应用内快捷键 (key 示例: 'inapp_confirm')"""
@@ -701,13 +765,44 @@ class ToolSettingsManager(QObject):
         """设置鼠标微移模式"""
         self.qsettings.setValue("inapp/inapp_cursor_move_mode", value)
 
+    def get_smart_selection_mode(self) -> str:
+        """返回生效的检测方式：off / window / element。"""
+        if not self.get_smart_selection():
+            return "off"
+        mode = self.qsettings.value(
+            "app/smart_selection_mode", self.APP_DEFAULT_SETTINGS["smart_selection_mode"], type=str
+        ).lower()
+        default = self.APP_DEFAULT_SETTINGS["smart_selection_mode"]
+        return mode if mode in STORED_SMART_SELECTION_MODES else default
+
+    def set_smart_selection_mode(self, mode: str):
+        """设置智能选区模式。off 不写 mode，关掉再打开还是原来的粒度。"""
+        mode = str(mode or "off").lower()
+        if mode not in SMART_SELECTION_MODES:
+            mode = self.APP_DEFAULT_SETTINGS["smart_selection_mode"]
+        if mode != "off":
+            self.qsettings.setValue("app/smart_selection_mode", mode)
+        self.qsettings.setValue("app/smart_selection", mode != "off")
+
     def get_smart_selection(self) -> bool:
-        """获取智能选区设置"""
+        """获取智能选区总开关。"""
         return self.qsettings.value("app/smart_selection", self.APP_DEFAULT_SETTINGS["smart_selection"], type=bool)
     
     def set_smart_selection(self, value: bool):
-        """设置智能选区"""
-        self.qsettings.setValue("app/smart_selection", value)
+        """设置智能选区总开关，同时保留已选择的检测模式。"""
+        self.qsettings.setValue("app/smart_selection", bool(value))
+
+    def get_smart_selection_animation(self) -> bool:
+        """获取智能选区换窗口动画设置"""
+        return self.qsettings.value(
+            "app/smart_selection_animation",
+            self.APP_DEFAULT_SETTINGS["smart_selection_animation"],
+            type=bool,
+        )
+
+    def set_smart_selection_animation(self, value: bool):
+        """设置智能选区换窗口动画"""
+        self.qsettings.setValue("app/smart_selection_animation", value)
 
     def get_double_click_copy_close_enabled(self) -> bool:
         """获取双击选区后复制并关闭的启用状态。"""
@@ -838,6 +933,18 @@ class ToolSettingsManager(QObject):
         """设置截图保存格式 (PNG/JPG/BMP/WEBP/PDF)"""
         self.qsettings.setValue("app/screenshot_format", value.upper())
 
+    def get_clipboard_file_reference_enabled(self) -> bool:
+        """获取复制时是否同时写入文件路径（CF_HDROP），需自动保存截图开启才生效"""
+        return self.qsettings.value(
+            "app/clipboard_file_reference_enabled",
+            self.APP_DEFAULT_SETTINGS["clipboard_file_reference_enabled"],
+            type=bool,
+        )
+
+    def set_clipboard_file_reference_enabled(self, value: bool):
+        """设置复制时是否同时写入文件路径（CF_HDROP）"""
+        self.qsettings.setValue("app/clipboard_file_reference_enabled", value)
+
     def get_screenshot_quality(self) -> int:
         """获取截图保存质量 (1-100, PNG/BMP时忽略)"""
         return self.qsettings.value("app/screenshot_quality", self.APP_DEFAULT_SETTINGS["screenshot_quality"], type=int)
@@ -956,9 +1063,26 @@ class ToolSettingsManager(QObject):
             }
         if provider_id == "baidu":
             return {
-                "app_id": self.get_baidu_translate_app_id(),
+                "appid": self.get_baidu_translate_appid(),
                 "secret_key": self.get_baidu_translate_secret_key(),
             }
+        if provider_id == "deepseek":
+            # model/base_url 留空时由 provider 用自己的默认值，
+            # 所以这里原样传空串而不是在这边兜底
+            return {
+                "api_key": self.get_deepseek_api_key(),
+                "model": self.get_deepseek_model(),
+                "base_url": self.get_deepseek_base_url(),
+            }
+        if provider_id in CUSTOM_LLM_PROVIDER_IDS:
+            # 一律经 get_<键名> 取值：设置页的 PendingConfig 靠拦截这些方法
+            # 把表单上未保存的值换进来
+            config = {
+                key: getattr(self, f"get_{provider_id}_{key}")()
+                for key in _CUSTOM_LLM_TEXT_KEYS
+            }
+            config["json_mode"] = getattr(self, f"get_{provider_id}_json_mode")()
+            return config
         return {}
     
     def get_deepl_api_key(self) -> str:
@@ -1083,16 +1207,16 @@ class ToolSettingsManager(QObject):
             (value or "").strip(),
         )
 
-    def get_baidu_translate_app_id(self) -> str:
+    def get_baidu_translate_appid(self) -> str:
         return self.qsettings.value(
-            "translation/providers/baidu/app_id",
-            self.APP_DEFAULT_SETTINGS["baidu_translate_app_id"],
+            "translation/providers/baidu/appid",
+            self.APP_DEFAULT_SETTINGS["baidu_translate_appid"],
             type=str,
         )
 
-    def set_baidu_translate_app_id(self, value: str):
+    def set_baidu_translate_appid(self, value: str):
         self.qsettings.setValue(
-            "translation/providers/baidu/app_id",
+            "translation/providers/baidu/appid",
             (value or "").strip(),
         )
 
@@ -1107,6 +1231,69 @@ class ToolSettingsManager(QObject):
         self.qsettings.setValue(
             "translation/providers/baidu/secret_key",
             (value or "").strip(),
+        )
+
+    def get_deepseek_api_key(self) -> str:
+        return self.qsettings.value(
+            "translation/providers/deepseek/api_key",
+            self.APP_DEFAULT_SETTINGS["deepseek_api_key"],
+            type=str,
+        )
+
+    def set_deepseek_api_key(self, value: str):
+        self.qsettings.setValue(
+            "translation/providers/deepseek/api_key",
+            (value or "").strip(),
+        )
+
+    def get_deepseek_model(self) -> str:
+        return self.qsettings.value(
+            "translation/providers/deepseek/model",
+            self.APP_DEFAULT_SETTINGS["deepseek_model"],
+            type=str,
+        )
+
+    def set_deepseek_model(self, value: str):
+        self.qsettings.setValue(
+            "translation/providers/deepseek/model",
+            (value or "").strip(),
+        )
+
+    def get_deepseek_base_url(self) -> str:
+        return self.qsettings.value(
+            "translation/providers/deepseek/base_url",
+            self.APP_DEFAULT_SETTINGS["deepseek_base_url"],
+            type=str,
+        )
+
+    def set_deepseek_base_url(self, value: str):
+        self.qsettings.setValue(
+            "translation/providers/deepseek/base_url",
+            (value or "").strip(),
+        )
+
+    def _get_custom_llm_text(self, slot: str, key: str) -> str:
+        return self.qsettings.value(
+            f"translation/providers/{slot}/{key}",
+            self.APP_DEFAULT_SETTINGS[f"{slot}_{key}"],
+            type=str,
+        )
+
+    def _set_custom_llm_text(self, slot: str, key: str, value: str):
+        self.qsettings.setValue(
+            f"translation/providers/{slot}/{key}", (value or "").strip()
+        )
+
+    def _get_custom_llm_json_mode(self, slot: str) -> bool:
+        return self.qsettings.value(
+            f"translation/providers/{slot}/json_mode",
+            self.APP_DEFAULT_SETTINGS[f"{slot}_json_mode"],
+            type=bool,
+        )
+
+    def _set_custom_llm_json_mode(self, slot: str, value: bool):
+        self.qsettings.setValue(
+            f"translation/providers/{slot}/json_mode", bool(value)
         )
 
     def get_translation_target_lang(self) -> str:
@@ -1218,6 +1405,18 @@ class ToolSettingsManager(QObject):
     def set_clipboard_auto_paste(self, value: bool):
         """设置是否自动粘贴"""
         self.qsettings.setValue("clipboard/auto_paste", value)
+
+    def get_clipboard_close_after_paste(self) -> bool:
+        """获取粘贴后是否关闭窗口"""
+        return self.qsettings.value(
+            "clipboard/close_after_paste",
+            self.APP_DEFAULT_SETTINGS["clipboard_close_after_paste"],
+            type=bool,
+        )
+
+    def set_clipboard_close_after_paste(self, value: bool):
+        """设置粘贴后是否关闭窗口"""
+        self.qsettings.setValue("clipboard/close_after_paste", value)
     
     def get_clipboard_history_limit(self) -> int:
         """获取历史记录数量限制"""
@@ -1226,6 +1425,22 @@ class ToolSettingsManager(QObject):
     def set_clipboard_history_limit(self, value: int):
         """设置历史记录数量限制"""
         self.qsettings.setValue("clipboard/history_limit", max(0, value))
+
+    def get_clipboard_foreground_scan_interval_ms(self) -> int:
+        """获取剪贴板面板前台窗口取样频率（毫秒）"""
+        return self.qsettings.value(
+            "clipboard/foreground_scan_interval_ms",
+            self.APP_DEFAULT_SETTINGS["clipboard_foreground_scan_interval_ms"],
+            type=int,
+        )
+
+    def set_clipboard_foreground_scan_interval_ms(self, value: int):
+        """设置剪贴板面板前台窗口取样频率（毫秒）"""
+        self.qsettings.setValue("clipboard/foreground_scan_interval_ms", max(50, int(value)))
+
+    def get_clipboard_foreground_scan_interval_options(self) -> list:
+        """获取剪贴板前台窗口取样频率可选项"""
+        return self.APP_DEFAULT_SETTINGS["clipboard_foreground_scan_interval_options"]
 
     def get_clipboard_db_path(self) -> str:
         """获取剪贴板数据库自定义路径（空字符串表示使用后端默认位置）"""
@@ -1397,6 +1612,28 @@ class ToolSettingsManager(QObject):
         else:
             log_debug(T("根据用户设置：不自动打开设置窗口"), "Startup")
         return show
+
+
+def _install_custom_llm_accessors():
+    """给每个保存位置生成 get_/set_<slot>_<key>。
+
+    翻译设置页按字段的 config_key 找这两个方法（见 provider_fields），
+    三个位置 × 九个字段手写就是五十多个只差名字的方法。
+    """
+    for slot in CUSTOM_LLM_PROVIDER_IDS:
+        for key in _CUSTOM_LLM_TEXT_KEYS:
+            setattr(ToolSettingsManager, f"get_{slot}_{key}",
+                    lambda self, s=slot, k=key: self._get_custom_llm_text(s, k))
+            setattr(ToolSettingsManager, f"set_{slot}_{key}",
+                    lambda self, value, s=slot, k=key:
+                        self._set_custom_llm_text(s, k, value))
+        setattr(ToolSettingsManager, f"get_{slot}_json_mode",
+                lambda self, s=slot: self._get_custom_llm_json_mode(s))
+        setattr(ToolSettingsManager, f"set_{slot}_json_mode",
+                lambda self, value, s=slot: self._set_custom_llm_json_mode(s, value))
+
+
+_install_custom_llm_accessors()
 
 
 # 全局单例

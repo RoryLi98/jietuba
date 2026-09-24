@@ -14,7 +14,6 @@ from ui.dialogs import show_warning_dialog, show_error_dialog
 
 from core.shortcut_manager import HotkeySystem
 from settings import get_tool_settings_manager
-from ui.screenshot_window import ScreenshotWindow
 from ui.tray_menu import create_tray_menu
 from core.logger import (
     setup_logger, get_logger, T,
@@ -22,7 +21,7 @@ from core.logger import (
 )
 
 # ── 全局版本号 ────────────────────────────────────────────
-APP_VERSION = "2026.09.14"
+APP_VERSION = "2.0.7"
 
 
 def create_fallback_app_icon():
@@ -90,11 +89,7 @@ class MainApp(QObject):
         super().__init__()
         self.app = QApplication(sys.argv)
         self.app.setQuitOnLastWindowClosed(False)
-
-        # 界面缩放（系数在 bootstrap 读取，这里应用默认字体）
-        from core import ui_scale
-        ui_scale.apply_app_font(self.app)
-
+        
         # Config - 使用统一的设置管理器
         self.config_manager = get_tool_settings_manager()
 
@@ -112,6 +107,19 @@ class MainApp(QObject):
         setup_logger(self.config_manager)
         self._logger = get_logger()
         self.app.aboutToQuit.connect(self._on_about_to_quit)
+
+        # Qt 的自动高 DPI 缩放已关闭。首次进入欢迎向导前，按 Windows 的
+        # 显示缩放为两套界面比例选一个初始档位；已有值（包括用户选择）不覆盖。
+        from core.ui_scale import apply_first_run_scale_defaults
+        recommended_scale = apply_first_run_scale_defaults(self.config_manager)
+        if recommended_scale is not None:
+            log_info(
+                T(
+                    "首次启动，系统推荐界面比例: {percent}%",
+                    percent=recommended_scale,
+                ),
+                "DPI",
+            )
         
         # 初始化翻译系统
         from core.i18n import I18nManager
@@ -131,6 +139,14 @@ class MainApp(QObject):
         # 初始化主题颜色管理器
         from core.theme import get_theme
         get_theme().init(self.config_manager)
+
+        # 初始化操作界面缩放管理器（工具栏/面板建出来之前必须先载入比例）
+        from core.ui_scale import get_ui_scale
+        get_ui_scale().init(self.config_manager)
+
+        # 初始化独立窗口缩放管理器（设置/剪贴板管理/翻译窗口）
+        from core.ui_scale import get_dialog_scale
+        get_dialog_scale().init(self.config_manager)
         
         # 输出DPI信息用于调试
         try:
@@ -181,6 +197,12 @@ class MainApp(QObject):
         except Exception as e:
             log_exception(e, T("清理翻译线程"))
         try:
+            from text_recognition import shutdown_recognition
+
+            shutdown_recognition()
+        except Exception as e:
+            log_exception(e, T("等待文字识别线程"))
+        try:
             if hasattr(self, "_logger") and self._logger:
                 self._logger.close()
         except Exception as e:
@@ -216,20 +238,9 @@ class MainApp(QObject):
         # 更新托盘菜单
         self._update_tray_menu()
         
-        # 重新创建设置窗口（因为设置窗口是预加载的，需要重建才能更新翻译）
+        # 设置窗口是预加载的，需要重建才能更新翻译。
         if self.settings_window:
-            was_visible = self.settings_window.isVisible()
-            self.settings_window.close()
-            self.settings_window.deleteLater()
-            self.settings_window = None
-            
-            # 重新创建设置窗口
-            self._preloader.preload_settings()
-            
-            # 如果之前是显示状态，重新显示
-            if was_visible:
-                self.settings_window.show()
-                self.settings_window.activateWindow()
+            self._recreate_settings_window()
         
         # 关闭翻译窗口（下次打开时会用新语言创建）
         from translation import TranslationManager
@@ -264,9 +275,9 @@ class MainApp(QObject):
         # 更新 tooltip
         self.tray_icon.setToolTip(self.tr("jietuba - Click to screenshot"))
 
-        # 重建菜单。旧菜单显式延迟销毁：实测 PySide6 会让被替换的菜单
-        # 一直存活，不处理的话每次重建（钉图增删、切主题、切语言都会
-        # 触发）都会永久泄漏一个 QMenu 及其动作。
+        # 重建菜单。旧菜单显式延迟销毁：PySide6 会让被替换的菜单一直存活，
+        # 不处理的话每次重建（钉图增删、切主题、切语言都会触发）都会
+        # 永久泄漏一个 QMenu 及其动作。
         old_menu = self.tray_icon.contextMenu()
         self.tray_icon.setContextMenu(self._create_tray_menu())
         if old_menu is not None:
@@ -278,6 +289,40 @@ class MainApp(QObject):
                     old_menu.deleteLater()
             except RuntimeError:
                 pass
+
+    def pin_from_selection_or_clipboard(self):
+        """统一钉图入口：截图内钉选区，截图外钉剪贴板最新。
+
+        - 截图会话活跃且已有确认选区 → 直接钉当前选区（与 inapp_pin 一致，
+          还会把结果图送进剪贴板）。
+        - 否则 → 钉剪贴板最新内容；文字渲染成图片再钉。
+        """
+        try:
+            sw = getattr(self, "screenshot_window", None)
+            if (sw is not None
+                    and getattr(sw, "_session_active", False)
+                    and sw.isVisible()):
+                scene = getattr(sw, "scene", None)
+                sel = getattr(scene, "selection_model", None) if scene else None
+                if sel is not None and getattr(sel, "is_confirmed", False):
+                    action_handler = getattr(sw, "action_handler", None)
+                    if action_handler is not None:
+                        log_debug(T("全局钉图：截图内，直接钉当前选区"), "PinFromClipboard")
+                        action_handler.handle_pin()
+                        return
+                # 截图开着但还没选区：忽略，避免误把剪贴板钉出来挡住截图
+                log_debug(T("全局钉图：截图中但无确认选区，已忽略"), "PinFromClipboard")
+                return
+        except Exception as e:
+            log_exception(e, T("截图内钉图失败，回退到剪贴板钉图"))
+
+        try:
+            from pin.pin_from_clipboard import create_pin_from_latest_clipboard
+            ok = create_pin_from_latest_clipboard(self.config_manager)
+            if not ok:
+                log_warning(T("剪贴板为空或无可钉内容"), "PinFromClipboard")
+        except Exception as e:
+            log_exception(e, T("从剪贴板钉图失败"))
 
     def update_hotkey(self, show_error: bool = False):
         """
@@ -328,25 +373,6 @@ class MainApp(QObject):
             else:
                 log_warning(T("智能翻译热键注册失败: {translation_hotkey}", translation_hotkey=translation_hotkey), "Hotkey")
                 failed_hotkeys.append((label, translation_hotkey))
-
-        # 注册全局钉图热键：截图内钉当前选区，截图外钉剪贴板最新内容
-        # （文字也会渲染成图片钉出来）。与截图内 inapp_pin 共用同一套语义，
-        # 即使配置成同一个键也不会双重触发：RegisterHotKey 会被 OS 消费，
-        # 截图内只走 WM_HOTKEY 回调，Qt KeyPress 不会再触发一次。
-        pin_hotkeys = (
-            (self.config_manager.get_pin_hotkey(), self.tr("Pin")),
-            (self.config_manager.get_pin_hotkey_2(), self.tr("Pin (2)")),
-        )
-        for pin_hotkey, label in pin_hotkeys:
-            if not pin_hotkey:
-                continue
-            if self.hotkey_system.register_hotkey(
-                pin_hotkey, self.pin_from_selection_or_clipboard
-            ):
-                log_info(T("全局钉图热键已注册: {pin_hotkey}", pin_hotkey=pin_hotkey), "Hotkey")
-            else:
-                log_warning(T("全局钉图热键注册失败: {pin_hotkey}", pin_hotkey=pin_hotkey), "Hotkey")
-                failed_hotkeys.append((label, pin_hotkey))
         
         # 注册剪切板热键（如果剪切板功能启用）
         if self.config_manager.get_clipboard_enabled():
@@ -366,6 +392,22 @@ class MainApp(QObject):
                 else:
                     log_warning(T("剪贴板备用热键注册失败: {clipboard_hotkey_2}", clipboard_hotkey_2=clipboard_hotkey_2), "Hotkey")
                     failed_hotkeys.append((self.tr("Clipboard (2)"), clipboard_hotkey_2))
+
+        # 注册「钉住剪贴板图片」热键（主 + 备用）。刻意放在 clipboard_enabled
+        # 判断之外：这条路径优先钉系统剪贴板里的图，历史功能关掉时照样有用。
+        # 默认两个都留空——不自作主张占用用户的按键，想用就自己设一个。
+        pin_clipboard_hotkeys = (
+            (self.config_manager.get_pin_clipboard_hotkey(), self.tr("Pin Clipboard Image")),
+            (self.config_manager.get_pin_clipboard_hotkey_2(), self.tr("Pin Clipboard Image (2)")),
+        )
+        for pin_clipboard_hotkey, label in pin_clipboard_hotkeys:
+            if not pin_clipboard_hotkey:
+                continue
+            if self.hotkey_system.register_hotkey(pin_clipboard_hotkey, self.pin_clipboard_image):
+                log_info(T("钉图热键已注册: {pin_clipboard_hotkey}", pin_clipboard_hotkey=pin_clipboard_hotkey), "Hotkey")
+            else:
+                log_warning(T("钉图热键注册失败: {pin_clipboard_hotkey}", pin_clipboard_hotkey=pin_clipboard_hotkey), "Hotkey")
+                failed_hotkeys.append((label, pin_clipboard_hotkey))
         
         # 如果有注册失败的热键且需要显示提示
         if show_error and failed_hotkeys:
@@ -472,6 +514,15 @@ class MainApp(QObject):
             if isinstance(w, QColorDialog) and w.isVisible():
                 w.reject()
 
+        # 剪贴板窗口可能被设为粘贴后常驻，会连同它一起被截进图里。用 close
+        # 而不是 hide：hide 不会关掉它已弹出的右键菜单，那个菜单是置顶的，
+        # 照样会进画面。截图是主功能，不能因为这里出状况就起不来。
+        try:
+            if self.clipboard_window and self.clipboard_window.isVisible():
+                self.clipboard_window.close()
+        except Exception as e:
+            log_exception(e, T("关闭剪贴板窗口"))
+
         log_info(T("启动后台截图线程"), "MainApp")
         
         # 在后台线程执行 mss.grab()，避免主线程被阻塞 100~500ms
@@ -507,6 +558,11 @@ class MainApp(QObject):
         else:
             # 首次创建
             log_debug(T("首次创建截图窗口"), "MainApp")
+            # 延迟到真正需要时才导入：这条 import 链拖着 canvas/toolbar/tools 一整套
+            # 模块，放在文件顶部会在 QApplication 建立之前、启动阶段就被迫付掉这笔
+            # 开销。后台预加载线程（bootstrap.py _preload_screenshot_modules）会尽
+            # 量抢先把它导入好，这里通常只是从 sys.modules 里取一下。
+            from ui.screenshot_window import ScreenshotWindow
             self.screenshot_window = ScreenshotWindow(
                 self.config_manager,
                 prefetched_image=image,
@@ -544,6 +600,11 @@ class MainApp(QObject):
 
     def on_settings_accepted(self):
         """设置保存后更新热键和剪贴板设置"""
+        accepted_window = self.sender()
+        dialog_scale_changed = bool(getattr(
+            accepted_window, "_dialog_scale_changed_on_accept", False
+        ))
+
         self.set_clipboard_monitoring_enabled(
             self.config_manager.get_clipboard_enabled()
         )
@@ -552,9 +613,60 @@ class MainApp(QObject):
         # 通知剪贴板窗口重新加载设置
         if hasattr(self, 'clipboard_window') and self.clipboard_window:
             self.clipboard_window._load_settings()
+            self.clipboard_window.controller._load_settings()
             # 同时更新历史限制
             if hasattr(self, 'clipboard_manager') and self.clipboard_manager:
                 self.clipboard_manager._apply_history_limit()
+
+        if dialog_scale_changed:
+            self._recreate_clipboard_manage_dialog()
+            # accepted 信号发出时旧窗口已经隐藏，所以这里明确要求把按新比例
+            # 构造的窗口重新打开，而不是依据旧窗口当前的可见状态。
+            self._recreate_settings_window(reopen=True)
+
+    def _recreate_clipboard_manage_dialog(self):
+        """Discard the cached clipboard manager UI after window-scale changes."""
+        from clipboard import (
+            destroy_manage_dialog,
+            get_existing_manage_dialog,
+            get_manage_dialog,
+        )
+
+        old_dialog = get_existing_manage_dialog()
+        if old_dialog is None:
+            return
+
+        manager = old_dialog.manager
+        was_visible = destroy_manage_dialog()
+        if not was_visible:
+            return
+
+        dialog = get_manage_dialog(manager)
+        if self.clipboard_window:
+            self.clipboard_window._connect_manage_dialog(dialog)
+        dialog.show_and_activate()
+
+    def _recreate_settings_window(self, reopen=None):
+        """Rebuild the cached settings UI after a process-wide UI setting changes.
+
+        ``reopen=None`` preserves whether the old window was visible.  Callers
+        running from QDialog.accepted can pass ``True`` because Qt has already
+        hidden the accepted dialog before emitting that signal.
+        """
+        window = self.settings_window
+        if window is None:
+            return
+
+        if reopen is None:
+            reopen = window.isVisible()
+
+        window.hide()
+        window.deleteLater()
+        self.settings_window = None
+
+        self._preloader.preload_settings()
+        if reopen:
+            self.open_settings()
     
     def open_translator(self):
         """打开翻译窗口"""
@@ -572,7 +684,7 @@ class MainApp(QObject):
     def _on_clipboard_item_received(self, item):
         """Refresh clipboard UI on the GUI thread without owning probe logic."""
         if self.clipboard_window:
-            self.clipboard_window.notify_new_content()
+            self.clipboard_window.notify_new_content(item)
 
     def set_clipboard_monitoring_enabled(self, enabled: bool) -> bool:
         """Synchronize the Rust clipboard watcher with the saved setting.
@@ -644,7 +756,8 @@ class MainApp(QObject):
             if not self.clipboard_window:
                 self.clipboard_window = ClipboardWindow()
             
-            self.clipboard_window.setWindowState(self.clipboard_window.windowState() & ~Qt.WindowState.WindowMinimized | Qt.WindowState.WindowActive)
+            # 不能带 WindowActive：它会在 show 之前激活窗口，showEvent 里就采不到原来的前台窗口（粘贴目标）
+            self.clipboard_window.setWindowState(self.clipboard_window.windowState() & ~Qt.WindowState.WindowMinimized)
             self.clipboard_window.show()
             self.clipboard_window.raise_()
             self.clipboard_window.activateWindow()
@@ -653,39 +766,15 @@ class MainApp(QObject):
         except Exception as e:
             log_exception(e, T("打开剪切板窗口失败"))
 
-    def pin_from_selection_or_clipboard(self):
-        """统一钉图入口：截图内钉选区，截图外钉剪贴板最新。
-
-        - 截图会话活跃且已有确认选区 → 直接钉当前选区（与 inapp_pin 一致，
-          还会把结果图送进剪贴板）。
-        - 否则 → 钉剪贴板最新内容；文字渲染成图片再钉。
-        """
-        try:
-            sw = getattr(self, "screenshot_window", None)
-            if (sw is not None
-                    and getattr(sw, "_session_active", False)
-                    and sw.isVisible()):
-                scene = getattr(sw, "scene", None)
-                sel = getattr(scene, "selection_model", None) if scene else None
-                if sel is not None and getattr(sel, "is_confirmed", False):
-                    action_handler = getattr(sw, "action_handler", None)
-                    if action_handler is not None:
-                        log_debug(T("全局钉图：截图内，直接钉当前选区"), "PinFromClipboard")
-                        action_handler.handle_pin()
-                        return
-                # 截图开着但还没选区：忽略，避免误把剪贴板钉出来挡住截图
-                log_debug(T("全局钉图：截图中但无确认选区，已忽略"), "PinFromClipboard")
-                return
-        except Exception as e:
-            log_exception(e, T("截图内钉图失败，回退到剪贴板钉图"))
+    def pin_clipboard_image(self):
+        """把剪贴板里的图片钉到鼠标位置。"""
+        from PySide6.QtGui import QCursor
+        from clipboard.ui.windows.pin_window import pin_latest_clipboard_image
 
         try:
-            from pin.pin_from_clipboard import create_pin_from_latest_clipboard
-            ok = create_pin_from_latest_clipboard(self.config_manager)
-            if not ok:
-                log_warning(T("剪贴板为空或无可钉内容"), "PinFromClipboard")
+            pin_latest_clipboard_image(QCursor.pos())
         except Exception as e:
-            log_exception(e, T("从剪贴板钉图失败"))
+            log_exception(e, T("钉住剪贴板图片失败"))
         
     def quit_app(self):
         # 完全销毁缓存的截图窗口

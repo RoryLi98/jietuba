@@ -21,6 +21,15 @@ ACCENT_SOFT = "#DFE8EF"
 ACCENT_SUBTLE = "rgba(111, 143, 171, 0.18)"
 FOCUS_RING = "rgba(111, 143, 171, 0.24)"
 
+# 输入类控件（下拉框、数字框、单行输入）的外框度量。要和它们排在同一列、
+# 看起来该是一家的控件——比如外观页那几个色块按钮——按这里取值，不要各写
+# 一套数字，否则改了一边就会高矮或圆角对不上。
+INPUT_RADIUS = 10
+INPUT_CONTENT_HEIGHT = 26
+INPUT_PADDING_V = 4
+INPUT_PADDING_H = 11
+INPUT_HEIGHT = INPUT_CONTENT_HEIGHT + 2 * INPUT_PADDING_V + 2
+
 def ui_tokens(widget=None):
     """Return semantic colours, honoring an optional top-level theme scope."""
     current = widget
@@ -69,6 +78,25 @@ def to_qicon(icon, widget=None) -> QIcon:
     if preserve_color or source.isNull():
         return source
     return _tinted_icon(path, ui_tokens(widget).text)
+
+
+def css_color(value: str) -> QColor:
+    """Parse a token colour for QPainter; QColor itself rejects rgb()/rgba()."""
+    text = value.strip()
+    if text.startswith(("rgba(", "rgb(")):
+        channels = [part.strip() for part in text[text.index("(") + 1:-1].split(",")]
+        color = QColor(*(int(channel) for channel in channels[:3]))
+        if len(channels) == 4:
+            color.setAlphaF(float(channels[3]))
+        return color
+    return QColor(text)
+
+
+def tinted_icon(icon, color: str) -> QIcon:
+    """Tint a FluentIcon or an SVG path to an explicit colour."""
+    path_getter = getattr(icon, "path", None)
+    path = path_getter() if callable(path_getter) else str(icon)
+    return _tinted_icon(path, color)
 
 
 @lru_cache(maxsize=128)

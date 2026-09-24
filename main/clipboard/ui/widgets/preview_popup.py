@@ -82,9 +82,6 @@ class PreviewPopup(QWidget):
         
         # 内容区域 - 使用 QTextEdit 支持富文本
         self.content_widget = TextEdit()
-        # 尺寸由内容适配计算，不参与界面缩放（避免二次放大）
-        from core.ui_scale import mark_unscaled
-        mark_unscaled(self.content_widget)
         self.content_widget.setReadOnly(True)
         # 启用自动换行
         self.content_widget.setLineWrapMode(TextEdit.LineWrapMode.WidgetWidth)
@@ -109,9 +106,6 @@ class PreviewPopup(QWidget):
         
         # 图片预览（默认隐藏）
         self.image_label = QLabel()
-        # 尺寸由图片适配计算，不参与界面缩放（避免二次放大）
-        from core.ui_scale import mark_unscaled
-        mark_unscaled(self.image_label)
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_label.setStyleSheet("background: #F0F0F0; border: 1px solid #E0E0E0; border-radius: 4px;")
         self.image_label.hide()

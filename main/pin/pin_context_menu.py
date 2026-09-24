@@ -14,10 +14,12 @@ def _get_shortcut_display(cfg_key: str) -> str:
     """从配置读取快捷键并返回大写显示文本（如 "CTRL+C"、"R"、"SPACE"）"""
     from settings import get_tool_settings_manager
     cfg = get_tool_settings_manager()
+    from core.shortcut_manager import inapp_shortcut_display_text
     text = cfg.get_inapp_shortcut(cfg_key)
     if not text:
         text = cfg.APP_DEFAULT_SETTINGS.get(cfg_key, "")
-    return text.upper() if text else ""
+    # 绑成鼠标中键时显示「中键」，而不是配置里那个 MOUSEMIDDLE
+    return inapp_shortcut_display_text(text)
 
 
 class PinContextMenu:
@@ -140,7 +142,11 @@ class PinContextMenu:
             menu.addAction(translate_window_action)
 
             # 恢复原始大小
-            reset_size_action = QAction(self.parent.tr("Reset size"), self.parent)
+            reset_key = _get_shortcut_display("inapp_pin_reset_size")
+            reset_label = self.parent.tr("Reset size")
+            if reset_key:
+                reset_label += f" ({reset_key})"
+            reset_size_action = QAction(reset_label, self.parent)
             reset_size_action.triggered.connect(self.parent.reset_to_original_size)
             menu.addAction(reset_size_action)
             

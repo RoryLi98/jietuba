@@ -63,7 +63,7 @@ class TestNormalizeLayout:
         assert dict(layout)["scan_code"] == MORE
 
     def test_locked_buttons_are_always_shown(self):
-        assert {"arrow", "number", "rect"} <= LOCKED
+        assert {"confirm"} <= LOCKED
         layout = dict(normalize_layout([
             (key, HIDE if index % 2 else MORE) for index, key in enumerate(LOCKED)
         ]))
@@ -83,7 +83,7 @@ class TestNormalizeLayout:
         stored = [(key, SHOW) for key in DEFAULT_ORDER if key != "scan_code"]
         layout = normalize_layout(stored)
         keys = [key for key, _mode in layout]
-        assert keys[keys.index("screenshot_translate") + 1] == "scan_code"
+        assert keys[keys.index("text_recognize") + 1] == "scan_code"
         assert dict(layout)["scan_code"] == MORE
 
 
@@ -104,9 +104,9 @@ class TestScreenshotToolbar:
     def test_default_layout_folds_low_frequency_buttons_and_ends_with_more(self, qapp):
         toolbar = Toolbar()
         assert _toolbar_row(toolbar) == [
-            key for key in DEFAULT_ORDER if key not in ("scan_code", "spotlight")
+            key for key in DEFAULT_ORDER if key not in ("text_recognize", "scan_code", "spotlight")
         ] + ["more"]
-        assert toolbar._folded_keys == ["scan_code", "spotlight"]
+        assert toolbar._folded_keys == ["text_recognize", "scan_code", "spotlight"]
         assert toolbar.copy_btn.isHidden()
         geometries = [toolbar._buttons[key].geometry() for key in _toolbar_row(toolbar)]
         for left, right in zip(geometries, geometries[1:]):
@@ -121,14 +121,15 @@ class TestScreenshotToolbar:
 
     def test_configured_layout_reorders_folds_and_hides(self, qapp):
         default_width = Toolbar().width()
-        save_layout(_layout_with(first="pin", mosaic=MORE, text=HIDE, scan_code=MORE))
+        save_layout(_layout_with(
+            first="pin", mosaic=MORE, text=HIDE, scan_code=MORE, text_recognize=MORE))
 
         toolbar = Toolbar()
         row = _toolbar_row(toolbar)
         assert row[0] == "pin"
         assert row[-1] == "more"
         assert "mosaic" not in row and "text" not in row
-        assert toolbar._folded_keys == ["scan_code", "mosaic"]
+        assert toolbar._folded_keys == ["text_recognize", "scan_code", "mosaic"]
         assert toolbar.width() < default_width
 
     def test_hiding_a_tool_only_hides_its_button(self, qapp):
@@ -213,7 +214,7 @@ class TestLayoutDialog:
 
         # 把「钉图」拖到第一行上沿：其余可调整行的中线都在鼠标下方，它就该排第一
         top = rows["long_screenshot"].mapToGlobal(QPoint(0, 1)).y()
-        dialog._drag_row(rows["pin"], top)
+        dialog._list._drag_row(rows["pin"], top)
         rows["mosaic"].set_mode(MORE)
 
         entries = dialog.entries()
@@ -230,10 +231,16 @@ class TestLayoutDialog:
         assert dialog._rows["pin"].combo.isEnabled()
         dialog.close()
 
-    def test_all_editable_rows_fit_without_a_scrollbar(self, qapp):
+    def test_rows_fit_the_screen_and_scroll_only_when_they_dont(self, qapp):
+        """锁定按钮变少后行数涨了不少：能整屏展示就不滚动，屏幕矮到放不下才滚动，但对话框不能超出屏幕"""
         dialog = self._dialog(default_layout())
-        assert dialog._scroll.viewport().height() >= dialog._card.sizeHint().height()
-        assert not dialog._scroll.verticalScrollBar().isVisible()
+        screen_height = QApplication.primaryScreen().availableGeometry().height()
+        content_height = dialog._list.content_height()
+        if content_height <= screen_height - 40:
+            assert dialog._list.viewport().height() >= content_height - 2
+            assert not dialog._list.verticalScrollBar().isVisible()
+        else:
+            assert dialog.height() <= screen_height
         dialog.close()
 
     def test_restore_defaults_resets_order_and_modes(self, qapp):

@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QStackedWidget, QWidget, QDialogButtonBox,
     QFileDialog,
 )
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from ui.dialogs import show_info_dialog, show_warning_dialog
 from PySide6.QtGui import QColor, QFont, QIcon
 
@@ -25,45 +25,31 @@ from ui.fluent_lite import (
     FrostedFramelessDialog,
 )
 from ui.fluent_lite import FluentTitleBar, scrollbar_qss
-from ui.fluent_lite.theme import ACCENT, ACCENT_HOVER, ACCENT_PRESSED
+from ui.fluent_lite.theme import ACCENT
 
 from core import log_info, safe_event
 from core.logger import log_exception, T
 from core.constants import CSS_FONT_FAMILY, DEFAULT_FONT_FAMILY
+from core.ui_scale import configure_dialog_control, configure_dialog_controls, dialog_scaled
+from settings.tool_settings import SMART_SELECTION_MODES
 
 # 页面创建函数
 from .page_hotkey import create_hotkey_page, validate_global_hotkey_edits
 from .page_capture import create_capture_page
 from .page_clipboard import create_clipboard_page
 from .page_translation import create_translation_page
+from . import provider_fields
 from .page_log import create_log_page, refresh_latest_log_label
 from .page_misc import create_misc_page
 from .page_appearance import create_appearance_page
 from .page_developer import create_developer_page
 from .page_about import create_about_page
 from .components import (
-    theme_surface_color, theme_sidebar_color,
+    theme_surface_color,
     theme_input_background, theme_popup_background,
     theme_popup_hover_background, theme_text_style, theme_menu_style, theme_color, refresh_theme_widget_styles,
     apply_theme_text_style,
 )
-
-
-class _FooterPrimaryButton(PrimaryPushButton):
-    """Large dialog action button with a subtle trailing sparkle."""
-
-    def __init__(self, text, parent=None):
-        super().__init__(text, parent)
-        self._sparkle = QLabel(self)
-        self._sparkle.setFixedSize(18, 22)
-        self._sparkle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._sparkle.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self._sparkle.setPixmap(FluentIcon.SPARKLE.icon().pixmap(16, 16))
-        self._sparkle.setStyleSheet("background: transparent; border: none;")
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._sparkle.move(self.width() - 24, (self.height() - self._sparkle.height()) // 2)
 
 
 def save_inapp_shortcut_edits(config_manager, edits):
@@ -87,6 +73,11 @@ class SettingsDialog(FrostedFramelessDialog):
     def __init__(self, config_manager=None, current_hotkey="ctrl+shift+a", parent=None):
         super().__init__(parent)
         self.config_manager = config_manager
+        # MainApp uses this after accepted() to decide whether the cached
+        # settings window must be rebuilt.  Most settings can be refreshed in
+        # place, but standalone-window sizing is calculated while widgets are
+        # constructed, so reusing this instance would keep the old geometry.
+        self._dialog_scale_changed_on_accept = False
         self.current_hotkey = current_hotkey
         self.main_window = parent
         self._skip_unsaved_close_prompt = False
@@ -98,11 +89,8 @@ class SettingsDialog(FrostedFramelessDialog):
         self._setup_titlebar()
 
         self.setWindowTitle("jietuba")
-        # 窗口默认尺寸跟随界面缩放，并夹到屏幕可用范围内
-        from core import ui_scale as _ui_scale
-        self.resize(*_ui_scale.scaled_window_size(900, 670))
-        # 基础字体跟随界面缩放（10pt 为未缩放基准值）
-        self.setFont(QFont(DEFAULT_FONT_FAMILY, _ui_scale.scaled(10)))
+        self.resize(dialog_scaled(1050), dialog_scaled(750))
+        self.setFont(QFont(DEFAULT_FONT_FAMILY, dialog_scaled(11)))
         self.setObjectName("SettingsDialog")
 
         self._setup_ui()
@@ -112,6 +100,7 @@ class SettingsDialog(FrostedFramelessDialog):
     def _setup_titlebar(self):
         """用 FluentTitleBar 替换默认标题栏"""
         title_bar = FluentTitleBar(self)
+        configure_dialog_control(title_bar)
         self.setTitleBar(title_bar)
         title_bar.iconLabel.hide()
         title_bar.titleLabel.hide()
@@ -134,38 +123,42 @@ class SettingsDialog(FrostedFramelessDialog):
     # ================================================================
 
     def _setup_ui(self):
-        sidebar_width = 212
-        title_bar_height = self.titleBar.height() if getattr(self, 'titleBar', None) else 32
+        sidebar_width = dialog_scaled(212)
+        title_bar_height = self.titleBar.height() if getattr(self, 'titleBar', None) else dialog_scaled(32)
 
         main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(10, title_bar_height + 6, 10, 10)
-        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(
+            dialog_scaled(10), title_bar_height + dialog_scaled(6), dialog_scaled(10), dialog_scaled(10)
+        )
+        main_layout.setSpacing(dialog_scaled(10))
 
         # 1. 左侧面板
         left_panel = QWidget()
         left_panel.setObjectName("SettingsLeftPanel")
         left_panel.setFixedWidth(sidebar_width)
         left_v = QVBoxLayout(left_panel)
-        left_v.setContentsMargins(10, 6, 10, 10)
-        left_v.setSpacing(8)
+        left_v.setContentsMargins(dialog_scaled(10), dialog_scaled(6), dialog_scaled(10), dialog_scaled(10))
+        left_v.setSpacing(dialog_scaled(8))
 
         # logo 区
         logo_area = QWidget()
-        logo_area.setFixedHeight(78)
+        logo_area.setFixedHeight(dialog_scaled(78))
         logo_layout = QHBoxLayout(logo_area)
-        logo_layout.setContentsMargins(12, 10, 12, 10)
-        logo_layout.setSpacing(10)
+        logo_layout.setContentsMargins(
+            dialog_scaled(12), dialog_scaled(10), dialog_scaled(12), dialog_scaled(10)
+        )
+        logo_layout.setSpacing(dialog_scaled(10))
         logo_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         logo_icon_lbl = QLabel()
-        logo_icon_lbl.setFixedSize(36, 36)
+        logo_icon_lbl.setFixedSize(dialog_scaled(36), dialog_scaled(36))
         logo_icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         try:
             from core.resource_manager import ResourceManager
             icon_path = ResourceManager.get_resource_path("svg/托盘.svg")
             if os.path.exists(icon_path):
-                pm = QIcon(icon_path).pixmap(36, 36)
+                pm = QIcon(icon_path).pixmap(dialog_scaled(36), dialog_scaled(36))
                 logo_icon_lbl.setPixmap(pm)
         except Exception as e:
             log_exception(e, T("加载 Logo 图标"))
@@ -173,11 +166,11 @@ class SettingsDialog(FrostedFramelessDialog):
 
         text_box = QVBoxLayout()
         text_box.setContentsMargins(0, 0, 0, 0)
-        text_box.setSpacing(2)
+        text_box.setSpacing(dialog_scaled(2))
         app_name_lbl = BodyLabel(self.tr("jietuba"))
-        apply_theme_text_style(app_name_lbl, 15, bold=True)
+        apply_theme_text_style(app_name_lbl, 16, bold=True)
         app_desc_lbl = QLabel(self.tr("Settings"))
-        apply_theme_text_style(app_desc_lbl, 12, caption=True)
+        apply_theme_text_style(app_desc_lbl, 13, caption=True)
         text_box.addWidget(app_name_lbl)
         text_box.addWidget(app_desc_lbl)
         logo_layout.addLayout(text_box, 1)
@@ -196,13 +189,17 @@ class SettingsDialog(FrostedFramelessDialog):
         self.right_area = right_area
         right_area.setObjectName("SettingsRightArea")
         right_layout = QVBoxLayout(right_area)
-        right_layout.setContentsMargins(24, 16, 24, 18)
-        right_layout.setSpacing(14)
+        right_layout.setContentsMargins(
+            dialog_scaled(24), dialog_scaled(16), dialog_scaled(24), dialog_scaled(18)
+        )
+        right_layout.setSpacing(dialog_scaled(14))
 
         self.content_title = QLabel(self.tr("Shortcut Settings"))
         apply_theme_text_style(
-            self.content_title, 20, bold=True,
-            extra="padding: 0 6px 2px 6px;"
+            self.content_title, 21, bold=True,
+            extra=(
+                f"padding: 0 {dialog_scaled(6)}px {dialog_scaled(2)}px {dialog_scaled(6)}px;"
+            ),
         )
 
         self.content_stack = QStackedWidget()
@@ -215,6 +212,10 @@ class SettingsDialog(FrostedFramelessDialog):
         self.content_stack.addWidget(create_misc_page(self))             # 6
         self.content_stack.addWidget(create_developer_page(self))        # 7
         self.content_stack.addWidget(create_about_page(self))            # 8
+
+        # 九个分页都是一次性建完、切换只换可见性（不是懒加载/动态重建），
+        # 建完后统一扫一遍即可覆盖全部分页里的 fluent_lite 控件。
+        configure_dialog_controls(self.content_stack)
 
         right_layout.addWidget(self.content_title)
         right_layout.addWidget(self.content_stack)
@@ -230,23 +231,20 @@ class SettingsDialog(FrostedFramelessDialog):
         """创建左侧导航栏"""
         nav = NavigationInterface(parent=parent, showMenuButton=False, showReturnButton=False, collapsible=False)
         nav.setObjectName("SettingsNavigation")
-        nav.setExpandWidth(188)
+        nav.setExpandWidth(dialog_scaled(188))
         nav.setMinimumExpandWidth(0)
         nav.expand(useAni=False)
-        nav.setMinimumWidth(188)
-        nav.setMaximumWidth(196)
+        nav.setMinimumWidth(dialog_scaled(188))
+        nav.setMaximumWidth(dialog_scaled(196))
 
-        # 左侧导航用单色 Fluent 线框图标（对标 Win11 设置），深浅主题自动 tint。
-        # 小尺寸下糊成一团的两个（翻译、其它）换了更简洁的字形：
-        # 翻译用气泡 + A，其它用布局网格。
         self._nav_items = [
             ("shortcuts", FluentIcon.COMMAND_PROMPT, self.tr("Shortcuts"), 0, NavigationItemPosition.TOP),
             ("capture", FluentIcon.CAMERA, self.tr("Capture Settings"), 1, NavigationItemPosition.TOP),
             ("clipboard", FluentIcon.PASTE, self.tr("Clipboard"), 2, NavigationItemPosition.TOP),
             ("appearance", FluentIcon.BRUSH, self.tr("Appearance"), 3, NavigationItemPosition.TOP),
-            ("translation", FluentIcon.TRANSLATE, self.tr("Translation"), 4, NavigationItemPosition.TOP),
+            ("translation", FluentIcon.LANGUAGE, self.tr("Translation"), 4, NavigationItemPosition.TOP),
             ("log", FluentIcon.HISTORY, self.tr("Log Settings"), 5, NavigationItemPosition.TOP),
-            ("other", FluentIcon.LAYOUT, self.tr("Other"), 6, NavigationItemPosition.TOP),
+            ("other", FluentIcon.APPLICATION, self.tr("Other"), 6, NavigationItemPosition.TOP),
             ("about", FluentIcon.INFO, self.tr("About"), 8, NavigationItemPosition.BOTTOM),
         ]
 
@@ -274,11 +272,11 @@ class SettingsDialog(FrostedFramelessDialog):
         row = QHBoxLayout()
         text_layout = QVBoxLayout()
         lbl_title = QLabel(title)
-        apply_theme_text_style(lbl_title, 13)
+        apply_theme_text_style(lbl_title, 14)
         text_layout.addWidget(lbl_title)
         if desc:
             lbl_desc = QLabel(desc)
-            apply_theme_text_style(lbl_desc, 12, caption=True)
+            apply_theme_text_style(lbl_desc, 13, caption=True)
             text_layout.addWidget(lbl_desc)
         row.addLayout(text_layout)
         row.addStretch()
@@ -294,61 +292,62 @@ class SettingsDialog(FrostedFramelessDialog):
         border_color = theme_color("#D9DDE3", "#3A3D43")
         focus_bg = theme_color("#FFFFFF", "#25272B")
         arrow_color = theme_color("#666666", "#D0D0D0")
+        s = dialog_scaled
         return f"""
             QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
-                border: 1px solid {border_color}; border-radius: 4px;
-                padding: 4px 8px; background-color: {input_bg};
+                border: 1px solid {border_color}; border-radius: {s(4)}px;
+                padding: {s(4)}px {s(8)}px; background-color: {input_bg};
                 color: {text_color}; font-family: {CSS_FONT_FAMILY};
-                font-size: 12px;
+                font-size: {s(13)}px;
             }}
             QLineEdit:focus, QSpinBox:focus {{
                 border: 1px solid {ACCENT}; background-color: {focus_bg};
             }}
-            QSpinBox, QDoubleSpinBox {{ padding-right: 24px; }}
+            QSpinBox, QDoubleSpinBox {{ padding-right: {s(24)}px; }}
             QSpinBox::up-button, QDoubleSpinBox::up-button {{
                 subcontrol-origin: border; subcontrol-position: top right;
-                width: 20px; border-left: 1px solid {border_color};
-                border-bottom: 1px solid {border_color}; border-top-right-radius: 4px;
+                width: {s(20)}px; border-left: 1px solid {border_color};
+                border-bottom: 1px solid {border_color}; border-top-right-radius: {s(4)}px;
                 background: {input_bg};
             }}
             QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover {{ background: {popup_hover}; }}
             QSpinBox::up-button:pressed, QDoubleSpinBox::up-button:pressed {{ background: #DCE8F4; }}
             QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
-                image: none; border-left: 4px solid transparent;
-                border-right: 4px solid transparent; border-bottom: 6px solid {arrow_color};
+                image: none; border-left: {s(4)}px solid transparent;
+                border-right: {s(4)}px solid transparent; border-bottom: {s(6)}px solid {arrow_color};
                 width: 0; height: 0;
             }}
             QSpinBox::down-button, QDoubleSpinBox::down-button {{
                 subcontrol-origin: border; subcontrol-position: bottom right;
-                width: 20px; border-left: 1px solid {border_color};
-                border-bottom-right-radius: 4px; background: {input_bg};
+                width: {s(20)}px; border-left: 1px solid {border_color};
+                border-bottom-right-radius: {s(4)}px; background: {input_bg};
             }}
             QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{ background: {popup_hover}; }}
             QSpinBox::down-button:pressed, QDoubleSpinBox::down-button:pressed {{ background: #DCE8F4; }}
             QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
-                image: none; border-left: 4px solid transparent;
-                border-right: 4px solid transparent; border-top: 6px solid {arrow_color};
+                image: none; border-left: {s(4)}px solid transparent;
+                border-right: {s(4)}px solid transparent; border-top: {s(6)}px solid {arrow_color};
                 width: 0; height: 0;
             }}
             QComboBox::drop-down {{
                 subcontrol-origin: padding; subcontrol-position: top right;
-                width: 20px; border-left: 1px solid {border_color};
-                border-top-right-radius: 4px; border-bottom-right-radius: 4px;
+                width: {s(20)}px; border-left: 1px solid {border_color};
+                border-top-right-radius: {s(4)}px; border-bottom-right-radius: {s(4)}px;
                 background: {input_bg};
             }}
             QComboBox::down-arrow {{
-                image: none; border-left: 4px solid transparent;
-                border-right: 4px solid transparent; border-top: 6px solid {arrow_color};
-                width: 0; height: 0; margin-right: 6px;
+                image: none; border-left: {s(4)}px solid transparent;
+                border-right: {s(4)}px solid transparent; border-top: {s(6)}px solid {arrow_color};
+                width: 0; height: 0; margin-right: {s(6)}px;
             }}
             QComboBox QAbstractItemView {{
                 border: 1px solid {border_color}; background: {popup_bg};
                 selection-background-color: {ACCENT}; selection-color: white;
                 font-family: {CSS_FONT_FAMILY};
-                font-size: 12px; color: {text_color}; outline: none;
+                font-size: {s(13)}px; color: {text_color}; outline: none;
             }}
             QComboBox QAbstractItemView::item {{
-                padding: 6px 8px; min-height: 24px; color: {text_color}; background: {popup_bg};
+                padding: {s(6)}px {s(8)}px; min-height: {s(24)}px; color: {text_color}; background: {popup_bg};
             }}
             QComboBox QAbstractItemView::item:hover {{
                 background-color: {popup_hover}; color: {text_color};
@@ -459,78 +458,34 @@ class SettingsDialog(FrostedFramelessDialog):
     # ================================================================
 
     def _create_button_area(self):
+        s = dialog_scaled
         layout = QHBoxLayout()
-        layout.setSpacing(12)
+        layout.setSpacing(s(10))
 
+        # The footer sits outside content_stack, so its controls are not
+        # covered by the sweep in _setup_ui and have to opt in themselves.
         reset_btn = TransparentPushButton(self.tr("Reset This Page"))
+        configure_dialog_control(reset_btn)
         reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        reset_btn.setIcon(FluentIcon.DELETE)
+        reset_btn.setIcon(FluentIcon.SYNC)
         reset_btn.clicked.connect(self._reset_current_page)
 
         cancel_btn = FluentPushButton(self.tr("Cancel"))
+        configure_dialog_control(cancel_btn)
         self._footer_cancel_btn = cancel_btn
-        cancel_btn.setFixedHeight(46)
-        cancel_btn.setMinimumWidth(150)
+        cancel_btn.setFixedHeight(s(42))
+        cancel_btn.setMinimumWidth(s(120))
         cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_btn.setIcon(FluentIcon.CANCEL)
-        cancel_btn.setIconSize(QSize(22, 22))
-        cancel_btn.setStyleSheet("""
-            QPushButton {
-                min-height: 44px;
-                padding: 0 24px;
-                color: #20262D;
-                background: rgba(255, 255, 255, 0.18);
-                border: 1px solid rgba(77, 88, 101, 0.38);
-                border-radius: 12px;
-                font-size: 16px;
-                font-weight: 500;
-                outline: none;
-            }
-            QPushButton:hover {
-                background: rgba(255, 255, 255, 0.46);
-                border-color: rgba(55, 68, 82, 0.55);
-            }
-            QPushButton:pressed {
-                background: rgba(220, 228, 236, 0.60);
-                border-color: rgba(55, 68, 82, 0.66);
-            }
-        """)
         cancel_btn.clicked.connect(self.reject)
 
-        ok_btn = _FooterPrimaryButton(self.tr("Apply"))
+        ok_btn = PrimaryPushButton(self.tr("Apply"))
+        configure_dialog_control(ok_btn)
         self._footer_ok_btn = ok_btn
-        ok_btn.setFixedHeight(46)
-        ok_btn.setMinimumWidth(150)
+        ok_btn.setFixedHeight(s(42))
+        ok_btn.setMinimumWidth(s(120))
         ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         ok_btn.setIcon(FluentIcon.CHECK)
-        ok_btn.setIconSize(QSize(23, 23))
-        ok_btn.setStyleSheet("""
-            QPushButton {
-                min-height: 44px;
-                padding: 0 25px;
-                color: white;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #91AABD, stop:0.52 %s, stop:1 #607F9A);
-                border: 1px solid rgba(255, 255, 255, 0.34);
-                border-radius: 12px;
-                font-size: 16px;
-                font-weight: 600;
-                outline: none;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #9AAFC0, stop:0.52 %s, stop:1 #58748D);
-            }
-            QPushButton:pressed {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 %s, stop:1 #465E73);
-                padding-top: 2px;
-            }
-            QPushButton:disabled {
-                color: rgba(255, 255, 255, 0.72);
-                background: rgba(151, 170, 186, 0.68);
-            }
-        """ % (ACCENT, ACCENT_HOVER, ACCENT_PRESSED))
+        ok_btn.setBaseIconSize(16)
         ok_btn.clicked.connect(self.accept)
         self._apply_footer_styles()
 
@@ -543,23 +498,23 @@ class SettingsDialog(FrostedFramelessDialog):
     def _apply_footer_styles(self):
         from core.ui_theme import get_ui_theme
         t = get_ui_theme().tokens
+        s = dialog_scaled
         cancel_btn = getattr(self, "_footer_cancel_btn", None)
         if cancel_btn is not None:
             cancel_btn.setStyleSheet(f"""
                 QPushButton {{
-                    min-height: 44px;
-                    padding: 0 24px;
+                    min-height: {s(40)}px;
+                    padding: 0 {s(22)}px;
                     color: {t.text};
                     background: {t.surface};
                     border: 1px solid {t.border_hover};
-                    border-radius: 12px;
-                    font-size: 16px;
+                    border-radius: {s(12)}px;
+                    font-size: {s(15)}px;
                     font-weight: 500;
                     outline: none;
                 }}
                 QPushButton:hover {{
                     background: {t.surface_hover};
-                    border-color: {t.border_hover};
                 }}
                 QPushButton:pressed {{
                     background: {t.surface_subtle};
@@ -569,32 +524,42 @@ class SettingsDialog(FrostedFramelessDialog):
         if ok_btn is not None:
             ok_btn.setStyleSheet(f"""
                 QPushButton {{
-                    min-height: 44px;
-                    padding: 0 25px;
+                    min-height: {s(40)}px;
+                    padding: 0 {s(22)}px;
                     color: #FFFFFF;
-                    background: {t.accent};
-                    border: 1px solid rgba(255, 255, 255, 0.28);
-                    border-radius: 12px;
-                    font-size: 16px;
+                    background: {t.accent_strong};
+                    border: 1px solid {t.accent_strong};
+                    border-radius: {s(12)}px;
+                    font-size: {s(15)}px;
                     font-weight: 600;
                     outline: none;
                 }}
                 QPushButton:hover {{
-                    background: {t.accent_hover};
+                    background: {t.accent_strong_hover};
+                    border-color: {t.accent_strong_hover};
                 }}
                 QPushButton:pressed {{
-                    background: {t.accent_pressed};
-                    padding-top: 2px;
+                    background: {t.accent_strong_pressed};
+                    border-color: {t.accent_strong_pressed};
                 }}
                 QPushButton:disabled {{
                     color: rgba(255, 255, 255, 0.72);
                     background: #687D8F;
+                    border-color: #687D8F;
                 }}
             """)
 
     # ================================================================
     # 重置页面
     # ================================================================
+
+    def _save_magnifier_color_formats(self):
+        """颜色格式列表是在管理窗口里编辑的，先留在实例上，点「应用」才落盘。"""
+        formats = getattr(self, 'magnifier_color_formats', None)
+        if formats is None:
+            return
+        from settings import color_formats
+        color_formats.save(self.config_manager, formats)
 
     def _reset_current_page(self):
         current_index = self.content_stack.currentIndex()
@@ -626,14 +591,14 @@ class SettingsDialog(FrostedFramelessDialog):
             self.clipboard_hotkey_edit.setText(defaults["clipboard_hotkey"])
         if hasattr(self, 'clipboard_hotkey_edit_2'):
             self.clipboard_hotkey_edit_2.setText(defaults["clipboard_hotkey_2"])
+        if hasattr(self, 'pin_clipboard_hotkey_edit'):
+            self.pin_clipboard_hotkey_edit.setText(defaults["pin_clipboard_hotkey"])
+        if hasattr(self, 'pin_clipboard_hotkey_edit_2'):
+            self.pin_clipboard_hotkey_edit_2.setText(defaults["pin_clipboard_hotkey_2"])
         if hasattr(self, 'translation_hotkey_edit'):
             self.translation_hotkey_edit.setText(defaults["translation_hotkey"])
         if hasattr(self, 'translation_hotkey_edit_2'):
             self.translation_hotkey_edit_2.setText(defaults["translation_hotkey_2"])
-        if hasattr(self, 'pin_hotkey_edit'):
-            self.pin_hotkey_edit.setText(defaults.get("pin_hotkey", ""))
-        if hasattr(self, 'pin_hotkey_edit_2'):
-            self.pin_hotkey_edit_2.setText(defaults.get("pin_hotkey_2", ""))
         # 应用内快捷键
         if hasattr(self, '_inapp_edits'):
             for cfg_key, edit in self._inapp_edits.items():
@@ -677,11 +642,13 @@ class SettingsDialog(FrostedFramelessDialog):
             if index >= 0:
                 self._ui_theme_combo.setCurrentIndex(index)
         if hasattr(self, '_ui_scale_combo'):
-            scale_idx = self._ui_scale_combo.findData(
-                float(defaults.get("ui_scale", 1.0))
-            )
-            if scale_idx >= 0:
-                self._ui_scale_combo.setCurrentIndex(scale_idx)
+            index = self._ui_scale_combo.findData(defaults.get("ui_scale_percent", 100))
+            if index >= 0:
+                self._ui_scale_combo.setCurrentIndex(index)
+        if hasattr(self, '_dialog_scale_combo'):
+            index = self._dialog_scale_combo.findData(defaults.get("dialog_scale_percent", 100))
+            if index >= 0:
+                self._dialog_scale_combo.setCurrentIndex(index)
         if hasattr(self, '_appearance_theme_color'):
             self._appearance_theme_color = QColor(defaults["theme_color"])
             _update_color_btn(self._theme_color_btn, self._appearance_theme_color)
@@ -691,6 +658,20 @@ class SettingsDialog(FrostedFramelessDialog):
                 defaults["mask_color_b"]
             )
             _update_color_btn(self._mask_color_btn, self._appearance_mask_color)
+        if hasattr(self, '_selection_border_combo'):
+            index = self._selection_border_combo.findData(defaults["selection_border_width"])
+            if index >= 0:
+                self._selection_border_combo.setCurrentIndex(index)
+        if hasattr(self, '_selection_handle_combo'):
+            index = self._selection_handle_combo.findData(defaults["selection_handle_style"])
+            if index >= 0:
+                self._selection_handle_combo.setCurrentIndex(index)
+        if hasattr(self, '_selection_handle_size_combo'):
+            index = self._selection_handle_size_combo.findData(
+                defaults["selection_handle_size"]
+            )
+            if index >= 0:
+                self._selection_handle_size_combo.setCurrentIndex(index)
 
     def _reset_screenshot_settings_page(self):
         defaults = self.config_manager.APP_DEFAULT_SETTINGS
@@ -706,15 +687,35 @@ class SettingsDialog(FrostedFramelessDialog):
             self.text_always_on_top_toggle.setChecked(
                 defaults["text_always_on_top"]
             )
-        if hasattr(self, 'smart_toggle'):
-            self.smart_toggle.setChecked(defaults["smart_selection"])
+        if hasattr(self, 'smart_mode_combo'):
+            self.smart_mode_combo.setCurrentIndex(SMART_SELECTION_MODES.index(
+                defaults["smart_selection_mode"] if defaults["smart_selection"] else "off"
+            ))
+        if hasattr(self, 'smart_animation_toggle'):
+            self.smart_animation_toggle.setChecked(defaults["smart_selection_animation"])
         if hasattr(self, 'save_toggle'):
             self.save_toggle.setChecked(defaults["screenshot_save_enabled"])
+        if hasattr(self, 'clipboard_file_reference_toggle'):
+            self.clipboard_file_reference_toggle.setChecked(
+                defaults["clipboard_file_reference_enabled"]
+            )
         if hasattr(self, 'save_path_lbl'):
             self.save_path_lbl.setText(defaults["screenshot_save_path"])
         if hasattr(self, 'screenshot_format_combo'):
             idx = {"PNG": 0, "JPG": 1, "BMP": 2, "WEBP": 3, "PDF": 4}.get(defaults["screenshot_format"].upper(), 0)
             self.screenshot_format_combo.setCurrentIndex(idx)
+        for attr, key in (('magnifier_enabled_toggle', 'magnifier_enabled'),
+                          ('magnifier_grid_toggle', 'magnifier_grid'),
+                          ('magnifier_swatch_toggle', 'magnifier_swatch'),
+                          ('magnifier_hint_toggle', 'magnifier_hint')):
+            toggle = getattr(self, attr, None)
+            if toggle is not None:
+                toggle.setChecked(defaults[key])
+        if hasattr(self, 'magnifier_color_formats'):
+            from settings import color_formats
+            self.magnifier_color_formats = color_formats.default_formats()
+        if hasattr(self, 'pin_auto_toolbar_toggle'):
+            self.pin_auto_toolbar_toggle.setChecked(defaults["pin_auto_toolbar"])
         if hasattr(self, 'ocr_enable_toggle'):
             self.ocr_enable_toggle.setChecked(defaults["ocr_enabled"])
         if hasattr(self, 'ocr_engine_combo'):
@@ -743,12 +744,6 @@ class SettingsDialog(FrostedFramelessDialog):
             self.autostart_toggle.setChecked(False)
         if hasattr(self, 'show_main_window_toggle'):
             self.show_main_window_toggle.setChecked(defaults["show_main_window"])
-        if hasattr(self, 'pin_auto_toolbar_toggle'):
-            self.pin_auto_toolbar_toggle.setChecked(defaults["pin_auto_toolbar"])
-        if hasattr(self, 'magnifier_color_format_combo'):
-            index = self.magnifier_color_format_combo.findData(defaults.get("magnifier_color_copy_format", "rgb_hex"))
-            if index >= 0:
-                self.magnifier_color_format_combo.setCurrentIndex(index)
 
     def _reset_translation_page(self):
         defaults = self.config_manager.APP_DEFAULT_SETTINGS
@@ -758,58 +753,28 @@ class SettingsDialog(FrostedFramelessDialog):
             )
             if index >= 0:
                 self.translation_provider_combo.setCurrentIndex(index)
-        if hasattr(self, 'deepl_api_key_input'):
-            self.deepl_api_key_input.setText(defaults["deepl_api_key"])
-        if hasattr(self, 'deepl_pro_toggle'):
-            self.deepl_pro_toggle.setChecked(defaults["deepl_use_pro"])
-        if hasattr(self, 'amazon_translate_region_input'):
-            self.amazon_translate_region_input.setText(
-                defaults["amazon_translate_region"]
-            )
-        if hasattr(self, 'amazon_translate_access_key_input'):
-            self.amazon_translate_access_key_input.setText(
-                defaults["amazon_translate_access_key_id"]
-            )
-        if hasattr(self, 'amazon_translate_secret_key_input'):
-            self.amazon_translate_secret_key_input.setText(
-                defaults["amazon_translate_secret_access_key"]
-            )
-        if hasattr(self, 'amazon_translate_session_token_input'):
-            self.amazon_translate_session_token_input.setText(
-                defaults["amazon_translate_session_token"]
-            )
-        if hasattr(self, 'google_translate_api_key_input'):
-            self.google_translate_api_key_input.setText(
-                defaults["google_translate_api_key"]
-            )
-        if hasattr(self, 'azure_translate_api_key_input'):
-            self.azure_translate_api_key_input.setText(
-                defaults["azure_translate_api_key"]
-            )
-        if hasattr(self, 'azure_translate_region_input'):
-            self.azure_translate_region_input.setText(
-                defaults["azure_translate_region"]
-            )
-        if hasattr(self, 'azure_translate_endpoint_input'):
-            self.azure_translate_endpoint_input.setText(
-                defaults["azure_translate_endpoint"]
-            )
-        if hasattr(self, 'baidu_translate_app_id_input'):
-            self.baidu_translate_app_id_input.setText(
-                defaults["baidu_translate_app_id"]
-            )
-        if hasattr(self, 'baidu_translate_secret_key_input'):
-            self.baidu_translate_secret_key_input.setText(
-                defaults["baidu_translate_secret_key"]
+        # 各家凭据和独有开关都按注册表的声明恢复，不再一家家手写。
+        # 手写那版加 baidu 时漏过一次，而漏了不报错——恢复默认会默默少恢复两项。
+        if hasattr(self, 'provider_field_widgets'):
+            provider_fields.reset_to_defaults(
+                defaults,
+                provider_fields.all_fields(self.translation_registry),
+                self.provider_field_widgets,
             )
         if hasattr(self, 'translation_target_combo'):
-            index = self.translation_target_combo.findData(defaults["translation_target_lang"])
+            index = self.translation_target_combo.findData(
+                defaults["translation_target_lang"]
+            )
             if index >= 0:
                 self.translation_target_combo.setCurrentIndex(index)
         if hasattr(self, 'split_sentences_toggle'):
-            self.split_sentences_toggle.setChecked(defaults["translation_split_sentences"])
+            self.split_sentences_toggle.setChecked(
+                defaults["translation_split_sentences"]
+            )
         if hasattr(self, 'preserve_formatting_toggle'):
-            self.preserve_formatting_toggle.setChecked(defaults["translation_preserve_formatting"])
+            self.preserve_formatting_toggle.setChecked(
+                defaults["translation_preserve_formatting"]
+            )
 
     def _reset_clipboard_page(self):
         defaults = self.config_manager.APP_DEFAULT_SETTINGS
@@ -819,14 +784,22 @@ class SettingsDialog(FrostedFramelessDialog):
             self.clipboard_auto_paste_toggle.setChecked(defaults["clipboard_auto_paste"])
         if hasattr(self, 'clipboard_history_limit_spin'):
             self.clipboard_history_limit_spin.setValue(defaults["clipboard_history_limit"])
+        if hasattr(self, 'clipboard_scan_interval_combo'):
+            idx = self.clipboard_scan_interval_combo.findData(
+                defaults["clipboard_foreground_scan_interval_ms"]
+            )
+            if idx >= 0:
+                self.clipboard_scan_interval_combo.setCurrentIndex(idx)
 
     # ================================================================
     # 保存（accept）
     # ================================================================
 
-    def accept(self) -> bool:
-        """保存所有设置。返回 False 表示校验失败被中止（窗口不应关闭）。"""
-        # 全局快捷键必须先整体通过校验。这里发生在任何 set_* 之前，
+    def accept(self):
+        """保存所有设置"""
+        self._dialog_scale_changed_on_accept = False
+
+        # 六个全局快捷键必须先整体通过校验。这里发生在任何 set_* 之前，
         # 因而冲突值不会写入配置，窗口也不会关闭。
         if not validate_global_hotkey_edits(self, check_system=True):
             self.content_stack.setCurrentIndex(0)
@@ -839,45 +812,10 @@ class SettingsDialog(FrostedFramelessDialog):
                     "Please fix them before applying."
                 ),
             )
-            return False
+            return
 
         # 防止保存过程中（比如语言切换触发的窗口重建）触发未保存确认弹窗
         self._skip_unsaved_close_prompt = True
-
-        # 0-前置. 校验全局热键能否解析。无法解析的组合键注册必然失败，
-        # 直接拦截保存，避免出现「设置了热键却不生效」的情况。
-        from core.shortcut_manager import is_hotkey_parsable
-        from ui.dialogs import show_warning_dialog
-        invalid_hotkeys = []
-        for attr, label in (
-            ('hotkey_input', self.tr("Screenshot")),
-            ('hotkey_input_2', self.tr("Screenshot (2)")),
-            ('clipboard_hotkey_edit', self.tr("Clipboard")),
-            ('clipboard_hotkey_edit_2', self.tr("Clipboard (2)")),
-            ('translation_hotkey_edit', self.tr("Translation")),
-            ('translation_hotkey_edit_2', self.tr("Translation (2)")),
-            ('pin_hotkey_edit', self.tr("Pin")),
-            ('pin_hotkey_edit_2', self.tr("Pin (2)")),
-        ):
-            editor = getattr(self, attr, None)
-            if editor is None:
-                continue
-            text = editor.text().strip()
-            if text and not text.endswith("+") and not is_hotkey_parsable(text):
-                invalid_hotkeys.append(f"• {label}: {text}")
-        if invalid_hotkeys:
-            show_warning_dialog(
-                self,
-                self.tr("Invalid Hotkey"),
-                self.tr("The following shortcuts cannot be recognized and will never work:")
-                + "\n\n" + "\n".join(invalid_hotkeys)
-                + "\n\n" + self.tr(
-                    "Please record them again in the boxes above (e.g. Ctrl+Alt+A, F8, Print)."
-                ),
-            )
-            # 中止保存，恢复标志让未保存变更检测继续生效
-            self._skip_unsaved_close_prompt = False
-            return False
 
         # 0. 快捷键
         self.config_manager.set_hotkey(self.hotkey_input.text().strip())
@@ -890,14 +828,6 @@ class SettingsDialog(FrostedFramelessDialog):
         if hasattr(self, 'translation_hotkey_edit_2'):
             self.config_manager.set_translation_hotkey_2(
                 self.translation_hotkey_edit_2.text().strip()
-            )
-        if hasattr(self, 'pin_hotkey_edit'):
-            self.config_manager.set_pin_hotkey(
-                self.pin_hotkey_edit.text().strip()
-            )
-        if hasattr(self, 'pin_hotkey_edit_2'):
-            self.config_manager.set_pin_hotkey_2(
-                self.pin_hotkey_edit_2.text().strip()
             )
 
         # 1. 截图交互（双击确认 + 智能选区）
@@ -913,8 +843,14 @@ class SettingsDialog(FrostedFramelessDialog):
             self.config_manager.set_text_always_on_top_enabled(
                 self.text_always_on_top_toggle.isChecked()
             )
-        if hasattr(self, 'smart_toggle'):
-            self.config_manager.set_smart_selection(self.smart_toggle.isChecked())
+        if hasattr(self, 'smart_mode_combo'):
+            self.config_manager.set_smart_selection_mode(
+                self.smart_mode_combo.currentData()
+            )
+        if hasattr(self, 'smart_animation_toggle'):
+            self.config_manager.set_smart_selection_animation(
+                self.smart_animation_toggle.isChecked()
+            )
 
         # 2. 日志设置
         if hasattr(self, 'log_toggle'):
@@ -961,10 +897,23 @@ class SettingsDialog(FrostedFramelessDialog):
         # 3. 截图保存
         if hasattr(self, 'save_toggle'):
             self.config_manager.set_screenshot_save_enabled(self.save_toggle.isChecked())
+        if hasattr(self, 'clipboard_file_reference_toggle'):
+            self.config_manager.set_clipboard_file_reference_enabled(
+                self.clipboard_file_reference_toggle.isChecked()
+            )
         if hasattr(self, 'save_path_lbl'):
             self.config_manager.set_screenshot_save_path(self.save_path_lbl.text())
         if hasattr(self, 'screenshot_format_combo'):
             self.config_manager.set_screenshot_format(self.screenshot_format_combo.currentData())
+
+        # 3.5 放大镜
+        for attr, key in (('magnifier_enabled_toggle', 'magnifier_enabled'),
+                          ('magnifier_grid_toggle', 'magnifier_grid'),
+                          ('magnifier_swatch_toggle', 'magnifier_swatch'),
+                          ('magnifier_hint_toggle', 'magnifier_hint')):
+            toggle = getattr(self, attr, None)
+            if toggle is not None:
+                self.config_manager.set_app_setting(key, toggle.isChecked())
 
         # 4. OCR
         if hasattr(self, 'ocr_enable_toggle'):
@@ -983,49 +932,15 @@ class SettingsDialog(FrostedFramelessDialog):
             self.config_manager.set_translation_provider(
                 self.translation_provider_combo.currentData()
             )
-        if hasattr(self, 'deepl_api_key_input'):
-            self.config_manager.set_deepl_api_key(self.deepl_api_key_input.text().strip())
-        if hasattr(self, 'deepl_pro_toggle'):
-            self.config_manager.set_deepl_use_pro(self.deepl_pro_toggle.isChecked())
-        if hasattr(self, 'amazon_translate_region_input'):
-            self.config_manager.set_amazon_translate_region(
-                self.amazon_translate_region_input.text().strip()
-            )
-        if hasattr(self, 'amazon_translate_access_key_input'):
-            self.config_manager.set_amazon_translate_access_key_id(
-                self.amazon_translate_access_key_input.text().strip()
-            )
-        if hasattr(self, 'amazon_translate_secret_key_input'):
-            self.config_manager.set_amazon_translate_secret_access_key(
-                self.amazon_translate_secret_key_input.text().strip()
-            )
-        if hasattr(self, 'amazon_translate_session_token_input'):
-            self.config_manager.set_amazon_translate_session_token(
-                self.amazon_translate_session_token_input.text().strip()
-            )
-        if hasattr(self, 'google_translate_api_key_input'):
-            self.config_manager.set_google_translate_api_key(
-                self.google_translate_api_key_input.text().strip()
-            )
-        if hasattr(self, 'azure_translate_api_key_input'):
-            self.config_manager.set_azure_translate_api_key(
-                self.azure_translate_api_key_input.text().strip()
-            )
-        if hasattr(self, 'azure_translate_region_input'):
-            self.config_manager.set_azure_translate_region(
-                self.azure_translate_region_input.text().strip()
-            )
-        if hasattr(self, 'azure_translate_endpoint_input'):
-            self.config_manager.set_azure_translate_endpoint(
-                self.azure_translate_endpoint_input.text().strip()
-            )
-        if hasattr(self, 'baidu_translate_app_id_input'):
-            self.config_manager.set_baidu_translate_app_id(
-                self.baidu_translate_app_id_input.text().strip()
-            )
-        if hasattr(self, 'baidu_translate_secret_key_input'):
-            self.config_manager.set_baidu_translate_secret_key(
-                self.baidu_translate_secret_key_input.text().strip()
+        # 各家凭据和独有开关统一按注册表的声明保存。以前这里是一长串手写的
+        # if hasattr(...)，加一家就得补一段；补漏了不报错——hasattr 把
+        # AttributeError 一起吞了，表现成「填了、存不上、一直说未配置」。
+        # baidu 就这么漏过一次，而当时全部测试都是绿的。
+        if hasattr(self, 'provider_field_widgets'):
+            provider_fields.save_from(
+                self.config_manager,
+                provider_fields.all_fields(self.translation_registry),
+                self.provider_field_widgets,
             )
         if hasattr(self, 'translation_target_combo'):
             self.config_manager.set_translation_target_lang(self.translation_target_combo.currentData())
@@ -1042,11 +957,7 @@ class SettingsDialog(FrostedFramelessDialog):
             self.config_manager.set_show_main_window(self.show_main_window_toggle.isChecked())
         if hasattr(self, 'pin_auto_toolbar_toggle'):
             self.config_manager.set_pin_auto_toolbar(self.pin_auto_toolbar_toggle.isChecked())
-        if hasattr(self, 'magnifier_color_format_combo'):
-            self.config_manager.set_app_setting(
-                "magnifier_color_copy_format",
-                self.magnifier_color_format_combo.currentData()
-            )
+        self._save_magnifier_color_formats()
 
         # 界面语言
         if hasattr(self, 'language_combo'):
@@ -1062,10 +973,18 @@ class SettingsDialog(FrostedFramelessDialog):
             self.config_manager.set_clipboard_enabled(self.clipboard_enabled_toggle.isChecked())
         if hasattr(self, 'clipboard_history_limit_spin'):
             self.config_manager.set_clipboard_history_limit(self.clipboard_history_limit_spin.value())
+        if hasattr(self, 'clipboard_scan_interval_combo'):
+            interval_ms = self.clipboard_scan_interval_combo.currentData()
+            if interval_ms is not None:
+                self.config_manager.set_clipboard_foreground_scan_interval_ms(interval_ms)
         if hasattr(self, 'clipboard_hotkey_edit'):
             self.config_manager.set_clipboard_hotkey(self.clipboard_hotkey_edit.text().strip())
         if hasattr(self, 'clipboard_hotkey_edit_2'):
             self.config_manager.set_clipboard_hotkey_2(self.clipboard_hotkey_edit_2.text().strip())
+        if hasattr(self, 'pin_clipboard_hotkey_edit'):
+            self.config_manager.set_pin_clipboard_hotkey(self.pin_clipboard_hotkey_edit.text().strip())
+        if hasattr(self, 'pin_clipboard_hotkey_edit_2'):
+            self.config_manager.set_pin_clipboard_hotkey_2(self.pin_clipboard_hotkey_edit_2.text().strip())
 
         # 7.5 应用内快捷键
         if hasattr(self, '_inapp_edits'):
@@ -1108,17 +1027,23 @@ class SettingsDialog(FrostedFramelessDialog):
         if hasattr(self, 'info_hide_on_drag_toggle'):
             self.config_manager.set_app_setting("screenshot_info_hide_on_drag", self.info_hide_on_drag_toggle.isChecked())
 
-        # 11. 外观设置（主题色、遮罩色）
+        # 11. 外观设置（主题色、遮罩色、选区外观、界面缩放）
         if hasattr(self, '_ui_theme_combo'):
             from core.ui_theme import get_ui_theme
             get_ui_theme().set_mode(self._ui_theme_combo.currentData())
 
-        # 12. 界面缩放（保存并立即生效）
+        # 缩放比例一变，已建出来的工具栏/面板会自己收到 scale_changed 重算
         if hasattr(self, '_ui_scale_combo'):
-            scale = float(self._ui_scale_combo.currentData())
-            self.config_manager.set_app_setting("ui_scale", scale)
-            from core import ui_scale
-            ui_scale.set_ui_scale(scale)
+            from core.ui_scale import get_ui_scale
+            get_ui_scale().set_percent(self._ui_scale_combo.currentData())
+
+        # 窗口缩放在后续新建的独立窗口中按各自基准尺寸生效；这里不对当前设置
+        # 窗口做事后整体拉伸，避免固定高度控件与已布局内容相互挤压。
+        if hasattr(self, '_dialog_scale_combo'):
+            from core.ui_scale import get_dialog_scale
+            self._dialog_scale_changed_on_accept = get_dialog_scale().set_percent(
+                self._dialog_scale_combo.currentData()
+            )
 
         from core.theme import get_theme
         theme = get_theme()
@@ -1126,6 +1051,12 @@ class SettingsDialog(FrostedFramelessDialog):
             theme.set_theme_color(self._appearance_theme_color)
         if hasattr(self, '_appearance_mask_color'):
             theme.set_mask_color(self._appearance_mask_color)
+        if hasattr(self, '_selection_border_combo'):
+            theme.set_selection_border_width(self._selection_border_combo.currentData())
+        if hasattr(self, '_selection_handle_combo'):
+            theme.set_selection_handle_style(self._selection_handle_combo.currentData())
+        if hasattr(self, '_selection_handle_size_combo'):
+            theme.set_selection_handle_size(self._selection_handle_size_combo.currentData())
 
         log_info("すべての設定を保存しました", "Settings")
         self._settings_snapshot = self._snapshot_settings()
@@ -1134,7 +1065,6 @@ class SettingsDialog(FrostedFramelessDialog):
             super().accept()
         finally:
             self._skip_unsaved_close_prompt = False
-        return True
 
     # ================================================================
     # showEvent / refresh
@@ -1159,14 +1089,15 @@ class SettingsDialog(FrostedFramelessDialog):
                 border: none;
             }}
             QWidget#SettingsLeftPanel {{
-                background-color: {theme_sidebar_color()};
+                /* 侧栏直接坐在窗口底色上，不再单独成块。 */
+                background-color: transparent;
                 border: none;
-                border-radius: 8px;
+                border-radius: 12px;
             }}
             QWidget#SettingsRightArea {{
                 background: {theme_surface_color()};
-                border: none;
-                border-radius: 8px;
+                border: 1px solid {tokens.separator};
+                border-radius: 12px;
             }}
             QLabel {{
                 color: {tokens.text};
@@ -1182,29 +1113,14 @@ class SettingsDialog(FrostedFramelessDialog):
         refresh_theme_widget_styles(self)
         self._apply_footer_styles()
         input_style = self._get_input_style()
-        for attr in (
-            "hotkey_input", "hotkey_input_2",
-            "clipboard_hotkey_edit", "clipboard_hotkey_edit_2",
-            "translation_hotkey_edit", "translation_hotkey_edit_2",
-            "deepl_api_key_input", "amazon_translate_region_input",
-            "amazon_translate_access_key_input",
-            "amazon_translate_secret_key_input",
-            "amazon_translate_session_token_input",
-            "google_translate_api_key_input",
-            "azure_translate_api_key_input",
-            "azure_translate_region_input",
-            "azure_translate_endpoint_input",
-            "baidu_translate_app_id_input",
-            "baidu_translate_secret_key_input",
-        ):
-            widget = getattr(self, attr, None)
-            if widget is not None:
+        # 翻译凭据的输入框是按声明动态建的，从 provider_field_widgets 取。
+        # 上面那张手写清单里 azure/baidu 一直缺席，切主题时它们不跟着变。
+        for widget in getattr(self, "provider_field_widgets", {}).values():
+            if hasattr(widget, "setEchoMode"):
                 widget.setStyleSheet(input_style)
-        for widget in getattr(self, "_inapp_edits", {}).values():
-            widget.setStyleSheet(input_style)
         self.content_title.setStyleSheet(
             theme_text_style(
-                20, bold=True,
+                21, bold=True,
                 extra="padding: 0 6px 2px 6px;"
             )
         )
@@ -1249,28 +1165,30 @@ class SettingsDialog(FrostedFramelessDialog):
         # 文本类
         for attr in ('hotkey_input', 'hotkey_input_2', 'clipboard_hotkey_edit',
                       'translation_hotkey_edit', 'translation_hotkey_edit_2',
-                      'clipboard_hotkey_edit_2', 'save_path_lbl', 'path_lbl',
-                      'deepl_api_key_input', 'amazon_translate_region_input',
-                      'amazon_translate_access_key_input',
-                      'amazon_translate_secret_key_input',
-                      'amazon_translate_session_token_input',
-                      'google_translate_api_key_input',
-                      'azure_translate_api_key_input',
-                      'azure_translate_region_input',
-                      'azure_translate_endpoint_input',
-                      'baidu_translate_app_id_input',
-                      'baidu_translate_secret_key_input'):
+                      'clipboard_hotkey_edit_2', 'pin_clipboard_hotkey_edit',
+                      'pin_clipboard_hotkey_edit_2', 'save_path_lbl', 'path_lbl',
+                      ):
             w = getattr(self, attr, None)
             if w is not None:
                 snap[attr] = w.text()
+        # 翻译凭据按声明取。以前是手写清单，只列了 deepl/amazon/google——改动
+        # azure 或 baidu 的凭据后直接关窗，不会弹「未保存」提示，改动就没了。
+        if hasattr(self, 'provider_field_widgets'):
+            for f in provider_fields.all_fields(self.translation_registry):
+                w = self.provider_field_widgets.get(f.config_key)
+                if w is not None:
+                    snap[f.config_key] = provider_fields.widget_value(f, w)
         # 开关类
         for attr in ('double_click_copy_close_toggle',
                       'cross_tool_selection_toggle',
                       'text_always_on_top_toggle',
-                      'smart_toggle',
-                      'save_toggle', 'ocr_enable_toggle',
+                      'smart_animation_toggle',
+                      'save_toggle', 'clipboard_file_reference_toggle',
+                      'magnifier_enabled_toggle', 'magnifier_grid_toggle',
+                      'magnifier_swatch_toggle', 'magnifier_hint_toggle',
+                      'ocr_enable_toggle',
                       'ocr_grayscale_toggle', 'ocr_upscale_toggle',
-                      'deepl_pro_toggle', 'split_sentences_toggle',
+                      'split_sentences_toggle',
                       'preserve_formatting_toggle', 'log_toggle',
                       'clipboard_enabled_toggle', 'clipboard_auto_paste_toggle',
                       'autostart_toggle', 'show_main_window_toggle',
@@ -1286,8 +1204,11 @@ class SettingsDialog(FrostedFramelessDialog):
                       'translation_provider_combo', 'translation_target_combo',
                       'log_level_combo',
                       'language_combo', 'engine_combo', 'cursor_move_combo',
-                      'magnifier_color_format_combo', 'log_retention_combo',
-                      '_ui_theme_combo', '_ui_scale_combo'):
+                      'log_retention_combo',
+                      '_ui_theme_combo', '_ui_scale_combo', '_dialog_scale_combo',
+                      '_selection_border_combo', '_selection_handle_combo',
+                      '_selection_handle_size_combo', 'smart_mode_combo',
+                      'clipboard_scan_interval_combo'):
             w = getattr(self, attr, None)
             if w is not None:
                 snap[attr] = w.currentIndex()
@@ -1307,6 +1228,9 @@ class SettingsDialog(FrostedFramelessDialog):
             snap['theme_color'] = self._appearance_theme_color.name()
         if hasattr(self, '_appearance_mask_color'):
             snap['mask_color'] = self._appearance_mask_color.name()
+        # 颜色格式在单独的管理窗口里编辑，没有对应的控件可读
+        if hasattr(self, 'magnifier_color_formats'):
+            snap['magnifier_color_formats'] = tuple(self.magnifier_color_formats)
         return snap
 
     def _has_unsaved_changes(self):
@@ -1343,12 +1267,8 @@ class SettingsDialog(FrostedFramelessDialog):
         if self._has_unsaved_changes():
             action = self._confirm_close_with_unsaved_changes()
             if action == "save":
-                # accept() 可能因校验失败被中止（如热键无效），
-                # 此时保持窗口打开，避免用户编辑内容被静默丢弃
-                if self.accept():
-                    event.accept()
-                else:
-                    event.ignore()
+                self.accept()
+                event.accept()
             elif action == "discard":
                 event.accept()
             else:
@@ -1396,6 +1316,10 @@ class SettingsDialog(FrostedFramelessDialog):
             self.clipboard_hotkey_edit.setText(self.config_manager.get_clipboard_hotkey())
         if hasattr(self, 'clipboard_hotkey_edit_2'):
             self.clipboard_hotkey_edit_2.setText(self.config_manager.get_clipboard_hotkey_2())
+        if hasattr(self, 'pin_clipboard_hotkey_edit'):
+            self.pin_clipboard_hotkey_edit.setText(self.config_manager.get_pin_clipboard_hotkey())
+        if hasattr(self, 'pin_clipboard_hotkey_edit_2'):
+            self.pin_clipboard_hotkey_edit_2.setText(self.config_manager.get_pin_clipboard_hotkey_2())
         if hasattr(self, 'translation_hotkey_edit'):
             self.translation_hotkey_edit.setText(
                 self.config_manager.get_translation_hotkey()
@@ -1427,8 +1351,15 @@ class SettingsDialog(FrostedFramelessDialog):
         if hasattr(self, 'ignore_top_pixels_spinbox'):
             self.ignore_top_pixels_spinbox.setValue(self.config_manager.get_long_stitch_ignore_top_pixels())
 
-        if hasattr(self, 'smart_toggle'):
-            self.smart_toggle.setChecked(self.config_manager.get_smart_selection())
+        if hasattr(self, 'smart_mode_combo'):
+            self.smart_mode_combo.setCurrentIndex(SMART_SELECTION_MODES.index(
+                self.config_manager.get_smart_selection_mode()
+            ))
+
+        if hasattr(self, 'smart_animation_toggle'):
+            self.smart_animation_toggle.setChecked(
+                self.config_manager.get_smart_selection_animation()
+            )
 
         if hasattr(self, 'double_click_copy_close_toggle'):
             self.double_click_copy_close_toggle.setChecked(
@@ -1447,12 +1378,26 @@ class SettingsDialog(FrostedFramelessDialog):
 
         if hasattr(self, 'save_toggle'):
             self.save_toggle.setChecked(self.config_manager.get_screenshot_save_enabled())
+        if hasattr(self, 'clipboard_file_reference_toggle'):
+            self.clipboard_file_reference_toggle.setChecked(
+                self.config_manager.get_clipboard_file_reference_enabled()
+            )
         if hasattr(self, 'save_path_lbl'):
             self.save_path_lbl.setText(self.config_manager.get_screenshot_save_path())
         if hasattr(self, 'screenshot_format_combo'):
             idx = {"PNG": 0, "JPG": 1, "BMP": 2, "WEBP": 3, "PDF": 4}.get(
                 self.config_manager.get_screenshot_format().upper(), 0)
             self.screenshot_format_combo.setCurrentIndex(idx)
+        for attr, key in (('magnifier_enabled_toggle', 'magnifier_enabled'),
+                          ('magnifier_grid_toggle', 'magnifier_grid'),
+                          ('magnifier_swatch_toggle', 'magnifier_swatch'),
+                          ('magnifier_hint_toggle', 'magnifier_hint')):
+            toggle = getattr(self, attr, None)
+            if toggle is not None:
+                toggle.setChecked(self.config_manager.get_app_setting(key))
+        if hasattr(self, 'magnifier_color_formats'):
+            from settings import color_formats
+            self.magnifier_color_formats = color_formats.load(self.config_manager)
         if hasattr(self, 'ocr_enable_toggle'):
             self.ocr_enable_toggle.setChecked(self.config_manager.get_ocr_enabled())
         if hasattr(self, 'ocr_engine_combo'):
@@ -1472,49 +1417,14 @@ class SettingsDialog(FrostedFramelessDialog):
             )
             if index >= 0:
                 self.translation_provider_combo.setCurrentIndex(index)
-        if hasattr(self, 'deepl_api_key_input'):
-            self.deepl_api_key_input.setText(self.config_manager.get_deepl_api_key())
-        if hasattr(self, 'deepl_pro_toggle'):
-            self.deepl_pro_toggle.setChecked(self.config_manager.get_deepl_use_pro())
-        if hasattr(self, 'amazon_translate_region_input'):
-            self.amazon_translate_region_input.setText(
-                self.config_manager.get_amazon_translate_region()
-            )
-        if hasattr(self, 'amazon_translate_access_key_input'):
-            self.amazon_translate_access_key_input.setText(
-                self.config_manager.get_amazon_translate_access_key_id()
-            )
-        if hasattr(self, 'amazon_translate_secret_key_input'):
-            self.amazon_translate_secret_key_input.setText(
-                self.config_manager.get_amazon_translate_secret_access_key()
-            )
-        if hasattr(self, 'amazon_translate_session_token_input'):
-            self.amazon_translate_session_token_input.setText(
-                self.config_manager.get_amazon_translate_session_token()
-            )
-        if hasattr(self, 'google_translate_api_key_input'):
-            self.google_translate_api_key_input.setText(
-                self.config_manager.get_google_translate_api_key()
-            )
-        if hasattr(self, 'azure_translate_api_key_input'):
-            self.azure_translate_api_key_input.setText(
-                self.config_manager.get_azure_translate_api_key()
-            )
-        if hasattr(self, 'azure_translate_region_input'):
-            self.azure_translate_region_input.setText(
-                self.config_manager.get_azure_translate_region()
-            )
-        if hasattr(self, 'azure_translate_endpoint_input'):
-            self.azure_translate_endpoint_input.setText(
-                self.config_manager.get_azure_translate_endpoint()
-            )
-        if hasattr(self, 'baidu_translate_app_id_input'):
-            self.baidu_translate_app_id_input.setText(
-                self.config_manager.get_baidu_translate_app_id()
-            )
-        if hasattr(self, 'baidu_translate_secret_key_input'):
-            self.baidu_translate_secret_key_input.setText(
-                self.config_manager.get_baidu_translate_secret_key()
+        # 各家凭据/开关按声明重载。手写那版只覆盖了 deepl/amazon/google，
+        # azure 和 baidu 从来没被重载过——外部改了配置再打开设置页，看到的
+        # 还是旧值。
+        if hasattr(self, 'provider_field_widgets'):
+            provider_fields.load_into(
+                self.config_manager,
+                provider_fields.all_fields(self.translation_registry),
+                self.provider_field_widgets,
             )
         if hasattr(self, 'translation_target_combo'):
             index = self.translation_target_combo.findData(self.config_manager.get_app_setting("translation_target_lang", ""))
@@ -1544,6 +1454,12 @@ class SettingsDialog(FrostedFramelessDialog):
             self.clipboard_auto_paste_toggle.setChecked(self.config_manager.get_clipboard_auto_paste())
         if hasattr(self, 'clipboard_history_limit_spin'):
             self.clipboard_history_limit_spin.setValue(self.config_manager.get_clipboard_history_limit())
+        if hasattr(self, 'clipboard_scan_interval_combo'):
+            idx = self.clipboard_scan_interval_combo.findData(
+                self.config_manager.get_clipboard_foreground_scan_interval_ms()
+            )
+            if idx >= 0:
+                self.clipboard_scan_interval_combo.setCurrentIndex(idx)
 
         if hasattr(self, 'autostart_toggle'):
             from ..welcome.page6_finish import FinishPage as _FP
@@ -1583,11 +1499,16 @@ class SettingsDialog(FrostedFramelessDialog):
                 self._ui_theme_combo.setCurrentIndex(index)
 
         if hasattr(self, '_ui_scale_combo'):
-            scale_idx = self._ui_scale_combo.findData(
-                float(self.config_manager.get_app_setting("ui_scale", 1.0))
-            )
-            if scale_idx >= 0:
-                self._ui_scale_combo.setCurrentIndex(scale_idx)
+            from core.ui_scale import get_ui_scale
+            index = self._ui_scale_combo.findData(get_ui_scale().percent)
+            if index >= 0:
+                self._ui_scale_combo.setCurrentIndex(index)
+
+        if hasattr(self, '_dialog_scale_combo'):
+            from core.ui_scale import get_dialog_scale
+            index = self._dialog_scale_combo.findData(get_dialog_scale().percent)
+            if index >= 0:
+                self._dialog_scale_combo.setCurrentIndex(index)
 
         if hasattr(self, '_theme_color_btn'):
             from core.theme import get_theme
@@ -1598,6 +1519,30 @@ class SettingsDialog(FrostedFramelessDialog):
             self._appearance_mask_color = QColor(mc.red(), mc.green(), mc.blue())
             _update_color_btn(self._theme_color_btn, self._appearance_theme_color)
             _update_color_btn(self._mask_color_btn, self._appearance_mask_color)
+
+        if hasattr(self, '_selection_border_combo'):
+            from core.theme import get_theme
+            index = self._selection_border_combo.findData(
+                get_theme().selection_border_width
+            )
+            if index >= 0:
+                self._selection_border_combo.setCurrentIndex(index)
+
+        if hasattr(self, '_selection_handle_combo'):
+            from core.theme import get_theme
+            index = self._selection_handle_combo.findData(
+                get_theme().selection_handle_style
+            )
+            if index >= 0:
+                self._selection_handle_combo.setCurrentIndex(index)
+
+        if hasattr(self, '_selection_handle_size_combo'):
+            from core.theme import get_theme
+            index = self._selection_handle_size_combo.findData(
+                get_theme().selection_handle_size
+            )
+            if index >= 0:
+                self._selection_handle_size_combo.setCurrentIndex(index)
 
         # 剪切板主题色同步（在别处改了主题色后打开设置，确保显示最新值）
         if hasattr(self, '_clip_theme_btn'):

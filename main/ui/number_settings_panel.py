@@ -2,10 +2,9 @@
 序号工具设置面板
 适用于：序号 (number)
 """
-from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import (
-    QApplication,
     QHBoxLayout,
     QLabel,
     QStyleOptionGraphicsItem,
@@ -18,7 +17,8 @@ from canvas.items import NumberItem
 from tools.number import NumberTool
 
 from core.i18n import make_tr
-from .base_settings_panel import BaseSettingsPanel, PANEL_SCALE, set_step_button_icon
+from core.ui_scale import scaled
+from .base_settings_panel import BaseSettingsPanel, HoverPopup, set_step_button_icon
 
 # 样式弹出条与序号面板共用同一翻译上下文
 _style_tr = make_tr("ArrowSettingsPanel")
@@ -45,33 +45,20 @@ def render_number_style_preview(
     return pixmap
 
 
-class NumberStylePopup(QWidget):
+class NumberStylePopup(HoverPopup):
     """悬停在 ① 预览上弹出的样式选择条。"""
 
     style_selected = Signal(str)
 
-    ITEM_SIDE = 20      # 与面板里其它小控件一个量级，34 太笨重
+    BASE_ITEM_SIDE = 20   # 与面板里其它小控件一个量级，34 太笨重
+    BASE_ITEM_PADDING = 6
     # 这是样式选择器，不表示颜色。颜色由光标去预览，图标固定用中性色，
     # 否则选浅色标注时白底上的图标会看不见。
     PREVIEW_INK = QColor("#444444")
-    CLOSE_DELAY_MS = 260
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # 与设置面板同样的标志：浮在最上层且不抢焦点，否则一弹出面板就没了
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.setObjectName("NumberStylePopup")
-        # 配色沿用应用里设置面板的白底浅色，不要另造一套深色
-        self.setStyleSheet(
-            "#NumberStylePopup { background: white; border: 1px solid #ccc;"
-            " border-radius: 3px; }"
+        self.set_extra_stylesheet(
             # 选中态必须一眼盖过悬停态：弹出条以 ① 预览为中心对齐，鼠标移进来
             # 时几乎总会先擦过中间那两个按钮，两者长得像就会被误读成"它自己跳
             # 到空心圆了"。所以悬停只给极淡的底，选中给明显的蓝框——图标是深灰
@@ -84,8 +71,9 @@ class NumberStylePopup(QWidget):
         )
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(2)
+        pad = scaled(4)
+        layout.setContentsMargins(pad, pad, pad, pad)
+        layout.setSpacing(scaled(2))
 
         self._buttons = {}
         for style, tip in (
@@ -97,25 +85,26 @@ class NumberStylePopup(QWidget):
             button = QToolButton(self)
             button.setCheckable(True)
             button.setAutoRaise(True)
-            button.setFixedSize(self.ITEM_SIDE + 6, self.ITEM_SIDE + 6)
-            button.setIconSize(QSize(self.ITEM_SIDE, self.ITEM_SIDE))
             button.setToolTip(_style_tr(tip))
             button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             button.clicked.connect(lambda _=False, st=style: self._choose(st))
             layout.addWidget(button)
             self._buttons[style] = button
 
-        self._close_timer = QTimer(self)
-        self._close_timer.setSingleShot(True)
-        self._close_timer.setInterval(self.CLOSE_DELAY_MS)
-        self._close_timer.timeout.connect(self.hide)
-        self._render_previews()
+        self.apply_scale()
 
-    def _render_previews(self):
+    def apply_scale(self):
+        """按当前比例重挂样式、重算格子大小并重画预览图"""
+        super().apply_scale()
+        if not getattr(self, "_buttons", None):
+            return
+        side = scaled(self.BASE_ITEM_SIDE)
+        cell = side + scaled(self.BASE_ITEM_PADDING)
         for style, button in self._buttons.items():
-            button.setIcon(
-                render_number_style_preview(style, self.PREVIEW_INK, self.ITEM_SIDE)
-            )
+            button.setFixedSize(cell, cell)
+            button.setIconSize(QSize(side, side))
+            button.setIcon(render_number_style_preview(style, self.PREVIEW_INK, side))
+        self.adjustSize()
 
     def set_current_style(self, style: str):
         style = NumberItem.normalize_style(style)
@@ -126,21 +115,6 @@ class NumberStylePopup(QWidget):
         self.set_current_style(style)
         self.style_selected.emit(style)
         self.hide()
-
-    # 鼠标在"预览标签"和"弹出层"之间移动时不能立刻关，留一点缓冲
-    def keep_open(self):
-        self._close_timer.stop()
-
-    def close_soon(self):
-        self._close_timer.start()
-
-    def enterEvent(self, event):
-        self.keep_open()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        self.close_soon()
-        super().leaveEvent(event)
 
 
 class NumberSettingsPanel(BaseSettingsPanel):
@@ -154,10 +128,13 @@ class NumberSettingsPanel(BaseSettingsPanel):
     SIZE_DEFAULT = 16
     SIZE_TOOLTIP = "Font Size"
 
+    # 基准尺寸（100% 下的实际像素）
+    BASE_NEXT_PREVIEW = 23
+    BASE_NEXT_BTN_WIDTH = 16
+    BASE_NEXT_BTN_HEIGHT = 13
+
     def _build_extra_controls(self, layout):
-        _sz = round(26 * PANEL_SCALE)
         self.next_preview = QLabel()
-        self.next_preview.setFixedSize(_sz, _sz)
         self.next_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # 这里要显示的是下一个序号会长成什么样，所以连样式一起画，
         # 而不是用 CSS 画一个永远是空心圆的假框。
@@ -173,27 +150,36 @@ class NumberSettingsPanel(BaseSettingsPanel):
         self.next_preview.installEventFilter(self)
 
         btn_wrap = QWidget()
-        btn_layout = QVBoxLayout(btn_wrap)
-        btn_layout.setContentsMargins(0, 0, 0, 0)
-        btn_layout.setSpacing(2)
+        self._next_btn_layout = QVBoxLayout(btn_wrap)
+        self._next_btn_layout.setContentsMargins(0, 0, 0, 0)
 
         self.next_up_btn = QToolButton()
-        set_step_button_icon(self.next_up_btn, "up")
-        self.next_up_btn.setFixedSize(round(18 * PANEL_SCALE), round(14 * PANEL_SCALE))
         self.next_up_btn.setToolTip(self._tr("Next Number"))
-        btn_layout.addWidget(self.next_up_btn)
+        self._next_btn_layout.addWidget(self.next_up_btn)
 
         self.next_down_btn = QToolButton()
-        set_step_button_icon(self.next_down_btn, "down")
-        self.next_down_btn.setFixedSize(round(18 * PANEL_SCALE), round(14 * PANEL_SCALE))
         self.next_down_btn.setToolTip(self._tr("Next Number"))
-        btn_layout.addWidget(self.next_down_btn)
+        self._next_btn_layout.addWidget(self.next_down_btn)
 
         layout.insertWidget(1, btn_wrap)
 
         self.next_up_btn.clicked.connect(lambda: self._change_next_number(1))
         self.next_down_btn.clicked.connect(lambda: self._change_next_number(-1))
-        self._update_next_preview(self._next_value)
+
+    def _apply_scale_sizes(self):
+        super()._apply_scale_sizes()
+        preview = scaled(self.BASE_NEXT_PREVIEW)
+        self.next_preview.setFixedSize(preview, preview)
+        for direction, button in (("up", self.next_up_btn), ("down", self.next_down_btn)):
+            set_step_button_icon(button, direction)
+            button.setFixedSize(scaled(self.BASE_NEXT_BTN_WIDTH),
+                                scaled(self.BASE_NEXT_BTN_HEIGHT))
+        self._next_btn_layout.setSpacing(scaled(2))
+        popup = getattr(self, "_style_popup", None)
+        if popup is not None:
+            popup.apply_scale()
+        # 预览图是按 next_preview 的像素尺寸画的，改比例后要重画
+        self._update_next_preview()
 
     def set_next_number(self, value: int):
         if not hasattr(self, "next_preview"):
@@ -248,44 +234,7 @@ class NumberSettingsPanel(BaseSettingsPanel):
     def _show_style_popup(self):
         popup = self._ensure_style_popup()
         popup.set_current_style(self._current_style)
-        popup.keep_open()
-        popup.adjustSize()
-
-        popup.move(self._style_popup_position(popup))
-        popup.show()
-        popup.raise_()
-
-    def _style_popup_position(self, popup) -> QPoint:
-        """背离工具栏的方向弹；那一边放不下就换另一边。
-
-        面板在工具栏下方就往下弹，在上方就往上弹，这样天然不会盖住一级/二级菜单。
-        """
-        gap = 4
-        panel_rect = QRect(self.mapToGlobal(QPoint(0, 0)), self.size())
-        preview_top_left = self.next_preview.mapToGlobal(QPoint(0, 0))
-
-        screen = QApplication.screenAt(preview_top_left) or QApplication.primaryScreen()
-        area = screen.availableGeometry()
-
-        toolbar = getattr(self, "_owner_toolbar", None)
-        below_toolbar = True
-        if toolbar is not None:
-            try:
-                below_toolbar = panel_rect.top() >= toolbar.mapToGlobal(QPoint(0, 0)).y()
-            except RuntimeError:
-                pass
-
-        outward = panel_rect.bottom() + gap if below_toolbar else panel_rect.top() - popup.height() - gap
-        other = panel_rect.top() - popup.height() - gap if below_toolbar else panel_rect.bottom() + gap
-
-        y = outward
-        if not (area.top() <= y and y + popup.height() <= area.bottom()):
-            y = other
-
-        x = preview_top_left.x() + self.next_preview.width() // 2 - popup.width() // 2
-        x = max(area.left(), min(x, area.right() - popup.width()))
-        y = max(area.top(), min(y, area.bottom() - popup.height()))
-        return QPoint(int(x), int(y))
+        popup.show_beside(self, self.next_preview)
 
     def _on_style_selected(self, style: str):
         self.set_style(style)

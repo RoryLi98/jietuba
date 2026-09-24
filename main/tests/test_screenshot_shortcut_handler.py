@@ -12,14 +12,18 @@ QObject），它是"按键 → 动作"的唯一入口：确认、钉图、撤销
 而现有测试完全不覆盖它。
 
 隔离方式：用 __new__ 跳过 __init__（它会去读用户配置里的快捷键绑定），
-手工装配 _bindings / _move_keys / _window，用假事件对象和 MagicMock 窗口驱动。
+手工装配 _bindings / _mouse_bindings / _move_keys / _window，用假事件对象和
+MagicMock 窗口驱动。
 """
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from PySide6.QtCore import Qt
+import pytest
+from PySide6.QtCore import Qt, QRect, QRectF
 from PySide6.QtWidgets import QApplication
 
+from core import last_capture_region as region_module
+from core.last_capture_region import set_last_region
 from ui.screenshot_window import ScreenshotShortcutHandler
 
 NO_MOD = Qt.KeyboardModifier.NoModifier
@@ -37,7 +41,23 @@ BINDINGS = {
     "inapp_translate": (Qt.Key.Key_T, CTRL),
     "inapp_zoom_in": (Qt.Key.Key_Plus, NO_MOD),
     "inapp_zoom_out": (Qt.Key.Key_Minus, NO_MOD),
+    "inapp_restore_last_region": (Qt.Key.Key_L, NO_MOD),
 }
+
+
+class _FakeMouseEvent:
+    """中键事件。刻意不提供 key() 和 isAutoRepeat()——handle_key 里若有哪条
+    分支绕过 event_key()/event_is_auto_repeat() 直接取，就会在这里炸出来。"""
+
+    def __init__(self, button=Qt.MouseButton.MiddleButton, modifiers=NO_MOD):
+        self._button = button
+        self._mods = modifiers
+
+    def button(self):
+        return self._button
+
+    def modifiers(self):
+        return self._mods
 
 
 class _FakeKeyEvent:
@@ -53,12 +73,17 @@ class _FakeKeyEvent:
 
 
 def _make_window(text_editing=False, confirmed=True, can_undo=True, can_redo=True,
-                 magnifier=None):
+                 magnifier=None, tool_id="cursor",
+                 virtual_geometry=(0, 0, 1920, 1080)):
     """
     一个"什么都能被观测"的假截图窗口。
 
     注意 MagicMock 的任意属性都是真值，所以凡是被 if 判断的开关都必须显式赋值，
     否则用例会在错误的分支上通过。
+
+    tool_id=None 模拟选区尚未确认、没有工具激活的状态；ToolController.current_tool_id
+    把这种状态也归一成 "cursor"（见 tools/controller.py），和 tool_id="cursor" 是
+    同一档语义（没有绘制工具在用），两者都应让"恢复上次选区"生效。
     """
     window = MagicMock()
     window._is_closing = False
@@ -68,6 +93,10 @@ def _make_window(text_editing=False, confirmed=True, can_undo=True, can_redo=Tru
     window.scene.undo_stack.canUndo.return_value = can_undo
     window.scene.undo_stack.canRedo.return_value = can_redo
     window.magnifier_overlay = magnifier
+    window.scene.tool_controller.current_tool_id = tool_id or "cursor"
+    window.virtual_x, window.virtual_y, window.virtual_width, window.virtual_height = (
+        virtual_geometry
+    )
     return window
 
 
@@ -79,10 +108,12 @@ def _make_magnifier(should_render=True, has_cursor=True, copy_ok=True):
     return magnifier
 
 
-def _make_handler(window, move_keys=None):
+def _make_handler(window, move_keys=None, mouse_bindings=None):
     handler = ScreenshotShortcutHandler.__new__(ScreenshotShortcutHandler)
     handler._window = window
     handler._bindings = dict(BINDINGS)
+    # 鼠标键绑定表。本文件只驱动键盘事件，但 _match 两张表都要查，缺了会 AttributeError
+    handler._mouse_bindings = dict(mouse_bindings or {})
     handler._move_keys = dict(move_keys or {})
     # __init__ 被跳过，补上工具快捷键表（本文件只测动作/移动/放大镜分发）
     handler._tool_shortcuts = ()
@@ -210,10 +241,15 @@ class TestDelete:
         assert _make_handler(window).handle_key(_FakeKeyEvent(Qt.Key.Key_Delete)) is True
         window.view.smart_edit_controller.delete_selected.assert_called_once()
 
-    def test_delete_is_consumed_but_inert_while_editing_text(self):
-        """文字编辑中按 Delete 应该删字符，不能把整个图元删掉"""
+    def test_delete_is_released_to_the_text_item_while_editing_text(self):
+        """文字编辑中按 Delete 应该删字符，不能把整个图元删掉。
+
+        回归用例：之前这里断言 handle_key 返回 True（事件被吃掉）——图元没被删对了，
+        但事件也被吞了，文字框根本收不到这次按键，光标后面的字删不掉。必须返回
+        False，让事件继续往下传给 QGraphicsTextItem 自己的按键处理。
+        """
         window = _make_window(text_editing=True)
-        assert _make_handler(window).handle_key(_FakeKeyEvent(Qt.Key.Key_Delete)) is True
+        assert _make_handler(window).handle_key(_FakeKeyEvent(Qt.Key.Key_Delete)) is False
         window.view.smart_edit_controller.delete_selected.assert_not_called()
 
 
@@ -228,6 +264,57 @@ class TestTranslate:
         window = _make_window(confirmed=False)
         assert _make_handler(window).handle_key(_FakeKeyEvent(Qt.Key.Key_T, CTRL)) is False
         window.toolbar.screenshot_translate_clicked.emit.assert_not_called()
+
+
+class TestRestoreLastRegion:
+    """按住恢复上次选区键（默认 L）时的分发逻辑，见 _restore_last_region。"""
+
+    @pytest.fixture(autouse=True)
+    def _reset_region(self):
+        region_module._last_region = None
+        yield
+        region_module._last_region = None
+
+    def test_restores_the_remembered_region_when_no_tool_is_active(self):
+        set_last_region(QRect(100, 200, 300, 150))
+        window = _make_window(confirmed=False, tool_id=None)
+        assert _make_handler(window).handle_key(_FakeKeyEvent(Qt.Key.Key_L)) is True
+        window.scene.selection_model.initialize_confirmed_rect.assert_called_once_with(
+            QRectF(100, 200, 300, 150)
+        )
+
+    def test_region_on_a_monitor_left_of_the_primary_is_restored(self):
+        """副屏在主屏左边时虚拟桌面原点是负的，选区坐标也是负的，不能判成越界。"""
+        set_last_region(QRect(-1870, 50, 400, 300))
+        window = _make_window(tool_id="cursor", virtual_geometry=(-1920, 0, 3840, 1080))
+        assert _make_handler(window).handle_key(_FakeKeyEvent(Qt.Key.Key_L)) is True
+        window.scene.selection_model.initialize_confirmed_rect.assert_called_once_with(
+            QRectF(-1870, 50, 400, 300)
+        )
+
+    def test_does_nothing_while_a_drawing_tool_is_active(self):
+        """已经选中绘制工具时不响应，避免覆盖正在进行的标注。"""
+        set_last_region(QRect(0, 0, 300, 200))
+        window = _make_window(tool_id="pen")
+        assert _make_handler(window).handle_key(_FakeKeyEvent(Qt.Key.Key_L)) is False
+        window.scene.selection_model.initialize_confirmed_rect.assert_not_called()
+
+    def test_does_nothing_when_nothing_has_been_remembered_yet(self):
+        window = _make_window(tool_id="cursor")
+        assert _make_handler(window).handle_key(_FakeKeyEvent(Qt.Key.Key_L)) is False
+        window.scene.selection_model.initialize_confirmed_rect.assert_not_called()
+
+    def test_does_nothing_when_the_remembered_region_no_longer_fits_the_virtual_desktop(self):
+        """典型场景：拔掉了显示器，上次选区落在当前虚拟桌面范围之外。"""
+        set_last_region(QRect(3000, 0, 300, 200))
+        window = _make_window(tool_id="cursor", virtual_geometry=(0, 0, 1920, 1080))
+        assert _make_handler(window).handle_key(_FakeKeyEvent(Qt.Key.Key_L)) is False
+        window.scene.selection_model.initialize_confirmed_rect.assert_not_called()
+
+    def test_missing_scene_does_not_raise(self):
+        window = _make_window(tool_id="cursor")
+        window.scene = None
+        assert _make_handler(window).handle_key(_FakeKeyEvent(Qt.Key.Key_L)) is False
 
 
 class TestTextEditingPassthrough:
@@ -345,4 +432,43 @@ class TestUnhandledKeys:
         handler = _make_handler(window)
         handler._bindings = {}
         assert handler.handle_key(_FakeKeyEvent(Qt.Key.Key_Space)) is False
+        window.action_handler.handle_confirm.assert_not_called()
+
+
+class TestMiddleClickBinding:
+    """绑成中键的动作要和绑成键盘时走同一条 if 链。"""
+
+    def test_middle_click_triggers_the_bound_action(self):
+        window = _make_window(confirmed=True)
+        handler = _make_handler(window, mouse_bindings={
+            "inapp_confirm": (Qt.MouseButton.MiddleButton, NO_MOD)})
+        assert handler.handle_mouse(_FakeMouseEvent()) is True
+        window.action_handler.handle_confirm.assert_called_once()
+
+    def test_middle_click_respects_the_same_guards_as_the_keyboard(self):
+        """确认动作在选区未确认时不该触发，鼠标这条路也一样。"""
+        window = _make_window(confirmed=False)
+        handler = _make_handler(window, mouse_bindings={
+            "inapp_confirm": (Qt.MouseButton.MiddleButton, NO_MOD)})
+        assert handler.handle_mouse(_FakeMouseEvent()) is False
+        window.action_handler.handle_confirm.assert_not_called()
+
+    def test_an_unbound_middle_click_trips_no_key_only_branch(self):
+        """ESC、Enter、取色 C 都是硬编码的键专属分支，必须对鼠标事件全部落空。
+
+        它们靠 event_key() 返回 Key_unknown 落空；谁把那里改回 event.key()，
+        这条会直接 AttributeError。
+        """
+        window = _make_window(confirmed=True)
+        handler = _make_handler(window)
+        assert handler.handle_mouse(_FakeMouseEvent()) is False
+        window.cleanup_and_close.assert_not_called()
+        window.action_handler.handle_confirm.assert_not_called()
+
+    def test_other_buttons_are_not_the_middle_binding(self):
+        window = _make_window(confirmed=True)
+        handler = _make_handler(window, mouse_bindings={
+            "inapp_confirm": (Qt.MouseButton.MiddleButton, NO_MOD)})
+        left = _FakeMouseEvent(button=Qt.MouseButton.LeftButton)
+        assert handler.handle_mouse(left) is False
         window.action_handler.handle_confirm.assert_not_called()

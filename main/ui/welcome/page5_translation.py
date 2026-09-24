@@ -12,10 +12,12 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPainter, QColor, QFont, QPen
+from core.ui_scale import dialog_scaled
 from ui.fluent_lite import ComboBox, LineEdit
 from core import safe_event
 from core.i18n import make_tr
 from core.logger import log_error, log_exception, T
+from ui.settings_ui import provider_fields
 
 if __package__:
     from .base_page import (
@@ -218,12 +220,14 @@ class TranslationPage(BasePage):
         self._settings_card.setObjectName("SettingRow")
         self._settings_card.setProperty("welcomeSettingRow", True)
         card_layout = QVBoxLayout(self._settings_card)
-        card_layout.setContentsMargins(22, 18, 22, 18)
-        card_layout.setSpacing(14)
+        card_layout.setContentsMargins(
+            dialog_scaled(22), dialog_scaled(18), dialog_scaled(22), dialog_scaled(18)
+        )
+        card_layout.setSpacing(dialog_scaled(14))
         layout.addWidget(self._settings_card)
 
         self._provider_combo = ComboBox()
-        self._provider_combo.setMinimumWidth(280)
+        self._provider_combo.setMinimumWidth(dialog_scaled(280))
         self._provider_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         from translation.service import create_default_translation_service
 
@@ -231,15 +235,16 @@ class TranslationPage(BasePage):
         # 表单是手写的，结果 azure 在下拉框里选得到、下面却还留着上一个引擎的
         # 表单。现在两者同源，新增引擎不必再来这里补一次。
         provider_order = {"google": 0, "deepl": 1, "azure": 2, "amazon": 3}
+        self._registry = create_default_translation_service(
+            self._config
+        ).registry
         self._provider_metadata = sorted(
-            create_default_translation_service(
-                self._config
-            ).registry.available_providers(),
+            self._registry.available_providers(),
             key=lambda item: provider_order.get(item.provider_id, 99),
         )
         for metadata in self._provider_metadata:
             self._provider_combo.addItem(
-                metadata.display_name, metadata.provider_id
+                _tr(metadata.display_name), metadata.provider_id
             )
         saved_provider = (
             self._config.get_translation_provider()
@@ -271,7 +276,7 @@ class TranslationPage(BasePage):
 
         # 目标语言
         self._lang_combo = ComboBox()
-        self._lang_combo.setMinimumWidth(240)
+        self._lang_combo.setMinimumWidth(dialog_scaled(240))
         self._lang_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         self._populate_lang_combo()
         row, self._row_lang_lbl = self._config_row(
@@ -290,7 +295,9 @@ class TranslationPage(BasePage):
             self._row_lang_lbl.setText(_tr("翻译目标语言"))
         for label, text in getattr(self, "_credential_labels", []):
             label.setText(_tr(text))
-        for metadata in getattr(self, "_provider_metadata", ()):
+        for index, metadata in enumerate(getattr(self, "_provider_metadata", ())):
+            # 品牌名没有翻译条目，原样返回；只有「自定义」这类名字会变
+            self._provider_combo.setItemText(index, _tr(metadata.display_name))
             for field in metadata.credentials:
                 edit = self._credential_edits.get(field.config_key)
                 if edit is not None and field.placeholder:
@@ -327,7 +334,7 @@ class TranslationPage(BasePage):
         page, form = self._credential_page()
         for field in metadata.credentials:
             edit = self._credential_edit(
-                self._read_credential(field.config_key),
+                self._read_credential(field),
                 _tr(field.placeholder) if field.placeholder else "",
                 password=field.secret,
             )
@@ -337,36 +344,20 @@ class TranslationPage(BasePage):
         if metadata.help_url:
             form.addRow("", self._credential_hint(
                 f'<a href="{metadata.help_url}" '
-                f'style="color:{ACCENT};">{metadata.help_label}</a>'
+                f'style="color:{ACCENT};">{_tr(metadata.help_label)}</a>'
             ))
         self._add_provider_page(metadata.provider_id, page)
 
-    def _read_credential(self, config_key: str) -> str:
-        getter = getattr(self._config, "get_" + config_key, None)
-        if getter is None:
-            return ""
-        try:
-            return getter() or ""
-        except Exception as e:
-            log_exception(e, T("读取翻译凭据 {config_key}", config_key=config_key))
-            return ""
-
-    def _write_credential(self, config_key: str, value: str):
-        setter = getattr(self._config, "set_" + config_key, None)
-        if setter is None:
-            return
-        try:
-            setter(value)
-        except Exception as e:
-            log_exception(e, T("保存翻译凭据 {config_key}", config_key=config_key))
+    def _read_credential(self, field) -> str:
+        return provider_fields.read_config(self._config, field)
 
     def _credential_page(self):
         page = QWidget()
         page.setStyleSheet("background: transparent;")
         form = QFormLayout(page)
-        form.setContentsMargins(0, 2, 0, 2)
-        form.setHorizontalSpacing(_FORM_COLUMN_GAP)
-        form.setVerticalSpacing(7)
+        form.setContentsMargins(0, dialog_scaled(2), 0, dialog_scaled(2))
+        form.setHorizontalSpacing(dialog_scaled(_FORM_COLUMN_GAP))
+        form.setVerticalSpacing(dialog_scaled(7))
         form.setFieldGrowthPolicy(
             QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
         )
@@ -378,12 +369,12 @@ class TranslationPage(BasePage):
         row_widget.setStyleSheet("background: transparent;")
         row = QHBoxLayout(row_widget)
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(_FORM_COLUMN_GAP)
+        row.setSpacing(dialog_scaled(_FORM_COLUMN_GAP))
         label = QLabel(_tr(text), row_widget)
         set_welcome_label_style(
             label, role="primary", font_size=14, weight=600
         )
-        label.setFixedWidth(_FORM_LABEL_WIDTH)
+        label.setFixedWidth(dialog_scaled(_FORM_LABEL_WIDTH))
         control.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
@@ -406,7 +397,7 @@ class TranslationPage(BasePage):
         set_welcome_label_style(
             label, role="primary", font_size=12, weight=600
         )
-        label.setFixedWidth(_FORM_LABEL_WIDTH)
+        label.setFixedWidth(dialog_scaled(_FORM_LABEL_WIDTH))
         self._credential_labels = getattr(
             self, "_credential_labels", []
         )
@@ -444,15 +435,20 @@ class TranslationPage(BasePage):
         # borders.  Keep a small layout allowance as well so the final
         # row/focus border is never clipped at fractional DPI scales.
         self._credential_stack.setFixedHeight(
-            max(68, page.sizeHint().height() + 12)
+            max(dialog_scaled(68), page.sizeHint().height() + dialog_scaled(12))
         )
 
     def save(self):
         provider_id = self._provider_combo.currentData() or "google"
         if hasattr(self._config, "set_translation_provider"):
             self._config.set_translation_provider(provider_id)
-        for config_key, edit in self._credential_edits.items():
-            self._write_credential(config_key, edit.text().strip())
+        # 和设置页走同一套读写。以前两个页面各有一份反射实现，
+        # 行为要靠人去对齐（裁不裁空白、异常怎么吞），对不齐也不会报错。
+        provider_fields.save_from(
+            self._config,
+            provider_fields.all_fields(self._registry),
+            self._credential_edits,
+        )
         lang = self._lang_combo.currentData()
         if lang:
             self._config.set_app_setting("translation_target_lang", lang)

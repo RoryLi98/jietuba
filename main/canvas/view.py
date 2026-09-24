@@ -20,6 +20,34 @@ from core import log_debug, log_info, log_warning, log_error, safe_event
 from core.logger import T
 
 
+def _rect_area(rect) -> int:
+    """[x1, y1, x2, y2] 形式矩形的面积，用于比较嵌套链上相邻两级的大小。"""
+    return (rect[2] - rect[0]) * (rect[3] - rect[1])
+
+
+# 两级之间每条边都不超过这个差距就算同一级。高分屏上一个逻辑像素的边框是两个
+# 物理像素，取 1 会漏掉最常见的那种父子差。
+LEVEL_TOLERANCE_PX = 2
+
+
+def _append_level(chain: list, rect: list):
+    """把一级追加到由细到粗的嵌套链末尾，和上一级没有实质区别的并掉。
+
+    两种情形都会让滚轮空转一格，所以用同一条规则挡掉：嵌套树里父子常因为
+    border、padding 报出只差一两个像素的矩形；而横跨窗口或屏幕边界的矩形裁剪
+    之后可能比里面一级还小，那它就不是"更外面的一级"。
+    """
+    if not chain:
+        chain.append(rect)
+        return
+    previous = chain[-1]
+    if _rect_area(rect) < _rect_area(previous):
+        return
+    if all(abs(rect[i] - previous[i]) <= LEVEL_TOLERANCE_PX for i in range(4)):
+        return
+    chain.append(rect)
+
+
 class CanvasView(QGraphicsView):
     """
     画布视图
@@ -71,20 +99,21 @@ class CanvasView(QGraphicsView):
         self.viewport().setMouseTracking(True)
         
         # 交互状态
-        self.is_selecting = False  # 是否在选择区域
-        self.is_drawing = False    # 是否在绘制
-        self.is_dragging_selection = False # 是否正在拖拽选区（用于区分点击和拖拽）
         
         # 启用鼠标追踪以支持悬停检测
         self.setMouseTracking(True)
         
-        self.start_pos = QPointF()
         
         # 智能选区相关
         self.smart_selection_enabled = False
+        self.smart_selection_drills_to_elements = False  # 是否在窗口之下再取控件
+        self.smart_selection_animated = False  # 选区跳转时补间，由设置开启
         self.window_finder = None  # WindowFinder 实例（按需创建）
-        self._last_smart_selection_pos = None  # 上次智能选区触发的位置（防抖）
-        self._last_smart_selection_rect = QRectF()  # 缓存上次的智能选区矩形
+        self.element_finder = None  # UIAElementFinder（按需创建）
+        self._smart_selection_level = 0  # 滚轮选的粒度：0 是最细一级，往上是包围它的矩形
+        self._smart_selection_level_anchor = None  # 档位锚定在哪个最细矩形上
+        from canvas.smart_selection_anim import SmartSelectionAnimator
+        self._smart_selection_anim = SmartSelectionAnimator(self._set_selection_rect_now, self)
         
         # 初始化光标管理器
         from tools.cursor_manager import CursorManager
@@ -125,16 +154,16 @@ class CanvasView(QGraphicsView):
             self.smart_edit_controller.set_tool(current_tool.id)
         
         # Pending 单击文字进入编辑的状态
-        self._pending_text_edit_item = None
-        self._pending_text_edit_press_pos = None
-        self._pending_text_edit_moved = False
-        self._text_drag_hover_item = None
-        self._text_drag_active = False
-        self._text_drag_item = None
-        self._text_drag_last_scene_pos = None
-        self._text_drag_cursor_active = False
-        self._manual_item_drag_active = False
-        self._manual_item_drag_last_scene_pos = None
+
+        # 两种由 View 全程接管的手势，各自管着自己那一摊状态（见 canvas/gestures.py）
+        from canvas.gestures import (
+            DrawingStroke, ManualItemDrag, PendingTextEdit, SelectionDrag, TextEdgeDrag,
+        )
+        self.drawing = DrawingStroke(self)
+        self.selection_drag = SelectionDrag(self)
+        self.text_drag = TextEdgeDrag(self)
+        self.item_drag = ManualItemDrag(self)
+        self.pending_text_edit = PendingTextEdit(self)
 
         # 控制点画在 viewport 之上的独立浮层里，不进 QGraphicsScene 的渲染管线。
         # 这样内容层的脏区只需要描述内容，不必再为"手柄能凸出多远"外扩。
@@ -188,7 +217,7 @@ class CanvasView(QGraphicsView):
         """断开会话级信号和引用，避免旧 view 在销毁期收到晚到回调。"""
         if self._is_closed:
             return
-        self._finish_manual_item_drag(commit=True)
+        self.item_drag.finish(commit=True)
         self._is_closed = True
 
         from core.qt_utils import safe_disconnect
@@ -239,6 +268,13 @@ class CanvasView(QGraphicsView):
         if getattr(self, "window_finder", None):
             self.window_finder.clear()
             self.window_finder = None
+
+        if getattr(self, "element_finder", None):
+            self.element_finder.close()
+            self.element_finder = None
+
+        if getattr(self, "_smart_selection_anim", None):
+            self._smart_selection_anim.stop()
 
         self.cursor_manager = None
         self.smart_edit_controller = None
@@ -335,93 +371,247 @@ class CanvasView(QGraphicsView):
     # 智能选区功能
     # ========================================================================
     
-    def enable_smart_selection(self, enabled: bool):
+    def enable_smart_selection(self, mode):
+        """启用智能选区。
+
+        控件不是与窗口并列的另一种模式，而是窗口之下的一级粒度：``element``
+        在窗口矩形的基础上再下钻一级取 UI Automation 的控件矩形，UIA 缺失或
+        目标没有暴露无障碍树时，这一级自然不存在，剩下的就是窗口检测。保留
+        bool 入参是为了兼容旧调用方：True 等同于 ``element``。
         """
-        启用/禁用智能选区功能
-        
-        Args:
-            enabled: True=启用，False=禁用
-        """
-        self.smart_selection_enabled = enabled
-        
-        if enabled:
-            # 检查依赖
+        if isinstance(mode, bool):
+            mode = "element" if mode else "off"
+        mode = str(mode or "off").lower()
+        if mode not in {"off", "window", "element"}:
+            mode = "off"
+
+        self.smart_selection_enabled = mode != "off"
+        self.smart_selection_drills_to_elements = mode == "element"
+        # 每次截图都从最细一级开始，不继承上一次滚轮停在哪一档。
+        self._smart_selection_level = 0
+        self._smart_selection_level_anchor = None
+
+        if self.element_finder:
+            self.element_finder.close()
+            self.element_finder = None
+
+        if self.smart_selection_enabled:
+            # 检查窗口检测依赖
             from capture.window_finder import is_smart_selection_available
             if not is_smart_selection_available():
                 log_warning(T("win32gui 未安装，智能选区功能不可用"), "SmartSelect")
                 self.smart_selection_enabled = False
+                self.smart_selection_drills_to_elements = False
                 return
-            
+
             # 创建 WindowFinder 实例
             if not self.window_finder:
                 from capture.window_finder import WindowFinder
-                # 新架构 CanvasScene 使用全局坐标系（与屏幕物理坐标一致）
-                # 因此不需要减去偏移量，直接使用全局坐标即可
+                # CanvasScene 使用物理屏幕坐标，因此不需要坐标偏移。
                 self.window_finder = WindowFinder(0, 0)
-            
-            # 枚举窗口
+
+            # 截图浮层显示前先缓存底层 HWND；UIA 后续以该句柄为根，避免
+            # ElementFromPoint 命中全屏截图浮层自身。
             self.window_finder.find_windows()
-            log_debug(T("已启用，找到 {window_count} 个窗口", window_count=len(self.window_finder.windows)), "SmartSelect")
+            log_debug(
+                T("已启用，找到 {window_count} 个窗口", window_count=len(self.window_finder.windows)),
+                "SmartSelect",
+            )
+
+            if self.smart_selection_drills_to_elements:
+                from capture.uia_element_finder import UIAElementFinder, is_uia_available
+
+                if is_uia_available():
+                    self.element_finder = UIAElementFinder(self)
+                    self.element_finder.cache_updated.connect(self._on_uia_cache_updated)
+                    cursor_pos = QCursor.pos()
+                    window_hit = self.window_finder.find_window_at_point_info(
+                        cursor_pos.x(), cursor_pos.y()
+                    )
+                    if window_hit:
+                        self.element_finder.request_refresh_if_needed(window_hit[0])
+                    # 光标底下那个插过队了，其余按"露出来多少"预热：用户挪鼠标
+                    # 的这几百毫秒里把它们扫完，移过去时就没有等待可言。被完全
+                    # 遮住的窗口选都选不中，不在其列。
+                    self.element_finder.prewarm(
+                        self.window_finder.windows_by_exposed_area()
+                    )
+                else:
+                    # 缺少可选依赖时只是少了下钻这一级，不该让截图失败。
+                    self.smart_selection_drills_to_elements = False
+                    log_warning(T("comtypes 未安装，已回退为窗口检测"), "SmartSelect")
         else:
             log_debug(T("已禁用"), "SmartSelect")
+            self._smart_selection_anim.stop()
             if self.window_finder:
                 self.window_finder.clear()
     
     def _get_smart_selection_rect(self, scene_pos: QPointF) -> QRectF:
-        """
-        获取智能选区矩形（鼠标位置的窗口边界）
-        
-        优化策略：
-        1. 防抖：只在鼠标移动超过阈值时才触发查找
-        2. 缓存：相同位置直接返回缓存结果
-        
-        Args:
-            scene_pos: 鼠标在场景中的位置
-        
-        Returns:
-            窗口矩形（场景坐标）
+        """返回鼠标下方的智能选区矩形（物理屏幕坐标），截图范围之外的部分裁掉。
+
+        不缓存上一次的结果：selection_model.set_rect 本身对相同矩形短路，而
+        命中测试只是在几百个矩形里取最小，按距离防抖省不下什么，却要为窗口和
+        控件两种粒度各配一套阈值——控件小到几像素，窗口大到整屏。
         """
         if not self.smart_selection_enabled or not self.window_finder:
             return QRectF()
-        
-        # 优化1：防抖 - 鼠标移动小于阈值不触发查找
-        # 智能选区结果是窗口矩形（通常几百像素宽），小幅移动结果不会变
-        if self._last_smart_selection_pos is not None:
-            dist = (scene_pos - self._last_smart_selection_pos).manhattanLength()
-            if dist < 8:  # 阈值：8px（约0.5mm物理距离，跨窗口边界延迟肉眼无感）
-                return self._last_smart_selection_rect
-        
-        # 查找鼠标位置的窗口
-        x = int(scene_pos.x())
-        y = int(scene_pos.y())
-        
-        # 设置备选矩形为全场景（使用场景真实坐标，包含负坐标显示器）
+
+        x, y = int(scene_pos.x()), int(scene_pos.y())
+        # 备选矩形取全场景（场景用物理屏幕坐标，含负坐标显示器）
         scene_rect = self.canvas_scene.scene_rect
-        fallback_rect = [
+        capture_rect = [
             int(scene_rect.x()),
             int(scene_rect.y()),
             int(scene_rect.x() + scene_rect.width()),
-            int(scene_rect.y() + scene_rect.height())
+            int(scene_rect.y() + scene_rect.height()),
         ]
-        
-        window_rect = self.window_finder.find_window_at_point(x, y, fallback_rect)
-        
-        # 转换为 QRectF
-        if window_rect:
-            result = QRectF(
-                float(window_rect[0]),
-                float(window_rect[1]),
-                float(window_rect[2] - window_rect[0]),
-                float(window_rect[3] - window_rect[1])
+
+        rect = self._pick_smart_selection_level(
+            self._smart_selection_chain(x, y, capture_rect)
+        )
+        if not rect:
+            return QRectF()
+
+        return QRectF(
+            float(rect[0]),
+            float(rect[1]),
+            float(rect[2] - rect[0]),
+            float(rect[3] - rect[1]),
+        ).intersected(scene_rect)
+
+    def _smart_selection_chain(self, x: int, y: int, capture_rect):
+        """鼠标下方由细到粗的嵌套矩形链：控件 → 窗口 → 鼠标所在那块屏幕。
+
+        屏幕是最外一级，鼠标不在任何窗口上时也是唯一一级——滚到头总能框住整屏。
+        """
+        chain = []
+        window_hit = self.window_finder.find_window_at_point_info(x, y)
+        if window_hit:
+            for rect in self._element_rects(window_hit, x, y, capture_rect):
+                _append_level(chain, rect)
+            _append_level(chain, list(window_hit[1]))
+
+        screen = self.window_finder.find_monitor_rect_at_point(x, y)
+        _append_level(chain, [
+            max(screen[0], capture_rect[0]), max(screen[1], capture_rect[1]),
+            min(screen[2], capture_rect[2]), min(screen[3], capture_rect[3]),
+        ])
+        return chain
+
+    def _element_rects(self, window_hit, x: int, y: int, capture_rect):
+        """窗口之下命中该点的控件矩形，由细到粗。
+
+        扫描一个窗口要几十到上百毫秒，期间这一级是空的、由窗口顶着，结果回来时
+        由 cache_updated 收紧到控件——这一级缺席时的表现就是纯窗口检测。
+        """
+        hwnd, window_rect, _title = window_hit
+        if not self.smart_selection_drills_to_elements or not self.element_finder:
+            return []
+
+        min_size = self.canvas_scene.selection_model.min_size
+        elements = self.element_finder.elements_at(
+            hwnd, x, y, min_size=(min_size.width(), min_size.height())
+        )
+        self.element_finder.request_refresh_if_needed(hwnd)
+
+        rects = []
+        for element in elements:
+            left, top, right, bottom = element.rect
+            clipped = [max(left, window_rect[0], capture_rect[0]),
+                       max(top, window_rect[1], capture_rect[1]),
+                       min(right, window_rect[2], capture_rect[2]),
+                       min(bottom, window_rect[3], capture_rect[3])]
+            # 控件可能横跨窗口或截图边界，裁完剩下的那块未必还盖着鼠标，也可能
+            # 塌到最小选区以下——这样的控件不该占链上一级，外面一级会顶替它。
+            if (clipped[0] <= x < clipped[2] and clipped[1] <= y < clipped[3]
+                    and clipped[2] - clipped[0] >= min_size.width()
+                    and clipped[3] - clipped[1] >= min_size.height()):
+                rects.append(clipped)
+        return rects
+
+    def _pick_smart_selection_level(self, chain):
+        """按当前档位从嵌套链里取一级，越界的档位贴住链的两端。
+
+        档位锚在链最细一级上：鼠标在同一个控件里移动时保持滚轮选好的粒度，
+        移到别的控件才重新从最细一级开始。锚成位置的话，挪一像素就会把用户
+        刚滚出来的粒度清掉。还没有锚只是这个位置第一次算链——滚轮可能就发生在
+        这一帧之前，这时归零会把用户刚滚的那一格吃掉。
+        """
+        if not chain:
+            return None
+        anchor = tuple(chain[0])
+        if self._smart_selection_level_anchor not in (None, anchor):
+            self._smart_selection_level = 0
+        self._smart_selection_level_anchor = anchor
+        self._smart_selection_level = min(self._smart_selection_level, len(chain) - 1)
+        return chain[self._smart_selection_level]
+
+    def _adjust_smart_selection_level(self, delta: int, scene_pos: QPointF) -> bool:
+        """滚轮切粒度：向上滚选包围当前矩形的更大一级，向下滚回到更细一级。
+
+        滚轮归谁只看检测方式这一个开关：开着控件检测就一直归粒度，哪怕鼠标底下
+        只有一级、滚了没有变化；关着就一直归放大镜倍数。按链上有几级动态决定的
+        话，同一个动作在不同位置表现不同，而"有几级"用户根本看不见。选区确认
+        或正在拉框时没有链可走，那时仍归放大镜。
+        """
+        if (self._is_closed or not self.smart_selection_drills_to_elements
+                or self.canvas_scene is None
+                or self.canvas_scene.selection_model.is_confirmed
+                or self.selection_drag.active):
+            return False
+
+        self._smart_selection_level = max(
+            0, self._smart_selection_level + (1 if delta > 0 else -1)
+        )
+        # 走 hover 这条正路，换档和鼠标移动引起的选区更新是同一件事。
+        self._handle_hover_preview(scene_pos)
+        return True
+
+    @safe_event
+    def _on_uia_cache_updated(self, hwnd: int):
+        """扫描结果迟到，按当前鼠标位置把选区从窗口矩形收紧到控件矩形。
+
+        用户已经滚出粒度时不收紧：扫描要几十到上百毫秒，正好覆盖"移过去马上滚
+        一格"这个节奏，这时候结果一回来链的最细一级就换了人，档位锚不住会归零，
+        用户刚滚到的整屏会当场塌回一个小按钮。
+        """
+        if (self._is_closed or not self.smart_selection_enabled
+                or not self.smart_selection_drills_to_elements
+                or self._smart_selection_level > 0
+                or not self.window_finder or not self.canvas_scene
+                or self.canvas_scene.selection_model.is_confirmed
+                or self.selection_drag.active):
+            return
+
+        cursor_pos = QCursor.pos()
+        window_hit = self.window_finder.find_window_at_point_info(
+            cursor_pos.x(), cursor_pos.y()
+        )
+        if window_hit and window_hit[0] == hwnd:
+            # 走 hover 这条正路：迟到的结果和鼠标移动引起的更新没有区别，
+            # 收紧同样该补间，否则选区会在原地硬跳一下。
+            self._handle_hover_preview(QPointF(cursor_pos.x(), cursor_pos.y()))
+
+    def _set_selection_rect_now(self, rect: QRectF):
+        """补间每帧的落点。视图关闭后 canvas_scene 会被置空，定时器可能还差一拍。"""
+        if self._is_closed or self.canvas_scene is None:
+            return
+        self.canvas_scene.selection_model.set_rect(rect)
+    
+    def _apply_smart_selection_rect(self, rect: QRectF, *, animate: bool):
+        """把智能选区矩形送进 selection_model。
+
+        animate=False 用于按下、首次出现这类必须落在真实矩形上的时机——补间
+        中途的矩形不对应任何一个窗口或控件，此时截图会截出插值结果。hover 一律
+        补间：窗口和控件用的是同一条路径，位移小于一屏的跳转由动画自身按位移
+        判定要不要走完（见 SmartSelectionAnimator.MIN_TRAVEL_PX）。
+        """
+        if animate and self.smart_selection_animated:
+            self._smart_selection_anim.animate_to(
+                self.canvas_scene.selection_model.rect(), rect
             )
         else:
-            result = QRectF()
-        
-        # 优化2：缓存结果
-        self._last_smart_selection_pos = scene_pos
-        self._last_smart_selection_rect = result
-        
-        return result
+            self._smart_selection_anim.snap_to(rect)
     
     # ========================================================================
     # 智能编辑控制器回调
@@ -429,7 +619,7 @@ class CanvasView(QGraphicsView):
     
     def _on_editing_cleanup(self):
         """响应 editing_cleanup_requested 信号，清除编辑状态"""
-        self._finish_manual_item_drag(commit=True)
+        self.item_drag.finish(commit=True)
         if self.smart_edit_controller.selected_item:
             log_debug(T("取消智能编辑选择"), "CanvasView")
             self.smart_edit_controller.clear_selection(suppress_block=True)
@@ -437,7 +627,7 @@ class CanvasView(QGraphicsView):
             self.cursor_manager.hide_brush_indicator()
 
     def _on_tool_changed_for_edit(self, tool_id: str):
-       self._finish_manual_item_drag(commit=True)
+       self.item_drag.finish(commit=True)
        self.smart_edit_controller.set_tool(tool_id)
 
        # 工具切换时立即更新光标
@@ -498,7 +688,7 @@ class CanvasView(QGraphicsView):
         if item:
             log_debug(T("选中: {item_type}", item_type=type(item).__name__), "SmartEdit")
         else:
-            self._finish_manual_item_drag(commit=False)
+            self.item_drag.finish(commit=False)
             log_debug(T("取消选择"), "SmartEdit")
             self._sync_highlighter_panel_mode()
         self._sync_selection_style_to_toolbar(item)
@@ -771,22 +961,11 @@ class CanvasView(QGraphicsView):
         scene_pos = self.mapToScene(event.pos())
         self._double_click_candidate = None
         # 新的一次点击开始前重置单击编辑状态
-        self._clear_pending_text_edit()
+        self.pending_text_edit.clear()
         
         if not self.canvas_scene.selection_model.is_confirmed:
             # 选区未确认：拖拽创建选区
-            self.is_selecting = True
-            self.is_dragging_selection = False # 重置拖拽状态
-            self.start_pos = scene_pos
-            self.canvas_scene.selection_model.activate()
-            # 开始拖拽，隐藏控制点（降低渲染压力）
-            self.canvas_scene.selection_model.start_dragging()
-            
-            # 智能选区：点击时立即更新选区（防止 activate 清除选区）
-            if self.smart_selection_enabled:
-                smart_rect = self._get_smart_selection_rect(scene_pos)
-                if not smart_rect.isEmpty():
-                    self.canvas_scene.selection_model.set_rect(smart_rect)
+            self.selection_drag.begin(scene_pos)
         else:
             # 选区已确认：优先尝试智能编辑
             # 先快照"按下之前"的可回滚状态，但只有穿过下面的编辑分支
@@ -794,12 +973,12 @@ class CanvasView(QGraphicsView):
             double_click_candidate = self._build_double_click_candidate(
                 scene_pos, event
             )
-            current_tool = self.canvas_scene.tool_controller.current_tool
-            current_tool_id = current_tool.id if current_tool else "cursor"
-            
+            current_tool_id = self.canvas_scene.tool_controller.current_tool_id
+
             log_debug(T("选区已确认，当前工具: {current_tool_id}", current_tool_id=current_tool_id), "CanvasView")
             
-            # 步骤0：如果正在编辑文本，点击外部只确认编辑，不创建新文本
+            # 步骤0：正在编辑文本时，点击外部先结算这次编辑，不创建新文本；
+            # 若点在另一段文字上，同一次点击顺势切过去继续编辑那一段
             if self._is_text_editing():
                 focus_item = self._get_active_text_item()
                 if focus_item is None:
@@ -814,21 +993,26 @@ class CanvasView(QGraphicsView):
                     log_debug("文字宽度控制点拖拽被处理", "CanvasView")
                     return
                 if isinstance(focus_item, QGraphicsTextItem) and \
-                        self._is_point_on_text_edge(focus_item, scene_pos):
-                    self._begin_text_drag(focus_item, scene_pos)
+                        self.text_drag.is_point_on_edge(focus_item, scene_pos):
+                    self.text_drag.begin(focus_item, scene_pos)
                     return
                 # 检查点击位置是否在当前编辑的文本框内
                 if focus_item.contains(focus_item.mapFromScene(scene_pos)):
                     # 点击在文本框内，正常传递事件（移动光标等）
                     super().mousePressEvent(event)
                     return
-                else:
-                    # 点击在文本框外，清除焦点（触发 focusOutEvent 自动确认/删除）
-                    log_debug(T("结束文本编辑"), "CanvasView")
-                    focus_item.clearFocus()
-                    self._finalize_text_edit_state(focus_item)
-                    # 阻止本次点击触发新绘图
+                # 点击在文本框外：先让当前这段结束编辑（失焦时图元自己结算内容）
+                switch_target = self._text_switch_target(
+                    scene_pos, focus_item, event.modifiers()
+                )
+                self._end_text_edit(focus_item)
+                if switch_target is None or switch_target.scene() is None:
+                    # 没点到别的文字，这一下只用来确认编辑，不再触发新绘图
                     return
+                # 点到了另一段文字：同一次点击继续往下走完选中流程，单击就切过去，
+                # 而不是被吞掉、还要再点第二下。这一下已经有了自己的用途，不能
+                # 再当"双击确认截图"的候选（步骤1 之后才会赋值给 self）。
+                double_click_candidate = None
 
             # 步骤1：优先检查控制点拖拽（如果已选中图元）
             edit_handled = self.smart_edit_controller.handle_edit_press(
@@ -859,12 +1043,11 @@ class CanvasView(QGraphicsView):
                 # 选中了图元，阻止绘图
                 # 传递给 Scene（让图元处理拖拽）
                 log_debug(T("图元选择被处理，阻止绘图"), "CanvasView")
-                self._maybe_prepare_text_edit(event, scene_pos)
+                self.pending_text_edit.arm(event, scene_pos)
                 if self.smart_edit_controller.press_requires_manual_dispatch:
                     # Qt 默认把事件交给 z 轴最上方图元；当控制器有意向下
                     # 命中兼容目标时，由 View 接管本次拖动，避免顶层文字抢走事件。
-                    self._manual_item_drag_active = True
-                    self._manual_item_drag_last_scene_pos = QPointF(scene_pos)
+                    self.item_drag.begin(scene_pos)
                     event.accept()
                     return
                 super().mousePressEvent(event)
@@ -882,12 +1065,7 @@ class CanvasView(QGraphicsView):
             if is_drawing_tool:
                 # 绘图工具激活：绘图
                 log_debug(T("开始绘图"), "CanvasView")
-                self.is_drawing = True
-                # 立即隐藏放大镜，避免 hide() 和首帧绘图重绘叠加导致卡顿
-                self._clear_magnifier_overlay()
-                started = self.canvas_scene.tool_controller.on_press(scene_pos, event.button())
-                if started is False:
-                    self.is_drawing = False
+                self.drawing.begin(scene_pos, event.button())
             else:
                 # cursor 工具：传递给 Scene（可能拖拽窗口/选区）
                 log_debug(T("cursor工具，传递给Scene"), "CanvasView")
@@ -937,9 +1115,9 @@ class CanvasView(QGraphicsView):
             return None
         if event.modifiers() != Qt.KeyboardModifier.NoModifier:
             return None
-        if self.is_selecting or self.is_drawing or self.is_dragging_selection:
+        if self.selection_drag.active or self.drawing.active or self.selection_drag.dragging:
             return None
-        if self._text_drag_active:
+        if self.text_drag.active:
             return None
 
         selection = self.canvas_scene.selection_model.rect()
@@ -968,7 +1146,7 @@ class CanvasView(QGraphicsView):
             return False
         if event.modifiers() != Qt.KeyboardModifier.NoModifier:
             return False
-        if candidate["dragged"] or self.is_drawing or self.is_selecting:
+        if candidate["dragged"] or self.drawing.active or self.selection_drag.active:
             return False
 
         original_selection = candidate["selection_rect"]
@@ -987,6 +1165,15 @@ class CanvasView(QGraphicsView):
         handler = getattr(self.window(), "_handle_confirm", None)
         if not callable(handler):
             return False
+
+        # 下面靠撤销栈的前后差异判断第一下点击留下了什么，前提是它的持久改动
+        # 都已经落到栈上。文字编辑是例外：内容要到失焦才结算（临时文字到那时
+        # 才入栈或被丢弃）。有候选就说明第一下点击前没有在编辑文字（编辑中的
+        # 点击走 mousePressEvent 的步骤 0，不产生候选），所以此刻的编辑一定是
+        # 第一下点击开启的——先像"点击外部"一样结束它，再看差异。
+        active_text_item = self._get_active_text_item()
+        if active_text_item is not None:
+            self._end_text_edit(active_text_item)
 
         stack = self.canvas_scene.undo_stack
         command_to_undo = None
@@ -1028,7 +1215,7 @@ class CanvasView(QGraphicsView):
         # A crop handle can mutate the selection without an undo command.
         self.canvas_scene.selection_model.set_rect(QRectF(original_selection))
         self.canvas_scene.selection_model.stop_dragging()
-        self.is_dragging_selection = False
+        self.selection_drag.dragging = False
 
         event.accept()
         handler()
@@ -1043,9 +1230,9 @@ class CanvasView(QGraphicsView):
         鼠标移动事件 - 状态机路由
         
         状态优先级（互斥）：
-        1. 创建选区 (is_selecting)
-        2. 绘图中 (is_drawing)
-        3. 文字拖拽 (_text_drag_active)
+        1. 创建选区 (selection_drag.active)
+        2. 绘图中 (drawing.active)
+        3. 文字拖拽 (text_drag.active)
         4. 选区已确认 - 编辑模式
         5. 选区未确认 - 悬停预览
         """
@@ -1064,21 +1251,21 @@ class CanvasView(QGraphicsView):
         # ====================================================================
         # 状态1：创建选区（拖拽选框）
         # ====================================================================
-        if self.is_selecting:
-            self._handle_selection_drag(scene_pos)
+        if self.selection_drag.active:
+            self.selection_drag.perform(scene_pos)
             return
         
         # ====================================================================
         # 状态2：绘图中（使用画笔/矩形/箭头等工具）
         # ====================================================================
-        if self.is_drawing:
-            self._handle_drawing_move(scene_pos)
+        if self.drawing.active:
+            self.drawing.perform(scene_pos)
             return
         
         # ====================================================================
         # 状态3：文字拖拽（拖动文字框边缘调整大小）
         # ====================================================================
-        if self._text_drag_active:
+        if self.text_drag.active:
             self._handle_text_drag_move(scene_pos)
             return
         
@@ -1098,41 +1285,11 @@ class CanvasView(QGraphicsView):
     # 状态处理器：创建选区
     # ========================================================================
     
-    def _handle_selection_drag(self, scene_pos: QPointF):
-        """处理选区拖拽（状态1）"""
-        self._update_magnifier_overlay(scene_pos)
-        
-        if not self.is_dragging_selection:
-            dist = (scene_pos - self.start_pos).manhattanLength()
-            if dist > 10:
-                self.is_dragging_selection = True
-
-        if self.is_dragging_selection:
-            rect = QRectF(self.start_pos, scene_pos).normalized()
-            self.canvas_scene.selection_model.set_rect(rect)
-    
-    # ========================================================================
-    # 状态处理器：绘图模式
-    # ========================================================================
-    
-    def _handle_drawing_move(self, scene_pos: QPointF):
-        """处理绘图工具移动（状态2）
-        
-        绘图中放大镜已在 mousePressEvent 开始时隐藏，
-        不再每帧调用 _update_magnifier_overlay 做无用判断。
-        """
-        self.canvas_scene.tool_controller.on_move(scene_pos)
-        self._apply_tool_cursor()
-    
-    # ========================================================================
-    # 状态处理器：文字拖拽
-    # ========================================================================
-    
     def _handle_text_drag_move(self, scene_pos: QPointF):
         """处理文字框边缘拖拽（状态3）"""
         self._update_magnifier_overlay(scene_pos)
-        self._set_text_drag_cursor(True)
-        self._perform_text_drag(scene_pos)
+        self.text_drag.set_cursor(True)
+        self.text_drag.perform(scene_pos)
     
     # ========================================================================
     # 状态处理器：编辑模式（选区已确认）
@@ -1140,18 +1297,18 @@ class CanvasView(QGraphicsView):
     
     def _handle_edit_mode_move(self, event, scene_pos: QPointF):
         """处理编辑模式的鼠标移动（状态4）"""
-        self._track_pending_text_edit_movement(event)
+        self.pending_text_edit.track(event)
         self._update_magnifier_overlay(scene_pos)
         
         # 检查是否正在编辑文字（需要检测文字框边缘拖拽）
         # 左键按住时用户可能在拖拽选文字，不应检测边缘拖拽 hover
         is_left_pressed = bool(event.buttons() & Qt.MouseButton.LeftButton)
         if self._is_text_editing() and not is_left_pressed:
-            self._update_text_drag_hover(scene_pos)
+            self.text_drag.update_hover(scene_pos)
 
         # 向下命中的兼容图元由 View 全程拥有这次手势，优先于顶层图元
         # 的控制点/hover 分发。
-        if self._manual_item_drag_active and is_left_pressed:
+        if self.item_drag.active and is_left_pressed:
             self._handle_selected_item_drag(event, scene_pos)
             return
         
@@ -1216,18 +1373,10 @@ class CanvasView(QGraphicsView):
         )
         is_left_button_pressed = bool(event.buttons() & Qt.MouseButton.LeftButton)
 
-        if self._manual_item_drag_active and is_left_button_pressed:
-            self.smart_edit_controller.handle_move(event.pos(), scene_pos)
-            if self.smart_edit_controller.is_dragging:
-                last_pos = self._manual_item_drag_last_scene_pos or scene_pos
-                delta = scene_pos - last_pos
-                if not delta.isNull():
-                    selected_item.moveBy(delta.x(), delta.y())
-                self._manual_item_drag_last_scene_pos = QPointF(scene_pos)
-                self._update_edit_handles()
-            self.setCursor(Qt.CursorShape.SizeAllCursor)
+        if self.item_drag.active and is_left_button_pressed:
+            self.item_drag.perform(event, scene_pos)
             return True
-        
+
         if is_left_button_pressed:
             # 按住左键 → 正在拖拽
             # 但如果选中的是文字图元且处于编辑模式，左键拖拽是在选文字，不是移动图元
@@ -1255,31 +1404,6 @@ class CanvasView(QGraphicsView):
         
         return False
 
-    def _finish_manual_item_drag(self, *, commit: bool):
-        """Finish/cancel View-owned dragging and clear both sides of gesture state."""
-        controller = getattr(self, "smart_edit_controller", None)
-        if not self._manual_item_drag_active:
-            if controller is not None:
-                controller.press_requires_manual_dispatch = False
-            return
-
-        if controller is not None:
-            if commit and controller.is_dragging and controller.selected_item is not None:
-                controller._finalize_move_edit()
-            controller.is_dragging = False
-            controller.drag_start_pos = None
-            controller._move_initial_state = None
-            controller.press_requires_manual_dispatch = False
-            mode_type = type(controller.mode)
-            if controller.mode == mode_type.DRAGGING_MOVE:
-                controller.mode = mode_type.SELECTED
-            editor = getattr(controller, "layer_editor", None)
-            if editor is not None:
-                editor.is_moving_item = False
-
-        self._manual_item_drag_active = False
-        self._manual_item_drag_last_scene_pos = None
-    
     def _handle_edit_hover_detection(self, event, scene_pos: QPointF):
         """处理悬停检测（编辑模式子状态4）"""
         is_hovering = self.smart_edit_controller.handle_hover(event.pos(), scene_pos)
@@ -1304,11 +1428,13 @@ class CanvasView(QGraphicsView):
                 self.canvas_scene.selection_model.activate()
                 if not self.canvas_scene.selection_model.is_dragging:
                     self.canvas_scene.selection_model.start_dragging()
-                self.canvas_scene.selection_model.set_rect(smart_rect)
+                self._apply_smart_selection_rect(smart_rect, animate=True)
             else:
+                self._smart_selection_anim.stop()
                 if self.canvas_scene.selection_model.is_dragging:
                     self.canvas_scene.selection_model.stop_dragging()
         else:
+            self._smart_selection_anim.stop()
             if self.canvas_scene.selection_model.is_dragging:
                 self.canvas_scene.selection_model.stop_dragging()
     
@@ -1344,35 +1470,27 @@ class CanvasView(QGraphicsView):
         鼠标释放
         
         逻辑：
-        1. is_selecting=True → 完成选区创建，确认选区
-        2. is_drawing=True → 完成绘图，调用工具的 on_release
+        1. selection_drag.active → 完成选区创建，确认选区
+        2. drawing.active → 完成绘图，调用工具的 on_release
         3. 智能编辑控制点拖拽 → LayerEditor 处理
         4. 其他情况 → 智能编辑 + 传递给 Scene
         """
         scene_pos = self.mapToScene(event.pos())
         
-        if self._text_drag_active:
-            self._end_text_drag()
+        if self.text_drag.active:
+            self.text_drag.end()
             return
 
-        if self.is_selecting:
-            self.is_selecting = False
-            self.is_dragging_selection = False
-            # 结束拖拽，显示控制点
-            self.canvas_scene.selection_model.stop_dragging()
-            # 确认选区
-            self.canvas_scene.confirm_selection()
+        if self.selection_drag.active:
+            self.selection_drag.end()
             return
         
-        if self.is_drawing:
-            self.is_drawing = False
-            self.canvas_scene.tool_controller.on_release(scene_pos)
-            # 绘图结束，恢复放大镜跟踪（如果此时 _should_render 允许显示）
-            self._update_magnifier_overlay(scene_pos)
+        if self.drawing.active:
+            self.drawing.end(scene_pos)
             return
 
-        if self._manual_item_drag_active:
-            self._finish_manual_item_drag(commit=True)
+        if self.item_drag.active:
+            self.item_drag.finish(commit=True)
             if self.smart_edit_controller.selected_item:
                 self._update_edit_handles()
             event.accept()
@@ -1394,28 +1512,34 @@ class CanvasView(QGraphicsView):
         if self.smart_edit_controller.selected_item:
             self._update_edit_handles()
         
-        self._maybe_enter_text_edit_on_release(event, scene_pos)
+        self.pending_text_edit.settle(event, scene_pos)
         # 传递给场景处理（可能是在释放图元拖拽）
         super().mouseReleaseEvent(event)
     
     @safe_event
     def wheelEvent(self, event):
         """
-        鼠标滚轮事件 - 调整画笔大小或放大镜倍数
+        鼠标滚轮事件 - 切换智能选区粒度、调整画笔大小或放大镜倍数
         """
         self.invalidate_double_click_candidate()
         # 只在绘图工具激活时响应
         current_tool = self.canvas_scene.tool_controller.current_tool
-        if not current_tool or current_tool.id == "cursor":
-            # 无绘图工具激活时，尝试调整放大镜倍数
+        if self.canvas_scene.tool_controller.current_tool_id == "cursor":
+            delta = event.angleDelta().y()
+            # 控件粒度悬停时滚轮归粒度切换，放大镜倍数另有快捷键（默认 PgUp/PgDn）；
+            # 没有嵌套链可走时滚轮才还给放大镜。
+            if delta != 0 and self._adjust_smart_selection_level(
+                delta, self.mapToScene(event.position().toPoint())
+            ):
+                event.accept()
+                return
+
             window = self.window()
             # 确保不是钉图窗口（钉图窗口没有放大镜）
             if (hasattr(window, 'magnifier_overlay') and 
                 window.magnifier_overlay and 
                 window.magnifier_overlay.cursor_scene_pos is not None and 
                 window.magnifier_overlay._should_render()):
-                # 获取滚轮方向
-                delta = event.angleDelta().y()
                 if delta != 0:
                     # 向上滚动增加倍数，向下滚动减少倍数
                     zoom_delta = 1 if delta > 0 else -1
@@ -1606,88 +1730,23 @@ class CanvasView(QGraphicsView):
                 return focus_item
         return None
 
-    def _is_point_on_text_edge(self, item: QGraphicsTextItem, scene_pos: QPointF, margin: float = None) -> bool:
-        if not item:
-            return False
-        # 使用 TextItem 的 document margin 作为边缘判定区域
-        if margin is None:
-            margin = getattr(item, 'TEXT_PADDING', 12)
-        rect = item.mapToScene(item.boundingRect()).boundingRect()
-        if not rect.contains(scene_pos):
-            return False
-        inner = rect.adjusted(margin, margin, -margin, -margin)
-        if inner.width() <= 0 or inner.height() <= 0:
-            return True
-        return not inner.contains(scene_pos)
+    def _text_switch_target(self, scene_pos: QPointF, editing_item, modifiers):
+        """编辑中点在文字外时，这一下点中的另一段文字；没点中就是 None。
 
-    def _set_text_drag_cursor(self, active: bool):
-        if active:
-            self._text_drag_cursor_active = True
-            self.setCursor(Qt.CursorShape.SizeAllCursor)
-        else:
-            if not self._text_drag_cursor_active:
-                return
-            self._text_drag_cursor_active = False
-            if self._is_text_editing():
-                self.viewport().unsetCursor()
-            elif (
-                self.cursor_manager
-                and self.cursor_manager.current_cursor
-                and self.cursor_manager.current_tool_id != "cursor"
-            ):
-                self.setCursor(self.cursor_manager.current_cursor)
-            else:
-                self.setCursor(Qt.CursorShape.ArrowCursor)
-
-    def _update_text_drag_hover(self, scene_pos: QPointF):
-        if self._text_drag_active:
-            return
-        if not self._is_text_editing():
-            if self._text_drag_hover_item is not None:
-                self._text_drag_hover_item = None
-                self._set_text_drag_cursor(False)
-            return
-        item = self._get_active_text_item()
-        if item and self._is_point_on_text_edge(item, scene_pos):
-            self._text_drag_hover_item = item
-            self._set_text_drag_cursor(True)
-        else:
-            self._text_drag_hover_item = None
-            self._set_text_drag_cursor(False)
-
-    def _begin_text_drag(self, item: QGraphicsTextItem, scene_pos: QPointF):
-        self._clear_pending_text_edit()
-        self._text_drag_active = True
-        self._text_drag_item = item
-        self._text_drag_last_scene_pos = scene_pos
-        self._set_text_drag_cursor(True)
-        if self.smart_edit_controller:
-            self.smart_edit_controller.select_item(item, auto_select=False)
-
-    def _perform_text_drag(self, scene_pos: QPointF):
-        if not self._text_drag_active or not self._text_drag_item:
-            return
-        if not self._text_drag_last_scene_pos:
-            self._text_drag_last_scene_pos = scene_pos
-            return
-        delta = scene_pos - self._text_drag_last_scene_pos
-        if abs(delta.x()) < 1e-3 and abs(delta.y()) < 1e-3:
-            return
-        self._text_drag_item.moveBy(delta.x(), delta.y())
-        self._text_drag_last_scene_pos = scene_pos
-
-    def _end_text_drag(self):
-        self._text_drag_active = False
-        self._text_drag_item = None
-        self._text_drag_last_scene_pos = None
-        self._set_text_drag_cursor(False)
-
-    def _reset_text_drag_state(self):
-        self._text_drag_hover_item = None
-        self._text_drag_item = None
-        self._text_drag_last_scene_pos = None
-        self._text_drag_active = False
-        self._set_text_drag_cursor(False)
+        命中判断借控制器的 can_select_item，与真正执行选中的 handle_press 同一套
+        规则：谁在上面、当前工具选不选得中、要不要按 Ctrl，只有一处说了算。若这一
+        下点中的是别的类型（例如 Ctrl 跨工具选形状），按老规矩只结束编辑，不转手。
+        """
+        controller = getattr(self, "smart_edit_controller", None)
+        if controller is None:
+            return None
+        for item in self.canvas_scene.items(scene_pos):
+            if item is editing_item:
+                continue
+            if not controller.can_select_item(item, modifiers):
+                continue
+            return item if isinstance(item, TextItem) else None
+        return None
 
     def _apply_size_change_to_selection(self, scale: float):
         controller = getattr(self, "smart_edit_controller", None)
@@ -1826,11 +1885,6 @@ class CanvasView(QGraphicsView):
 
         return False
     
-    def _clear_pending_text_edit(self):
-        self._pending_text_edit_item = None
-        self._pending_text_edit_press_pos = None
-        self._pending_text_edit_moved = False
-
     def _update_magnifier_overlay(self, scene_pos: QPointF):
         overlay = self._get_magnifier_overlay()
         if overlay:
@@ -1846,49 +1900,6 @@ class CanvasView(QGraphicsView):
         if window and hasattr(window, "magnifier_overlay"):
             return window.magnifier_overlay
         return None
-    
-    def _maybe_prepare_text_edit(self, event, scene_pos: QPointF):
-        if event.button() != Qt.MouseButton.LeftButton:
-            return
-        if self._is_text_editing():
-            return
-        item = getattr(self.smart_edit_controller, "selected_item", None)
-        if not isinstance(item, TextItem):
-            return
-        # 只在点击位置仍在文字上时才进入待编辑状态
-        if not item.contains(item.mapFromScene(scene_pos)):
-            return
-        self._pending_text_edit_item = item
-        self._pending_text_edit_press_pos = event.pos()
-        self._pending_text_edit_moved = False
-    
-    def _track_pending_text_edit_movement(self, event):
-        if (self._pending_text_edit_item is None or
-                self._pending_text_edit_press_pos is None):
-            return
-        if not (event.buttons() & Qt.MouseButton.LeftButton):
-            return
-        if (event.pos() - self._pending_text_edit_press_pos).manhattanLength() > 5:
-            self._pending_text_edit_moved = True
-    
-    def _maybe_enter_text_edit_on_release(self, event, scene_pos: QPointF):
-        if self._pending_text_edit_item is None:
-            return
-        if event.button() != Qt.MouseButton.LeftButton:
-            self._clear_pending_text_edit()
-            return
-        if self._pending_text_edit_moved:
-            self._clear_pending_text_edit()
-            return
-        item = self._pending_text_edit_item
-        if not isinstance(item, TextItem):
-            self._clear_pending_text_edit()
-            return
-        if not item.contains(item.mapFromScene(scene_pos)):
-            self._clear_pending_text_edit()
-            return
-        self._clear_pending_text_edit()
-        self._enter_text_edit_mode(item)
     
     def _enter_text_edit_mode(self, item: TextItem):
         self._connect_text_geometry_updates(item)
@@ -1930,16 +1941,20 @@ class CanvasView(QGraphicsView):
         item._geometry_update_connected = False
         item._geometry_update_slot = None
 
+    def _end_text_edit(self, text_item: QGraphicsTextItem):
+        """结束文字编辑：失焦让图元自己结算内容（入栈/丢弃/可撤销清空），再清理视图侧状态。"""
+        log_debug(T("结束文本编辑"), "CanvasView")
+        text_item.clearFocus()
+        self._finalize_text_edit_state(text_item)
+
     def _finalize_text_edit_state(self, text_item: QGraphicsTextItem):
         if text_item is not None:
             self._disconnect_text_geometry_updates(text_item)
         controller = getattr(self, "smart_edit_controller", None)
         if controller and controller.selected_item is text_item:
             controller.clear_selection(suppress_block=True)
-        elif text_item and text_item.isSelected():
-            text_item.setSelected(False)
-        self._reset_text_drag_state()
-        self._clear_pending_text_edit()
+        self.text_drag.reset()
+        self.pending_text_edit.clear()
     
     def export_and_close(self):
         """

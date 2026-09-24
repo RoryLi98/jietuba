@@ -64,12 +64,16 @@ class PinOCRManager:
 
     def __init__(self, pin_window, config_manager):
         self._win = pin_window
-        self._cfg = config_manager
         self.ocr_text_layer = None
         self.ocr_thread = None
         self._ocr_has_result = False
-        self._translate_pending = False
-        self._text_selection_enabled = True
+        # OCR 完成后要执行的回调，见 recognize_then
+        self._pending_callbacks = []
+        # 初值取自动 OCR 设置：自动识别关掉时这张钉图还没有文字层，右键菜单必须
+        # 如实显示为关闭，否则第一次点击只是把它翻成关闭，用户得点两次才会识别。
+        self._text_selection_enabled = bool(
+            config_manager and config_manager.get_ocr_enabled()
+        )
         self._temporary_enabled = True
 
     # ------------------------------------------------------------------
@@ -83,14 +87,6 @@ class PinOCRManager:
     @property
     def text_selection_enabled(self) -> bool:
         return self._text_selection_enabled
-
-    @property
-    def translate_pending(self) -> bool:
-        return self._translate_pending
-
-    @translate_pending.setter
-    def translate_pending(self, value: bool):
-        self._translate_pending = value
 
     @property
     def is_running(self) -> bool:
@@ -113,17 +109,11 @@ class PinOCRManager:
             if self.ocr_thread is not None:
                 return True
 
-            if not force:
-                if not self._cfg:
-                    return False
-
-                if not self._text_selection_enabled:
-                    log_info(T("钉图文字选择已关闭，跳过自动 OCR"), "OCR")
-                    return False
-
-                if not self._cfg.get_ocr_enabled():
-                    log_info(T("钉图自动 OCR 已关闭，跳过自动识别"), "OCR")
-                    return False
+            # 自动识别这一路只在钉图创建后跑一次，那时开关还是初值，也就是自动
+            # OCR 设置本身，所以两个条件合成一个就够。
+            if not force and not self._text_selection_enabled:
+                log_info(T("钉图自动 OCR 已关闭，跳过自动识别"), "OCR")
+                return False
 
             if not is_ocr_available():
                 log_debug(T("OCR 模块不可用（无OCR版本），静默跳过"), "OCR")
@@ -135,13 +125,17 @@ class PinOCRManager:
 
             log_debug(T("OCR 引擎已就绪（支持中日韩英混合识别）"), "OCR")
 
+            # 走到这里识别一定会发起：自动识别路径的开关本来就是开的，force 路径
+            # 则是用户主动要文字，识别的代价已经付了，文字选择跟着可用。
+            self._text_selection_enabled = True
+
             if self.ocr_text_layer is None:
-                # 即使文字选择当前关闭，也保留识别结果供翻译使用。
                 self.ocr_text_layer = OCRTextLayer(self._win)
                 cr = self._win.content_rect()
                 self.ocr_text_layer.setGeometry(cr.toRect())
-                self._apply_text_layer_enabled()
                 log_debug(T("OCR层初始化几何: {rect}", rect=cr.toRect()), "OCR")
+            # 文字层可能早就建好、被用户关掉了，开关改了就得同步到层上
+            self._apply_text_layer_enabled()
 
             # 立即启动异步识别
             return self._start_recognition()
@@ -154,17 +148,27 @@ class PinOCRManager:
             traceback.print_exc()
             return False
 
-    def recognize_for_translation(self) -> bool:
-        """确保钉图有 OCR 任务，并在完成后继续翻译。"""
-        self._translate_pending = True
+    def recognize_then(self, callback) -> bool:
+        """确保钉图有 OCR 任务，完成后用 (是否有文字, 全部文字) 调用 callback。
+
+        翻译和复制全部文字共用这一条路径：先发起的负责启动识别，后来的排进
+        同一次识别的回调队列，避免同一张钉图被识别两遍。
+        """
+        self._pending_callbacks.append(callback)
         if self.ocr_thread is not None:
             return True
 
         if self.init_now(force=True):
             return True
 
-        self._translate_pending = False
+        self._pending_callbacks.remove(callback)
         return False
+
+    def _flush_pending(self, success: bool, result: str):
+        """把识别结果发给排队中的回调（无论成功与否，队列都要清空）。"""
+        callbacks, self._pending_callbacks = self._pending_callbacks, []
+        for callback in callbacks:
+            callback(success, result)
 
     def _start_recognition(self) -> bool:
         """启动异步 OCR 识别线程
@@ -229,27 +233,23 @@ class PinOCRManager:
                 if text_count > 0:
                     self._ocr_has_result = True
 
-                    if self._translate_pending:
-                        self._translate_pending = False
-                        log_info(T("OCR 完成，执行等待中的翻译"), "Translate")
-                        text = self.ocr_text_layer.get_all_text(separator="\n")
-                        self._win._on_ocr_translation_finished(True, text)
+                    if self._pending_callbacks:
+                        log_info(T("OCR 完成，执行等待中的操作"), "OCR")
+                        self._flush_pending(
+                            True,
+                            self.ocr_text_layer.get_all_text(separator="\n"),
+                        )
 
                 log_info(T("钉图文字层已就绪，识别到 {text_count} 个文字块", text_count=text_count), "OCR")
-            elif self._translate_pending:
-                self._translate_pending = False
-                log_warning(T("OCR 未识别到可翻译文字"), "Translate")
-                self._win._on_ocr_translation_finished(
-                    False, self._win.tr("No text was recognized")
-                )
+            elif self._pending_callbacks:
+                log_warning(T("OCR 未识别到文字"), "OCR")
+                self._flush_pending(False, self._win.tr("No text was recognized"))
         except Exception as e:
             log_error(T("加载OCR结果失败: {e}", e=e), "OCR")
-            if self._translate_pending:
-                self._translate_pending = False
-                self._win._on_ocr_translation_finished(
-                    False,
-                    self._win.tr("OCR recognition failed: {error}").format(error=e),
-                )
+            self._flush_pending(
+                False,
+                self._win.tr("OCR recognition failed: {error}").format(error=e),
+            )
             import traceback
             traceback.print_exc()
         finally:
@@ -266,6 +266,9 @@ class PinOCRManager:
 
     def cleanup(self):
         """安全清理所有 OCR 资源（PinWindow 关闭时调用）"""
+        # 回调都绑在窗口上，窗口都要关了，识别结果没人再要
+        self._pending_callbacks.clear()
+
         # 清理 OCR 线程
         if self.ocr_thread is not None:
             try:

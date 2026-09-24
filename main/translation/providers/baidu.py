@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Baidu Translate (百度翻译开放平台) general text API provider."""
+"""Baidu large-model text translation provider (aiTextTranslate)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import hashlib
 import json
 import random
 import urllib.error
-import urllib.parse
 import urllib.request
 from typing import Any, Mapping
 
@@ -17,24 +16,32 @@ from ..models import (
     TranslationErrorCode,
     TranslationRequest,
     TranslationResult,
-    normalize_language_code,
 )
-from ..provider import TranslationProvider
+from ..provider import TextField, TranslationProvider
 
 
 class BaiduTranslateProvider(TranslationProvider):
-    """百度翻译通用文本翻译 API（https://fanyi-api.baidu.com）。
+    """百度大模型文本翻译 API（APPID + 密钥的 MD5 签名鉴权）。
 
-    鉴权：sign = MD5(appid + q + salt + secret_key)，q 为原文 UTF-8 明文。
-    免费版限制 1 QPS、单次请求原文不超过 6000 字节。
+    这个端点同时支持 Bearer Token 和签名两种鉴权，这里只走签名，因为翻译开放
+    平台注册后控制台发的就是 APPID + 密钥这一套；Bearer 要的是另外单独申请的
+    大模型 API Key，多数用户手上没有。实测拿标准凭据走 Bearer 会被回
+    ``54001 invalid token``——和随便填一个字符串的报错一模一样，排查起来毫无
+    线索，所以不留这条路。
     """
 
     provider_id = "baidu"
-    display_name = "Baidu Translate"
-    API_URL = "https://fanyi-api.baidu.com/api/trans/vip/translate"
-    MAX_TEXT_BYTES = 6000
+    display_name = "Baidu"
+    API_URL = "https://fanyi-api.baidu.com/ait/api/aiTextTranslate"
 
-    # 应用内 BCP-47 风格代码 → 百度语言代码
+    # 百度的语种代码和本应用内部代码（BCP-47 风格）不完全一致，这里只列出
+    # 二者不同的那些；没列到的直接透传（百度扩展语种大多和 ISO 码一致）。
+    # 两个方向分开写而不是互相推导，是因为好几个应用代码（en-US/en-GB、
+    # pt-BR/pt-PT）会收敛到同一个百度代码，推导不出唯一的反向映射。
+    #
+    # 透传能不能用是逐个打过真实接口验的：应用里 19 个目标语种，只有乌克兰语
+    # 需要映射（百度要 ukr，透传 uk 会回 58001 语言方向不支持）；tr/id/th/nl
+    # 这些看着像该用三字母码的，实测透传就对，不要想当然补。
     _LANGUAGE_CODES: dict[str, str] = {
         "zh-Hans": "zh",
         "zh-Hant": "cht",
@@ -45,73 +52,77 @@ class BaiduTranslateProvider(TranslationProvider):
         "es": "spa",
         "ar": "ara",
         "uk": "ukr",
+        "en-US": "en",
+        "en-GB": "en",
+        "pt-BR": "pt",
+        "pt-PT": "pt",
     }
-
-    # 百度错误码 → 统一错误码
-    #   52001 请求超时 / 52002 系统错误
-    #   52003 未授权用户 / 54001 签名错误 / 58000 客户端IP非法 / 58002 服务已关闭
-    #   54000 必填参数为空 / 58001 译文语言方向不支持
-    #   54003 请求频率受限 / 54005 长query请求频繁
-    #   54004 账户余额不足
-    _ERROR_CODE_MAP: dict[str, TranslationErrorCode] = {
-        "52001": TranslationErrorCode.NETWORK_ERROR,
-        "52002": TranslationErrorCode.NETWORK_ERROR,
-        "52003": TranslationErrorCode.AUTH_FAILED,
-        "54000": TranslationErrorCode.INVALID_REQUEST,
-        "54001": TranslationErrorCode.AUTH_FAILED,
-        "54003": TranslationErrorCode.RATE_LIMITED,
-        "54004": TranslationErrorCode.QUOTA_EXCEEDED,
-        "54005": TranslationErrorCode.RATE_LIMITED,
-        "58000": TranslationErrorCode.AUTH_FAILED,
-        "58001": TranslationErrorCode.UNSUPPORTED_LANGUAGE,
-        "58002": TranslationErrorCode.AUTH_FAILED,
+    _REVERSE_LANGUAGE_CODES: dict[str, str] = {
+        "zh": "zh-Hans",
+        "cht": "zh-Hant",
+        "jp": "ja",
+        "kor": "ko",
+        "vie": "vi",
+        "fra": "fr",
+        "spa": "es",
+        "ara": "ar",
+        "ukr": "uk",
     }
 
     def __init__(self, config: Mapping[str, Any]):
-        self._app_id = str(config.get("app_id", "") or "").strip()
+        self._appid = str(config.get("appid", "") or "").strip()
         self._secret_key = str(config.get("secret_key", "") or "").strip()
 
+    CREDENTIAL_FIELDS = (
+        TextField("baidu_translate_appid", "Baidu APPID", "APPID"),
+        # 叫 Secret Key 而不是 API Key：控制台上这一栏就叫密钥，且百度另有一个
+        # 叫 API Key 的东西（大模型单独申请的那个）。标签写错的后果是用户填了
+        # API Key、服务端回 54001 invalid token，界面上看不出填错了哪一个。
+        TextField("baidu_translate_secret_key", "Baidu Secret Key",
+                  "Paired with APPID in the Baidu console",
+                  secret=True),
+    )
+    HELP_LABEL = "Baidu Translate Open Platform"
+    HELP_URL = "https://fanyi-api.baidu.com/manage/developer"
+
     def is_configured(self) -> bool:
-        return bool(self._app_id and self._secret_key)
+        return bool(self._appid and self._secret_key)
 
     def translate(self, request: TranslationRequest) -> TranslationResult:
         if not request.text or not request.text.strip():
             return self._error(
                 TranslationErrorCode.INVALID_REQUEST, "Text is empty"
             )
-        if len(request.text.encode("utf-8")) > self.MAX_TEXT_BYTES:
-            return self._error(
-                TranslationErrorCode.INVALID_REQUEST,
-                "Text exceeds Baidu Translate's 6000-byte limit",
-            )
         if not self.is_configured():
             return self._error(
                 TranslationErrorCode.NOT_CONFIGURED,
-                "Baidu Translate APP ID / secret key is not configured",
+                "Baidu Translate APPID/Secret Key is not configured",
             )
 
-        salt = str(random.randint(32768, 65536 * 1000))
-        sign = hashlib.md5(
-            f"{self._app_id}{request.text}{salt}{self._secret_key}".encode(
-                "utf-8"
-            )
-        ).hexdigest()
-
-        params = {
-            "q": request.text,
-            "from": self._to_baidu_code(request.source_lang or "auto"),
+        # salt 必须是数字：服务端 AITextRequest.Salt 是 uint64，传字符串会被回
+        # 53001 parse json body error。appid 反过来必须是字符串，传数字同样报
+        # 53001。两者都是打真实接口撞出来的，JSON 里别顺手改类型。
+        salt = random.randint(100000, 999999)
+        body = {
+            "appid": self._appid,
+            "from": (
+                self._to_baidu_code(request.source_lang)
+                if request.source_lang
+                else "auto"
+            ),
             "to": self._to_baidu_code(request.target_lang),
-            "appid": self._app_id,
+            "q": request.text,
             "salt": salt,
-            "sign": sign,
+            "sign": self._sign(request.text, salt),
         }
+        payload = json.dumps(
+            body, ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")
         http_request = urllib.request.Request(
             url=self.API_URL,
-            data=urllib.parse.urlencode(params).encode("utf-8"),
+            data=payload,
             method="POST",
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+            headers={"Content-Type": "application/json"},
         )
 
         try:
@@ -122,6 +133,18 @@ class BaiduTranslateProvider(TranslationProvider):
             return self._parse_response(raw)
         except urllib.error.HTTPError as exc:
             return self._http_error(exc)
+        except TimeoutError:
+            # 读超时抛的是 TimeoutError，它不是 URLError 的子类，不加这条就会
+            # 一路掉进下面的兜底：归类成 UNKNOWN，还把「The read operation
+            # timed out」这种英文原文直接甩给用户。
+            log_error(
+                f"Baidu Translate timed out after {request.timeout}s",
+                "BaiduTranslate",
+            )
+            return self._error(
+                TranslationErrorCode.NETWORK_ERROR,
+                f"Request timed out after {request.timeout}s",
+            )
         except urllib.error.URLError as exc:
             reason = getattr(exc, "reason", exc)
             log_error(
@@ -151,34 +174,39 @@ class BaiduTranslateProvider(TranslationProvider):
                 f"Translation failed: {exc}",
             )
 
+    def _sign(self, text: str, salt: int) -> str:
+        """MD5(appid + q + salt + 密钥)，小写十六进制。
+
+        拼接用的 salt 是它的十进制字符串形态，放进 JSON 的却必须是数字本身，
+        两处形态不同是这版接口的要求，不是笔误。
+        """
+        raw = f"{self._appid}{text}{salt}{self._secret_key}"
+        return hashlib.md5(raw.encode("utf-8")).hexdigest()
+
     def _parse_response(self, raw: Any) -> TranslationResult:
+        # 百度即使鉴权/参数出错也回 HTTP 200，错误信息包在 body 里的
+        # error_code/error_msg 中，必须在这里而不是靠 HTTPError 来识别失败。
         if not isinstance(raw, dict):
             return self._error(
                 TranslationErrorCode.UNKNOWN,
                 "Invalid Baidu Translate response",
             )
-        error_code = str(raw.get("error_code", "") or "")
-        if error_code:
-            message = str(raw.get("error_msg", "") or f"Error {error_code}")
-            code = self._ERROR_CODE_MAP.get(
-                error_code, TranslationErrorCode.UNKNOWN
-            )
+        error_code = raw.get("error_code")
+        if error_code and str(error_code) != "0":
+            message = str(raw.get("error_msg") or f"error_code={error_code}")
             log_error(
-                f"Baidu Translate error {error_code}: {message}",
+                f"Baidu Translate API error {error_code}: {message}",
                 "BaiduTranslate",
             )
-            return self._error(code, f"[{error_code}] {message}")
+            return self._error(self._map_api_error_code(str(error_code)), message)
 
-        entries = raw.get("trans_result")
-        if not isinstance(entries, list) or not entries:
+        results = raw.get("trans_result") or []
+        if not results:
             return self._error(
                 TranslationErrorCode.UNKNOWN,
                 "Invalid Baidu Translate response",
             )
-        # 多行原文按 \n 逐段返回，拼接还原
-        translated = "\n".join(
-            str(entry.get("dst", "") or "") for entry in entries
-        )
+        translated = "\n".join(str(item.get("dst", "") or "") for item in results)
         if not translated:
             return self._error(
                 TranslationErrorCode.UNKNOWN,
@@ -193,19 +221,13 @@ class BaiduTranslateProvider(TranslationProvider):
 
     @classmethod
     def _to_baidu_code(cls, language_code: str) -> str:
-        if not language_code:
-            return "auto"
         return cls._LANGUAGE_CODES.get(language_code, language_code)
 
     @classmethod
     def _from_baidu_code(cls, baidu_code: str) -> str:
-        """百度返回的 from 代码 → 应用内部代码（用于展示检测语言）。"""
-        if not baidu_code or baidu_code == "auto":
+        if not baidu_code:
             return ""
-        for internal, baidu in cls._LANGUAGE_CODES.items():
-            if baidu == baidu_code:
-                return internal
-        return normalize_language_code(baidu_code) or ""
+        return cls._REVERSE_LANGUAGE_CODES.get(baidu_code, baidu_code)
 
     def _http_error(
         self, error: urllib.error.HTTPError
@@ -215,21 +237,40 @@ class BaiduTranslateProvider(TranslationProvider):
             data = json.loads(body.decode("utf-8")) if body else {}
         except (ValueError, UnicodeDecodeError):
             data = {}
-        err_code = str(data.get("error_code", "") or "") if data else ""
-        message = str(
-            data.get("error_msg") or error.reason or f"HTTP {error.code}"
-        )
-        code = self._ERROR_CODE_MAP.get(
-            err_code,
-            TranslationErrorCode.NETWORK_ERROR
+        if isinstance(data, dict) and data.get("error_code"):
+            return self._parse_response(data)
+        message = str(error.reason or f"HTTP {error.code}")
+        code = (
+            TranslationErrorCode.AUTH_FAILED
+            if error.code in (401, 403)
+            else TranslationErrorCode.NETWORK_ERROR
             if error.code >= 500
-            else TranslationErrorCode.UNKNOWN,
+            else TranslationErrorCode.UNKNOWN
         )
         log_error(
-            f"Baidu Translate HTTP {error.code}: {err_code or message}",
+            f"Baidu Translate HTTP {error.code}: {message}",
             "BaiduTranslate",
         )
-        return self._error(code, f"[{err_code or error.code}] {message}")
+        return self._error(code, message)
+
+    @staticmethod
+    def _map_api_error_code(error_code: str) -> TranslationErrorCode:
+        # 错误码表见 https://fanyi-api.baidu.com/doc/21（大模型版与通用版共用）。
+        # 53001 是请求体解析失败，文档里没列，是打真实接口撞出来的——漏了它会
+        # 让「字段类型写错」这类问题落进 UNKNOWN，报不出可操作的信息。
+        if error_code in {"52003", "54001", "58000"}:
+            return TranslationErrorCode.AUTH_FAILED
+        if error_code in {"53001", "54000"}:
+            return TranslationErrorCode.INVALID_REQUEST
+        if error_code in {"54003", "54005"}:
+            return TranslationErrorCode.RATE_LIMITED
+        if error_code == "54004":
+            return TranslationErrorCode.QUOTA_EXCEEDED
+        if error_code == "58001":
+            return TranslationErrorCode.UNSUPPORTED_LANGUAGE
+        if error_code in {"52001", "52002"}:
+            return TranslationErrorCode.NETWORK_ERROR
+        return TranslationErrorCode.UNKNOWN
 
     @staticmethod
     def _error(

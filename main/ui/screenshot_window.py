@@ -6,7 +6,7 @@
 
 import gc
 from PySide6.QtWidgets import QApplication, QWidget, QGraphicsTextItem
-from PySide6.QtCore import Qt, QTimer, QRect
+from PySide6.QtCore import Qt, QTimer, QRect, QRectF
 from PySide6.QtGui import QPixmap
 from ui.dialogs import show_modeless_warning_dialog
 
@@ -15,10 +15,11 @@ from capture.capture_service import CaptureService
 from ui.toolbar import Toolbar
 from ui.magnifier import MagnifierOverlay
 from ui.mask_overlay import MaskOverlayWidget
+from ui.selection_overlay import SelectionOverlayWidget
 from ui.selection_info import SelectionInfoPanel, SelectionInfoController
 from tools.action import ActionTools
 from settings import get_tool_settings_manager
-from stitch.scroll_window import ScrollCaptureWindow
+from settings.tool_settings import SMART_SELECTION_MODES
 from core.logger import log_debug, log_info, log_exception, T
 from core import safe_event
 from core.shortcut_manager import ShortcutManager, ShortcutHandler
@@ -31,17 +32,20 @@ class ScreenshotShortcutHandler(ShortcutHandler):
     def __init__(self, window: 'ScreenshotWindow'):
         self._window = window
         # 从配置读取应用内快捷键（一次性，截图窗口生命周期内不变）
-        from core.shortcut_manager import load_inapp_bindings, load_move_keys
+        from core.shortcut_manager import (
+            load_inapp_bindings, load_inapp_mouse_bindings, load_move_keys,
+        )
         from settings import ANNOTATION_TOOL_SHORTCUTS
         action_keys = [
             "inapp_confirm", "inapp_pin", "inapp_undo", "inapp_redo",
-            "inapp_delete",
+            "inapp_delete", "inapp_restore_last_region",
             "inapp_zoom_in", "inapp_zoom_out", "inapp_translate",
+            "inapp_text_recognize",
         ]
         self._tool_shortcuts = tuple(ANNOTATION_TOOL_SHORTCUTS)
-        self._bindings = load_inapp_bindings(
-            action_keys + [entry[0] for entry in self._tool_shortcuts]
-        )
+        bound_keys = action_keys + [entry[0] for entry in self._tool_shortcuts]
+        self._bindings = load_inapp_bindings(bound_keys)
+        self._mouse_bindings = load_inapp_mouse_bindings(bound_keys)
         self._move_keys = load_move_keys()
 
     @property
@@ -64,33 +68,48 @@ class ScreenshotShortcutHandler(ShortcutHandler):
                 and QApplication.activeModalWidget() is None)
 
     def _match(self, event, cfg_key: str) -> bool:
-        """检查按键事件是否匹配某个绑定"""
-        binding = self._bindings.get(cfg_key)
-        if not binding:
-            return False
-        want_key, want_mods = binding
-        return event.key() == want_key and event.modifiers() == want_mods
+        """检查事件是否匹配某个绑定（键盘组合或鼠标键）"""
+        from core.shortcut_manager import match_inapp_binding
+        return match_inapp_binding(
+            event, cfg_key, self._bindings, self._mouse_bindings
+        )
+
+    def handle_mouse(self, event) -> bool:
+        """中键走和键盘完全相同的那条 if 链，见 ShortcutHandler.handle_mouse。"""
+        return self.handle_key(event)
 
     def handle_key(self, event) -> bool:
+        from core.shortcut_manager import event_is_auto_repeat, event_key
+
         w = self._window
+        # 中键也走这条链（见 handle_mouse）。鼠标事件没有 key()，这里取到的是
+        # Key_unknown，所以下面所有键专属的分支——文字编辑放行、ESC、鼠标微移、
+        # 硬编码的取色 C 和 Enter——对中键自然全部落空，只剩 _match 驱动的那些
+        # 分支有效。不必逐条再加「这是不是鼠标事件」的判断。
+        key = event_key(event)
         if hasattr(w, "view") and hasattr(w.view, "invalidate_double_click_candidate"):
             w.view.invalidate_double_click_candidate()
         is_text_editing = w._is_text_editing()
 
         # 文字编辑模式下，部分按键交给 QGraphicsTextItem
         if is_text_editing:
-            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 return False
-            if event.key() in (Qt.Key.Key_C, Qt.Key.Key_D):
+            if key in (Qt.Key.Key_C, Qt.Key.Key_D):
                 return False
-            if (event.key() in (Qt.Key.Key_Z, Qt.Key.Key_Y)
+            if (key in (Qt.Key.Key_Z, Qt.Key.Key_Y)
                     and event.modifiers() == Qt.KeyboardModifier.ControlModifier):
                 return False
 
         # ESC — 固定不可自定义
-        if event.key() == Qt.Key.Key_Escape:
+        if key == Qt.Key.Key_Escape:
             w.cleanup_and_close()
             return True
+
+        # 恢复上次截图区域
+        if self._match(event, "inapp_restore_last_region"):
+            if self._restore_last_region():
+                return True
 
         # 确认截图
         if self._match(event, "inapp_confirm"):
@@ -116,17 +135,28 @@ class ScreenshotShortcutHandler(ShortcutHandler):
                 w.scene.undo_stack.redo()
             return True
 
-        # 删除选中图元
+        # 删除选中图元。文字编辑时这个键（默认 Delete）要留给文字框删字符，
+        # 不能在这里连事件一起吞掉——之前 return True 写在 if 外面，编辑文字时
+        # 按 Delete 键选中图元没删（判断对了），但事件已经被吃掉，文字框根本
+        # 收不到这次按键，光标后面的字删不掉。
         if self._match(event, "inapp_delete"):
-            if not is_text_editing and hasattr(w.view, 'smart_edit_controller'):
-                w.view.smart_edit_controller.delete_selected()
-            return True
+            if not is_text_editing:
+                if hasattr(w.view, 'smart_edit_controller'):
+                    w.view.smart_edit_controller.delete_selected()
+                return True
 
         # 截图翻译
         if self._match(event, "inapp_translate"):
             if w.scene and w.scene.selection_model.is_confirmed:
                 if hasattr(w, 'toolbar') and w.toolbar:
                     w.toolbar.screenshot_translate_clicked.emit()
+                return True
+
+        # 文字识别
+        if self._match(event, "inapp_text_recognize"):
+            if w.scene and w.scene.selection_model.is_confirmed:
+                if hasattr(w, 'toolbar') and w.toolbar:
+                    w.toolbar.text_recognize_clicked.emit()
                 return True
 
         # 放大镜缩放属于可配置截图动作，优先于工具键。
@@ -147,13 +177,13 @@ class ScreenshotShortcutHandler(ShortcutHandler):
             for cfg_key, tool_id, _label, _default in self._tool_shortcuts:
                 if not self._match(event, cfg_key):
                     continue
-                if not event.isAutoRepeat() and hasattr(w, "toolbar") and w.toolbar:
+                if not event_is_auto_repeat(event) and hasattr(w, "toolbar") and w.toolbar:
                     w.toolbar.select_tool(tool_id, toggle=False)
                 return True
 
         # ── 鼠标微移（配置动作/工具之后）──
         if not is_text_editing:
-            delta = self._move_keys.get(event.key())
+            delta = self._move_keys.get(key)
             if delta and event.modifiers() == Qt.KeyboardModifier.NoModifier:
                 from PySide6.QtGui import QCursor
                 p = QCursor.pos()
@@ -161,7 +191,7 @@ class ScreenshotShortcutHandler(ShortcutHandler):
                 return True
 
         # 取色（单键 C，无修饰键 — 保留硬编码）
-        if event.key() == Qt.Key.Key_C:
+        if key == Qt.Key.Key_C:
             if event.modifiers() == Qt.KeyboardModifier.NoModifier:
                 mo = getattr(w, 'magnifier_overlay', None)
                 if mo and mo.cursor_scene_pos is not None and mo._should_render():
@@ -170,12 +200,40 @@ class ScreenshotShortcutHandler(ShortcutHandler):
                         return True
 
         # Enter 确认（固定）
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             if w.scene and w.scene.selection_model.is_confirmed:
                 w.action_handler.handle_confirm()
                 return True
 
         return False
+
+    def _restore_last_region(self) -> bool:
+        """把选区还原成上次截图使用过的区域。
+
+        只在没有任何绘制工具开着时响应（同 view.py 的 is_drawing_tool 判断），
+        避免覆盖正在使用的标注。记忆的是虚拟桌面绝对坐标，也就是场景坐标，
+        落在当前虚拟桌面范围外（换了显示器排布等）就安静地不做任何事，不当
+        错误处理。
+        """
+        w = self._window
+        if not w.scene:
+            return False
+        if w.scene.tool_controller.current_tool_id != "cursor":
+            return False
+
+        from core.last_capture_region import get_last_region
+        absolute = get_last_region()
+        if absolute is None:
+            return False
+
+        # 副屏在主屏左边/上边时虚拟桌面左上角是负的，范围不能从原点量起。
+        virtual_bounds = QRect(round(w.virtual_x), round(w.virtual_y),
+                               round(w.virtual_width), round(w.virtual_height))
+        if not virtual_bounds.contains(absolute):
+            return False
+
+        w.scene.selection_model.initialize_confirmed_rect(QRectF(absolute))
+        return True
 
 
 class ScreenshotWindow(QWidget):
@@ -231,8 +289,10 @@ class ScreenshotWindow(QWidget):
         _timings['Scene+View'] = (_t2 - _t1) * 1000
         
         # 启用智能选区（从配置读取）
-        self.smart_selection_enabled = self.config_manager.get_smart_selection()
-        self.view.enable_smart_selection(self.smart_selection_enabled)
+        self.smart_selection_mode = self._get_configured_smart_selection_mode()
+        self.smart_selection_enabled = self.smart_selection_mode != "off"
+        self.view.enable_smart_selection(self.smart_selection_mode)
+        self.view.smart_selection_animated = self.config_manager.get_smart_selection_animation()
         
         # 4. 初始化工具栏（一次性创建，后续复用）
         self.toolbar = Toolbar(self)
@@ -251,6 +311,13 @@ class ScreenshotWindow(QWidget):
         # 6. 遮罩叠层（QWidget），覆盖整个窗口，位于 View 之上
         self.mask_overlay = MaskOverlayWidget(self, self.scene.selection_model)
         self.mask_overlay.setGeometry(0, 0, int(self.virtual_width), int(self.virtual_height))
+
+        # 6.1 选区装饰浮层，必须在遮罩之上，否则边框/手柄跨出选区的部分会被压暗
+        self.selection_overlay = SelectionOverlayWidget(
+            self, self.scene.selection_item, self.scene.selection_model
+        )
+        self.selection_overlay.setGeometry(0, 0, int(self.virtual_width), int(self.virtual_height))
+        self.selection_overlay.raise_()
 
         _t4 = time.perf_counter()
         _timings['Action+Mask'] = (_t4 - _t3) * 1000
@@ -320,6 +387,15 @@ class ScreenshotWindow(QWidget):
             cross_tool_select=self.config_manager.get_cross_tool_selection_enabled(),
         )
 
+    def _get_configured_smart_selection_mode(self) -> str:
+        """读取检测方式；没有这项设置的旧配置对象退回窗口级，和默认值一致。"""
+        getter = getattr(self.config_manager, "get_smart_selection_mode", None)
+        if callable(getter):
+            mode = str(getter() or "").lower()
+            if mode in SMART_SELECTION_MODES:
+                return mode
+        return "window" if self.config_manager.get_smart_selection() else "off"
+
     # ------------------------------------------------------------------
     # 窗口复用：准备新的截图会话
     # ------------------------------------------------------------------
@@ -353,8 +429,10 @@ class ScreenshotWindow(QWidget):
         self.view.setGeometry(0, 0, int(self.virtual_width), int(self.virtual_height))
         self.view.lower()  # 确保 view 在最底层，overlay 在上方
         
-        self.smart_selection_enabled = self.config_manager.get_smart_selection()
-        self.view.enable_smart_selection(self.smart_selection_enabled)
+        self.smart_selection_mode = self._get_configured_smart_selection_mode()
+        self.smart_selection_enabled = self.smart_selection_mode != "off"
+        self.view.enable_smart_selection(self.smart_selection_mode)
+        self.view.smart_selection_animated = self.config_manager.get_smart_selection_animation()
         
         # 创建新的 ActionHandler（引用新 scene）
         self.action_handler = ActionTools(
@@ -367,6 +445,11 @@ class ScreenshotWindow(QWidget):
         self.mask_overlay.rebind_model(self.scene.selection_model)
         self.mask_overlay.setGeometry(0, 0, int(self.virtual_width), int(self.virtual_height))
         self.mask_overlay.raise_()
+
+        # 复用 selection_overlay —— 绑到新 scene 的 item/model，并保持在遮罩之上
+        self.selection_overlay.rebind(self.scene.selection_item, self.scene.selection_model)
+        self.selection_overlay.setGeometry(0, 0, int(self.virtual_width), int(self.virtual_height))
+        self.selection_overlay.raise_()
         
         # 复用 info_panel —— swap view 引用，重建 controller
         self.info_panel._view = self.view
@@ -529,8 +612,9 @@ class ScreenshotWindow(QWidget):
         from core.qt_utils import safe_disconnect
         safe_disconnect(self.toolbar.text_font_changed, controller.on_text_font_changed)
         safe_disconnect(self.toolbar.color_changed, controller.on_text_color_changed)
-        if hasattr(self.toolbar, 'text_background_changed'):
-            safe_disconnect(self.toolbar.text_background_changed, controller.on_text_background_changed)
+        safe_disconnect(self.toolbar.text_background_changed, controller.on_text_background_changed)
+        safe_disconnect(self.toolbar.text_outline_changed, controller.on_text_outline_changed)
+        safe_disconnect(self.toolbar.text_shadow_changed, controller.on_text_shadow_changed)
 
     # ------------------------------------------------------------------
     # 窗口截图可见性控制
@@ -588,6 +672,7 @@ class ScreenshotWindow(QWidget):
         self.toolbar.pin_clicked.connect(self._handle_pin)
         self.toolbar.long_screenshot_clicked.connect(self.start_long_screenshot_mode)
         self.toolbar.screenshot_translate_clicked.connect(self._handle_screenshot_translate)
+        self.toolbar.text_recognize_clicked.connect(self._handle_text_recognize)
         self.toolbar.scan_code_clicked.connect(self._handle_scan_code)
         self.toolbar.gif_record_clicked.connect(self.start_gif_record_mode)
 
@@ -603,8 +688,9 @@ class ScreenshotWindow(QWidget):
             controller = self.view.smart_edit_controller
             self.toolbar.text_font_changed.connect(controller.on_text_font_changed)
             self.toolbar.color_changed.connect(controller.on_text_color_changed)
-            if hasattr(self.toolbar, 'text_background_changed'):
-                self.toolbar.text_background_changed.connect(controller.on_text_background_changed)
+            self.toolbar.text_background_changed.connect(controller.on_text_background_changed)
+            self.toolbar.text_outline_changed.connect(controller.on_text_outline_changed)
+            self.toolbar.text_shadow_changed.connect(controller.on_text_shadow_changed)
 
     # -- action_handler wrapper 方法（toolbar 信号的稳定接收端）--
     def _handle_confirm(self):
@@ -626,6 +712,10 @@ class ScreenshotWindow(QWidget):
     def _handle_screenshot_translate(self):
         if self.action_handler:
             self.action_handler.handle_screenshot_translate()
+
+    def _handle_text_recognize(self):
+        if self.action_handler:
+            self.action_handler.handle_text_recognize()
 
     def _handle_scan_code(self):
         if self.action_handler:
@@ -717,7 +807,8 @@ class ScreenshotWindow(QWidget):
             smart_rect = self.view._get_smart_selection_rect(scene_pos)
             if not smart_rect.isEmpty():
                 self.scene.selection_model.activate()
-                self.scene.selection_model.set_rect(smart_rect)
+                # 首次出现没有起点可补间，直接到位
+                self.view._apply_smart_selection_rect(smart_rect, animate=False)
                 log_debug(T("智能选区初始化: 鼠标位置({x}, {y}) -> 选区{rect}",
                              x=cursor_pos.x(), y=cursor_pos.y(), rect=smart_rect), "ScreenshotWindow")
 
@@ -738,6 +829,7 @@ class ScreenshotWindow(QWidget):
             return
         self.view.setGeometry(self.rect())
         self.mask_overlay.setGeometry(self.rect())
+        self.selection_overlay.setGeometry(self.rect())
         # 放大镜是独立小浮层，无需在 resizeEvent 中同步尺寸
         if self.scene.selection_model.is_confirmed:
             self.update_toolbar_position()
@@ -810,6 +902,9 @@ class ScreenshotWindow(QWidget):
         if hasattr(self, 'mask_overlay') and self.mask_overlay:
             self.mask_overlay.deleteLater()
             self.mask_overlay = None
+        if getattr(self, 'selection_overlay', None) is not None:
+            self.selection_overlay.deleteLater()
+            self.selection_overlay = None
         
         if hasattr(self, 'info_panel') and self.info_panel:
             self.info_panel.deleteLater()
@@ -947,16 +1042,14 @@ class ScreenshotWindow(QWidget):
         """马赛克种类变化（马赛克/模糊），交给 MosaicTool 统一处理。"""
         from tools.mosaic import MosaicTool
 
-        if MosaicTool.apply_style_change(style, getattr(self, "view", None),
-                                         getattr(self.scene, "undo_stack", None)):
+        if MosaicTool.apply_style_change(style, getattr(self, "view", None)):
             log_debug(T("马赛克种类已更新: {style}", style=style), "ScreenshotWindow")
 
     def on_mosaic_block_size_changed(self, block_size: int):
         """马赛克粒度变化，交给 MosaicTool 统一处理。"""
         from tools.mosaic import MosaicTool
 
-        if MosaicTool.apply_block_size_change(block_size, getattr(self, "view", None),
-                                              getattr(self.scene, "undo_stack", None)):
+        if MosaicTool.apply_block_size_change(block_size, getattr(self, "view", None)):
             log_debug(T("马赛克粒度已更新: {size}", size=block_size), "ScreenshotWindow")
 
     def on_line_style_changed(self, style: str):
@@ -1067,7 +1160,9 @@ class ScreenshotWindow(QWidget):
             # 保存配置，用于长截图窗口
             save_dir = self.config_manager.get_screenshot_save_path()
             
-            # 创建独立的长截图窗口（不传递 parent，让它独立运行）
+            # 创建独立的长截图窗口（不传递 parent，让它独立运行）。按需导入：长截图模块
+            # 加载时就会读设置、配置拼接引擎，放在文件顶部会被启动预加载带进工作线程。
+            from stitch import ScrollCaptureWindow
             scroll_window = ScrollCaptureWindow(capture_rect, parent=None, config_manager=self.config_manager)
             scroll_window.set_save_directory(save_dir)  # 设置保存目录
             

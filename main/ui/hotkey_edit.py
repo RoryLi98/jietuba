@@ -4,7 +4,7 @@
 提供视觉反馈，防止注册冲突的快捷键。
 """
 
-from PySide6.QtWidgets import QLineEdit, QWidget, QHBoxLayout, QLabel
+from PySide6.QtWidgets import QWidget, QHBoxLayout
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QKeyEvent, QKeySequence
 
@@ -14,7 +14,9 @@ from core.shortcut_manager import (
 )
 from core import safe_event
 from core.i18n import make_tr
-from core.ui_theme import get_ui_theme
+from core.ui_scale import dialog_scaled
+
+from .key_chip import STATUS_GAP, KeyChipLineEdit, StatusIcon
 
 _tr = make_tr("HotkeyEdit")
 
@@ -146,10 +148,7 @@ class _HotkeyEditHandler(ShortcutHandler):
         return True
 
 class HotkeyEdit(QWidget):
-    """
-    A composite widget that contains a QLineEdit for capturing hotkeys
-    and a validation status indicator (Check/X icon).
-    """
+    """全局热键录入框：按键块 + 右侧状态图标（可用 / 未设置 / 冲突）。"""
     textChanged = Signal(str)
 
     def __init__(self, parent=None):
@@ -158,21 +157,17 @@ class HotkeyEdit(QWidget):
         self._validation_error = ""
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
-        self.layout.setSpacing(5)
+        self.layout.setSpacing(dialog_scaled(STATUS_GAP))
 
         self.edit = _HotkeyLineEdit(self)
-        self.layout.addWidget(self.edit)
+        self.layout.addWidget(self.edit, 1)
 
-        # Status indicator
-        self.status_lbl = QLabel()
-        self.status_lbl.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
-        self.status_lbl.setFixedWidth(20)  # Reserve space
-        self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)  # Center icon
-        self.layout.addWidget(self.status_lbl)
-        
+        self.status_icon = StatusIcon(self)
+        self.layout.addWidget(self.status_icon, 0, Qt.AlignmentFlag.AlignVCenter)
+
         from core.shortcut_manager import HotkeySystem
         self.hotkey_system = HotkeySystem()
-        
+
         # Debounce timer for checking availability
         self.check_timer = QTimer(self)
         self.check_timer.setSingleShot(True)
@@ -182,6 +177,7 @@ class HotkeyEdit(QWidget):
         # Connect internal edit signals
         self.edit.textChanged.connect(self._on_text_changed)
         self.edit.textChanged.connect(self.textChanged.emit)
+        self._render_status()
 
     def setText(self, text):
         self.edit.setText(text)
@@ -189,23 +185,17 @@ class HotkeyEdit(QWidget):
 
     def text(self):
         return self.edit.text()
-    
-    def setPlaceholderText(self, text):
-        self.edit.setPlaceholderText(text)
-    
-    def setFixedWidth(self, w):
-        # Apply width to the composite widget or the edit?
-        # Usually user calls this on the editor. Let's redirect to super but ensure layout handles it.
-        super().setFixedWidth(w)
 
-    def setStyleSheet(self, style):
-        # Forward stylesheet to the line edit if possible, or just self
-        self.edit.setStyleSheet(style)
+    @property
+    def status_state(self) -> str:
+        """状态图标当前的状态："ok"、"idle"、"error"，空串表示不显示。"""
+        return self.status_icon.state
 
     def _on_text_changed(self, text):
         # 文本一变，旧值的系统检测结果就失效。设置页级冲突状态由外部
         # textChanged 监听器随后更新，因此这里先清掉旧的可用性显示。
         self._system_available = None
+        self._unparsable = False
         self._render_status()
         # If hotkey is complete (not ending with +), verify it
         if text and not text.endswith("+"):
@@ -217,22 +207,25 @@ class HotkeyEdit(QWidget):
         hotkey = self.text().strip()
         if not hotkey:
             self._system_available = True  # 空值表示未绑定，是合法状态
+            self._unparsable = False
             self._render_status()
             return True
         if hotkey.endswith("+"):
             self._system_available = False
+            self._unparsable = False
             self._render_status()
             return False
 
         # 先校验能否解析：无法解析的热键永远不会注册成功，
         # 与「已被其他程序占用」是两种不同的问题，提示要区分开。
-        if not is_hotkey_parsable(hotkey):
-            self.status_lbl.setText("⚠️")
-            self.status_lbl.setToolTip(
-                "⚠️ Unrecognized shortcut — this key is not supported for global hotkeys"
-            )
-            self.status_lbl.setStyleSheet("color: orange; font-weight: bold;")
-            return
+        # 鼠标侧键 token 走登记表而非键盘 VK 解析，跳过这条检查。
+        from core.shortcut_manager import is_mouse_button_hotkey
+        if not is_mouse_button_hotkey(hotkey) and not is_hotkey_parsable(hotkey):
+            self._unparsable = True
+            self._system_available = False
+            self._render_status()
+            return False
+        self._unparsable = False
 
         # Check availability using our HotkeySystem
         self._system_available = self.hotkey_system.check_hotkey_availability(hotkey)
@@ -243,20 +236,22 @@ class HotkeyEdit(QWidget):
         """合并设置页级校验与系统占用检测，设置页级错误优先显示。"""
         hotkey = self.text().strip()
         if self._validation_error:
-            self.status_lbl.setText("❌")
-            self.status_lbl.setToolTip(self._validation_error)
-            self.status_lbl.setStyleSheet("color: red; font-weight: bold;")
-        elif not hotkey or hotkey.endswith("+") or self._system_available is None:
-            self.status_lbl.clear()
-            self.status_lbl.setToolTip("")
+            state, tip = "error", self._validation_error
+        elif not hotkey:
+            state, tip = "idle", _tr("Not set")
+        elif getattr(self, "_unparsable", False):
+            state, tip = "error", _tr(
+                "Unrecognized shortcut — this key is not supported for global hotkeys"
+            )
+        elif hotkey.endswith("+") or self._system_available is None:
+            state, tip = "", ""
         elif self._system_available:
-            self.status_lbl.setText("✅")
-            self.status_lbl.setToolTip("Hotkey is available")
-            self.status_lbl.setStyleSheet("color: green; font-weight: bold;")
+            state, tip = "ok", _tr("Available")
         else:
-            self.status_lbl.setText("❌")
-            self.status_lbl.setToolTip("Hotkey is already in use by system or other app")
-            self.status_lbl.setStyleSheet("color: red; font-weight: bold;")
+            state, tip = "error", _tr("Already in use by another app.")
+        self.status_icon.setState(state, tip)
+        self.edit.setErrorState(state == "error")
+        self.edit.setToolTip(tip if state == "error" else "")
 
     def set_validation_error(self, message: str = ""):
         """设置由容器统一校验得出的错误（例如多个业务重复绑定）。"""
@@ -316,45 +311,22 @@ def validate_hotkey_group(edits, *, check_system: bool = False) -> bool:
     return all(system_results) and not duplicated
 
 
-class _HotkeyLineEdit(QLineEdit):
+class _HotkeyLineEdit(KeyChipLineEdit):
     """
     The internal customized QLineEdit that captures hotkeys.
     (This is the original HotkeyEdit logic, renamed to be internal)
     """
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setPlaceholderText("Press shortcut...")
         # NOTE: Do NOT set ReadOnly=True, as it may block key events on some platforms/versions.
         # We will block standard input by not calling super().keyPressEvent().
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self._apply_theme()
-        get_ui_theme().theme_changed.connect(self._apply_theme)
 
         # 创建 handler，聚焦时注册，失焦时注销
         self._shortcut_handler = _HotkeyEditHandler(self)
         # 侧键独占是引用计数式的，这里记录本控件是否已经占了一份，
         # 保证 focusIn / focusOut 成对增减，不会漏放或重复放。
         self._mouse_capture_held = False
-
-    def _apply_theme(self, _tokens=None):
-        tokens = get_ui_theme().tokens
-        self.setStyleSheet(f"""
-            QLineEdit {{
-                border: 1px solid {tokens.border_hover};
-                border-radius: 6px;
-                padding: 4px 8px;
-                background: {tokens.input_background};
-                color: {tokens.text};
-                font-size: 13px;
-            }}
-            QLineEdit:focus {{
-                border: 2px solid {tokens.accent};
-                background: {tokens.surface_hover};
-            }}
-            QLineEdit:hover {{
-                border-color: {tokens.accent_hover};
-            }}
-        """)
 
     @safe_event
     def keyPressEvent(self, event: QKeyEvent):

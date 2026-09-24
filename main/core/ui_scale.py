@@ -1,250 +1,326 @@
-﻿# -*- coding: utf-8 -*-
-"""界面缩放管理
-
-本应用刻意运行在「1 逻辑像素 = 1 物理像素」模式下（bootstrap 关闭了 Qt
-高 DPI 缩放），因为截图/钉图/长拼接等大量使用 mss 与 win32 返回的物理
-像素坐标。直接打开 QT_SCALE_FACTOR 会让整条坐标链错位，因此界面缩放
-采用「字体 + 固定尺寸」方案：
-
-  1. 启动时替换 QWidget.setStyleSheet / QApplication.setStyleSheet：
-     把样式表中的 font-size: Npx|pt 与 font: Npx|pt 简写按系数放大，
-     原始文本存入动态属性，供切换系数时无损重算；
-  2. 接管 QWidget.setFixed*/setMinimum* 系列方法：硬编码的控件尺寸
-     同样按系数放大（原始值存属性），字体变大后布局随之变大，
-     不会出现「字大了框没大」的挤压；由图片适配、字体度量或运行时
-     几何值决定尺寸的控件用 mark_unscaled() 豁免；
-  3. 按系数放大应用默认字体，覆盖未走样式表的文字（菜单、提示框等）；
-  4. set_ui_scale() 支持运行中切换：重设应用字体，并按原始值重刷
-     所有已存在控件的样式表与固定尺寸。
-
-系数保存在应用设置 ui_scale 中（默认 1.0，重启后依然生效）。
+# -*- coding: utf-8 -*-
 """
+操作界面缩放管理器 —— 集中管理工具栏、二级面板、弹层一类浮层的显示比例
 
-from __future__ import annotations
+只作用于操作界面尺寸（按钮、图标、字号、间距、边距、圆角、自绘控件的点击区域）。
+截图像素尺寸、绘制线宽、文字工具实际字号、录制区域这些内容数据不受影响。
 
-import re
-from typing import Optional
+尺寸一律用 Qt 像素；项目关闭了 Qt 自动高 DPI 缩放，首次运行时会根据
+Windows 系统 DPI 为两套界面缩放选择一个最接近的初始档位。
 
-from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QApplication, QWidget
+各组件把自己的基准尺寸写成常量，每次都从基准重新算 scaled(基准)，
+不要在已缩放的值上再乘比例 —— 反复切换比例会累积舍入误差。
 
-UI_SCALE_MIN = 1.0
-UI_SCALE_MAX = 2.0
-UI_SCALE_OPTIONS = [1.0, 1.25, 1.5, 1.75, 2.0]
+默认值定义在 settings/tool_settings.py 的 APP_DEFAULT_SETTINGS["ui_scale_percent"]，
+本模块通过 config_manager.get_app_setting / set_app_setting 读写。
+"""
+import math
 
-_scale: float = 1.0
-_base_font: Optional[QFont] = None
-_patched = False
-_orig_widget_setStyleSheet = None
-_orig_app_setStyleSheet = None
-
-# 原始样式表存放的动态属性名
-_RAW_SHEET_PROP = "_ui_scale_raw_stylesheet"
-# 「不参与固定尺寸缩放」标记的动态属性名（由 mark_unscaled 设置）
-_NO_SCALE_PROP = "_ui_scale_no_scale"
-# 固定尺寸调用日志存放的动态属性名：[(方法名, 原始参数), ...]
-_OPS_PROP = "_ui_scale_fixed_ops"
-
-# 接管的固定尺寸方法。豁免（mark_unscaled）用于尺寸由图片适配 /
-# 字体度量 / 运行时几何决定的控件，避免二次缩放。
-_FIXED_SIZE_METHODS = (
-    "setFixedWidth",
-    "setFixedHeight",
-    "setFixedSize",
-    "setMinimumWidth",
-    "setMinimumHeight",
-    "setMinimumSize",
-)
-
-# 原始方法备份，运行中重放固定尺寸时绕过补丁直接调用
-_orig_fixed_methods: dict = {}
-
-# font-size: 13px / 9pt
-_FONT_SIZE_RE = re.compile(r"(font-size\s*:\s*)(\d+(?:\.\d+)?)(px|pt\b)")
-# font: 600 13px Microsoft YaHei（简写，尺寸前最多三个样式/字重关键字，
-# 字重可能是数字如 600，因此前缀 token 允许字母数字）
-_FONT_SHORTHAND_RE = re.compile(
-    r"(\bfont\s*:\s*(?:[a-zA-Z0-9]+\s+){0,3})(\d+(?:\.\d+)?)(px|pt\b)"
-)
-# 已缩放标记：防止「读回样式表再设回去」的代码路径造成二次放大
-_SCALED_MARK = "/*ui-scale-scaled*/"
+from PySide6.QtCore import QObject, Signal
+from PySide6.QtWidgets import QWidget
 
 
-def get_ui_scale() -> float:
-    """当前界面缩放系数。"""
-    return _scale
+class _ScaleSignals(QObject):
+    """承载缩放变更信号的 QObject（管理器本身是普通单例，不继承 QObject）"""
+    # 不带参数：接收方直接连自己的 apply_scale()，需要比例时问 get_ui_scale()
+    scale_changed = Signal()
 
 
-def scaled(value: float) -> int:
-    """按当前系数换算字号/尺寸（px、pt 通用，至少为 1）。"""
-    return max(1, round(value * _scale))
+class UIScaleManager:
+    """操作界面缩放管理器（单例）"""
+
+    # 设置界面提供的档位，存储时用整数百分比，避免浮点在 QSettings 里往返失真
+    PERCENT_OPTIONS = (80, 90, 100, 110, 125, 150)
+    DEFAULT_PERCENT = 100
+
+    _instance = None
+
+    def __init__(self):
+        if hasattr(self, "_initialized"):
+            return
+        self._initialized = True
+        self._signals = _ScaleSignals()
+        self._config_manager = None
+        self._percent = self.DEFAULT_PERCENT
+
+    @classmethod
+    def instance(cls) -> "UIScaleManager":
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    # ================================================================
+    # 初始化（从配置加载）
+    # ================================================================
+
+    def init(self, config_manager):
+        """绑定配置管理器并载入已保存的比例"""
+        self._config_manager = config_manager
+        saved = config_manager.get_app_setting("ui_scale_percent")
+        self._percent = self.normalize_percent(saved)
+
+    # ================================================================
+    # 取值
+    # ================================================================
+
+    @property
+    def scale_changed(self):
+        """比例变更信号。接上自己的 apply_scale()，改比例时会被调用。"""
+        return self._signals.scale_changed
+
+    @property
+    def percent(self) -> int:
+        return self._percent
+
+    @property
+    def factor(self) -> float:
+        return self._percent / 100.0
+
+    def px(self, base) -> int:
+        """把基准像素换算成当前比例下的整数像素。
+
+        基准 0 保持 0（间距/边距可以就是 0），其余至少 1px，
+        免得分隔线一类 1px 的元素在缩小档位里消失。
+        """
+        if not base:
+            return 0
+        value = round(base * self.factor)
+        return max(1, int(value)) if base > 0 else min(-1, int(value))
+
+    def pxf(self, base) -> float:
+        """浮点版本，供描边宽度、圆角半径这类需要亚像素精度的绘制使用"""
+        return float(base) * self.factor
+
+    # ================================================================
+    # 设置（同时持久化）
+    # ================================================================
+
+    def set_percent(self, percent) -> bool:
+        """设置并持久化比例，发生变化时发出 scale_changed。返回是否真的变了。"""
+        percent = self.normalize_percent(percent)
+        changed = percent != self._percent
+        self._percent = percent
+        if self._config_manager:
+            self._config_manager.set_app_setting("ui_scale_percent", percent)
+        if changed:
+            self._signals.scale_changed.emit()
+        return changed
+
+    @classmethod
+    def normalize_percent(cls, value) -> int:
+        """把任意输入收敛到最近的合法档位，非法值回落到默认值"""
+        try:
+            value = int(round(float(value)))
+        except (TypeError, ValueError):
+            return cls.DEFAULT_PERCENT
+        return min(cls.PERCENT_OPTIONS, key=lambda option: (abs(option - value), option))
+
+    def reset_to_default(self):
+        self.set_percent(self.DEFAULT_PERCENT)
 
 
-# 兼容别名：语义上专指像素尺寸的场景
-scaled_px = scaled
+def recommended_scale_percent(system_dpi=None) -> int:
+    """按系统缩放区间选择保守的首次运行档位（96 DPI = 100%）。
 
-
-def _clamp(value: float) -> float:
+    系统缩放不超过 100% 时使用 100%；大于 100% 且不超过 150% 时
+    使用 125%；超过 150% 时使用 150%。这样不会让中等高 DPI 屏幕上的
+    固定尺寸窗口被等比例放得过大。
+    """
+    if system_dpi is None:
+        try:
+            from core.platform_utils import get_system_dpi
+            system_dpi = get_system_dpi()
+        except Exception:
+            # 自动检测只能改善首次体验，绝不能因为系统 API 异常阻断启动。
+            system_dpi = 96.0
     try:
-        value = float(value)
+        percent = float(system_dpi) / 96.0 * 100.0
+    except (TypeError, ValueError, ZeroDivisionError):
+        percent = UIScaleManager.DEFAULT_PERCENT
+    if not math.isfinite(percent) or percent <= 0:
+        percent = UIScaleManager.DEFAULT_PERCENT
+    if percent > 150:
+        return 150
+    if percent > 100:
+        return 125
+    return 100
+
+
+def apply_first_run_scale_defaults(config_manager, system_dpi=None):
+    """首次运行时为尚未配置的两套缩放写入系统推荐值。
+
+    已存在的任一设置都会保留，避免用户在向导期间重启，或预先导入配置后，
+    再次启动时被自动检测覆盖。返回实际推荐档位；非首次运行返回 ``None``。
+    """
+    if not config_manager.is_first_run():
+        return None
+
+    recommended = recommended_scale_percent(system_dpi)
+    settings = getattr(config_manager, "qsettings", None)
+    for key in ("ui_scale_percent", "dialog_scale_percent"):
+        setting_key = f"app/{key}"
+        if settings is None or not settings.contains(setting_key):
+            config_manager.set_app_setting(key, recommended)
+    return recommended
+
+
+def get_ui_scale() -> UIScaleManager:
+    """获取全局缩放管理器单例"""
+    return UIScaleManager.instance()
+
+
+def scaled(base) -> int:
+    """基准像素 → 当前比例下的整数像素"""
+    return UIScaleManager.instance().px(base)
+
+
+def scaled_f(base) -> float:
+    """基准像素 → 当前比例下的浮点像素（描边、圆角等）"""
+    return UIScaleManager.instance().pxf(base)
+
+
+def scale_factor() -> float:
+    """当前比例因子（1.0 = 100%）"""
+    return UIScaleManager.instance().factor
+
+
+class DialogScaleManager:
+    """独立业务窗口的界面缩放管理器。
+
+    与工具栏/面板的 UIScaleManager 分开：工具栏倍率管截图操作界面，
+    这一档管日常窗口的字号与尺寸。结构与 UIScaleManager 一致。
+    """
+
+    PERCENT_OPTIONS = UIScaleManager.PERCENT_OPTIONS
+    DEFAULT_PERCENT = 100
+
+    _instance = None
+
+    def __init__(self):
+        if hasattr(self, "_initialized"):
+            return
+        self._initialized = True
+        self._signals = _ScaleSignals()
+        self._config_manager = None
+        self._percent = self.DEFAULT_PERCENT
+
+    @classmethod
+    def instance(cls) -> "DialogScaleManager":
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def init(self, config_manager):
+        """绑定配置管理器并载入已保存的比例"""
+        self._config_manager = config_manager
+        saved = config_manager.get_app_setting("dialog_scale_percent")
+        self._percent = UIScaleManager.normalize_percent(saved)
+
+    @property
+    def scale_changed(self):
+        return self._signals.scale_changed
+
+    @property
+    def percent(self) -> int:
+        return self._percent
+
+    @property
+    def factor(self) -> float:
+        return self._percent / 100.0
+
+    def px(self, base) -> int:
+        """把基准像素换算成当前比例下的整数像素（语义同 UIScaleManager.px）"""
+        if not base:
+            return 0
+        value = round(base * self.factor)
+        return max(1, int(value)) if base > 0 else min(-1, int(value))
+
+    def pxf(self, base) -> float:
+        """浮点版本，语义同 UIScaleManager.pxf：供描边宽度、圆角半径等需要
+        亚像素精度、或要和 QPainter.scale() 配合使用的场景。"""
+        return float(base) * self.factor
+
+    def set_percent(self, percent) -> bool:
+        """设置并持久化比例，发生变化时发出 scale_changed。返回是否真的变了。"""
+        percent = UIScaleManager.normalize_percent(percent)
+        changed = percent != self._percent
+        self._percent = percent
+        if self._config_manager:
+            self._config_manager.set_app_setting("dialog_scale_percent", percent)
+        if changed:
+            self._signals.scale_changed.emit()
+        return changed
+
+
+def get_dialog_scale() -> DialogScaleManager:
+    """获取独立窗口缩放管理器单例"""
+    return DialogScaleManager.instance()
+
+
+def dialog_scaled(base) -> int:
+    """基准像素 → 当前独立窗口比例下的整数像素"""
+    return DialogScaleManager.instance().px(base)
+
+
+def dialog_scaled_f(base) -> float:
+    """基准像素 → 当前独立窗口比例下的浮点像素（描边、圆角等）"""
+    return DialogScaleManager.instance().pxf(base)
+
+
+def widget_scaled(widget, base) -> int:
+    """按控件上 configure_dialog_control() 标记的 dialog_scale_factor 属性换算像素。
+
+    未被标记的控件（工具栏/面板里的 fluent_lite 控件）比例视为 1.0 —— 那部分
+    走的是 UIScaleManager，两套缩放互不影响。供 ui/fluent_lite 的基础控件复用，
+    避免每个文件各自重复实现同一段换算逻辑。
+    """
+    try:
+        factor = float(widget.property("dialog_scale_factor") or 1.0) if widget is not None else 1.0
     except (TypeError, ValueError):
-        return 1.0
-    if value < UI_SCALE_MIN:
-        return UI_SCALE_MIN
-    if value > UI_SCALE_MAX:
-        return UI_SCALE_MAX
-    return value
+        factor = 1.0
+    if not base:
+        return 0
+    value = round(base * factor)
+    return max(1, int(value)) if base > 0 else min(-1, int(value))
 
 
-def scale_stylesheet(text: Optional[str]) -> str:
-    """把样式表中的字体尺寸按当前系数放大。"""
-    if not text or _scale == 1.0 or _SCALED_MARK in text:
-        return text or ""
-
-    def _sub(m: "re.Match[str]") -> str:
-        size = max(1, round(float(m.group(2)) * _scale))
-        return f"{m.group(1)}{size}{m.group(3)}"
-
-    # 先在末尾加标记再替换，替换结果自带标记
-    result = _FONT_SIZE_RE.sub(_sub, text + "\n" + _SCALED_MARK)
-    result = _FONT_SHORTHAND_RE.sub(_sub, result)
-    return result
-
-
-def load_ui_scale_from_config() -> float:
-    """从应用设置读取缩放系数（QApplication 创建前调用）。"""
-    global _scale
-    try:
-        from settings import get_tool_settings_manager
-        value = get_tool_settings_manager().get_app_setting("ui_scale", 1.0)
-    except Exception:
-        value = 1.0
-    _scale = _clamp(value)
-    return _scale
-
-
-def install_stylesheet_patch() -> None:
-    """接管样式表与固定尺寸设置入口，按当前系数放大。
-
-    必须在创建任何窗口之前调用；重复调用无效果。
-    """
-    global _patched, _orig_widget_setStyleSheet, _orig_app_setStyleSheet
-    if _patched:
+def scale_dialog_font(widget) -> None:
+    """将窗口的继承字体按当前独立窗口比例放大一次。"""
+    factor = get_dialog_scale().factor
+    if factor == 1.0:
         return
 
-    _orig_widget_setStyleSheet = QWidget.setStyleSheet
-
-    def _widget_set_stylesheet(self: QWidget, styleSheet: str) -> None:
-        self.setProperty(_RAW_SHEET_PROP, styleSheet or "")
-        _orig_widget_setStyleSheet(self, scale_stylesheet(styleSheet))
-
-    QWidget.setStyleSheet = _widget_set_stylesheet  # type: ignore[assignment]
-
-    if hasattr(QApplication, "setStyleSheet"):
-        _orig_app_setStyleSheet = QApplication.setStyleSheet
-
-        def _app_set_stylesheet(self, styleSheet: str) -> None:
-            self.setProperty(_RAW_SHEET_PROP, styleSheet or "")
-            _orig_app_setStyleSheet(self, scale_stylesheet(styleSheet))
-
-        QApplication.setStyleSheet = _app_set_stylesheet  # type: ignore[assignment]
-
-    # 固定尺寸：每次调用的原始值按顺序存入动态属性，实际设置缩放后的值。
-    # set_ui_scale() 运行中切换时按调用顺序重放（后调用的方法覆盖先前的，
-    # 与原生语义一致），实现整体重排。
-    for method_name in _FIXED_SIZE_METHODS:
-        orig_method = getattr(QWidget, method_name)
-        _orig_fixed_methods[method_name] = orig_method
-
-        def _make_patched(orig=orig_method, name=method_name):
-            def _patched(self, *args):
-                if args and all(isinstance(a, (int, float)) for a in args):
-                    if self.property(_NO_SCALE_PROP):
-                        orig(self, *args)
-                        return
-                    ops = self.property(_OPS_PROP)
-                    ops = list(ops) if ops else []
-                    if ops and ops[-1][0] == name:
-                        ops[-1] = (name, tuple(int(a) for a in args))
-                    else:
-                        ops.append((name, tuple(int(a) for a in args)))
-                    self.setProperty(_OPS_PROP, ops)
-                    args = tuple(scaled(a) for a in args)
-                orig(self, *args)
-            return _patched
-
-        setattr(QWidget, method_name, _make_patched())
-
-    _patched = True
+    font = widget.font()
+    if font.pointSizeF() > 0:
+        font.setPointSizeF(font.pointSizeF() * factor)
+    elif font.pixelSize() > 0:
+        font.setPixelSize(dialog_scaled(font.pixelSize()))
+    widget.setFont(font)
 
 
-def mark_unscaled(widget: QWidget) -> None:
-    """标记控件不参与固定尺寸缩放。
+def configure_dialog_control(widget) -> None:
+    """Opt a Fluent control into standalone-window sizing before its layout is used.
 
-    用于尺寸由内容/图片适配或运行时几何值决定的控件
-    （再乘缩放系数会二次放大）。必须在首次 setFixed*/setMinimum* 之前调用。
+    This deliberately touches one known control, rather than walking a completed
+    widget tree and multiplying its current geometry.  Fluent controls use the
+    marker when regenerating their own base stylesheet.
     """
-    widget.setProperty(_NO_SCALE_PROP, True)
+    widget.setProperty("dialog_scale_factor", get_dialog_scale().factor)
+    apply_theme = getattr(widget, "_apply_theme", None)
+    if callable(apply_theme):
+        apply_theme()
 
 
-def scaled_window_size(width: int, height: int) -> tuple:
-    """缩放顶层窗口的默认尺寸，并夹到屏幕可用区域的 92% 以内。"""
-    w, h = scaled(width), scaled(height)
-    app = QApplication.instance()
-    if app is not None:
-        screen = app.primaryScreen()
-        if screen is not None:
-            avail = screen.availableGeometry()
-            w = min(w, int(avail.width() * 0.92))
-            h = min(h, int(avail.height() * 0.92))
-    return w, h
+def configure_dialog_controls(root: QWidget) -> None:
+    """对 root 子树下所有已接入 dialog_scale_factor 机制的控件批量打标记。
 
-
-def apply_app_font(app: QApplication) -> None:
-    """按系数设置应用默认字体（首次调用时记录未缩放的基准字体）。"""
-    global _base_font
-    if _base_font is None:
-        _base_font = QFont(app.font())
-    font = QFont(_base_font)
-    font.setPointSize(max(1, round(_base_font.pointSize() * _scale)))
-    app.setFont(font)
-
-
-def _rescale_fixed_sizes(widget: QWidget) -> None:
-    """按记录的调用顺序重放一个控件的固定/最小尺寸设置。"""
-    ops = widget.property(_OPS_PROP)
-    if not ops:
-        return
-    for name, args in ops:
-        orig = _orig_fixed_methods.get(name)
-        if orig is not None:
-            orig(widget, *(scaled(a) for a in args))
-
-
-def set_ui_scale(value: float) -> float:
-    """设置缩放系数并即时生效（应用字体 + 样式表 + 固定尺寸整体重排）。"""
-    global _scale
-    _scale = _clamp(value)
-
-    app = QApplication.instance()
-    if app is None:
-        return _scale
-
-    apply_app_font(app)
-
-    if _patched and _orig_widget_setStyleSheet is not None:
-        for widget in QApplication.allWidgets():
-            try:
-                raw = widget.property(_RAW_SHEET_PROP)
-                if raw is not None:
-                    _orig_widget_setStyleSheet(widget, scale_stylesheet(raw))
-                _rescale_fixed_sizes(widget)
-            except RuntimeError:
-                continue  # 底层 C++ 对象已销毁
-
-        # 应用级样式表（QApplication 自身不是 QWidget，需单独处理）
-        if _orig_app_setStyleSheet is not None:
-            raw = app.property(_RAW_SHEET_PROP)
-            if raw is not None:
-                _orig_app_setStyleSheet(app, scale_stylesheet(raw))
-    return _scale
+    新增一个设置分页或弹层时，不用为其中每个 fluent_lite 控件都手写一遍
+    configure_dialog_control()：这里按 _apply_theme 是否存在筛选（那是控件
+    自己从基准常量重新算样式的入口），一次性打完标记。跟 configure_dialog_control
+    一样只触发控件"从基准值重算"，不读取也不搬用控件当前尺寸，所以同样不是
+    test_dialog_scale.py 里禁止的"事后整体拉伸"。
+    """
+    configure_dialog_control(root)
+    for widget in root.findChildren(QWidget):
+        if callable(getattr(widget, "_apply_theme", None)):
+            configure_dialog_control(widget)

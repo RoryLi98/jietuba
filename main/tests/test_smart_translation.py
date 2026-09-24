@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QApplication
 
+from core.ui_scale import dialog_scaled
 from core.ui_theme import DARK_TOKENS
 import translation.smart_translation_controller as smart_translation_controller_mod
 from translation.smart_translation_controller import SmartTranslationController
@@ -188,6 +189,37 @@ def test_compact_popup_reuses_existing_translation_palette(qapp):
     assert not popup.source_edit.isReadOnly()
     assert manual_requests[-1] == "manual text"
     popup.close()
+
+
+def test_empty_compact_popup_does_not_add_vertical_blank_space(qapp):
+    popup = TranslationPopup()
+    try:
+        popup.show_popup("", QPoint(10, 10))
+        qapp.processEvents()
+
+        assert popup.height() == popup.sizeHint().height()
+    finally:
+        popup.close()
+
+
+def test_reopened_popup_sizes_loading_state_to_loading_text(qapp):
+    popup = TranslationPopup()
+    loading_height = dialog_scaled(popup.RESULT_MIN_HEIGHT)
+    try:
+        popup.show_popup("first", QPoint(10, 10))
+        qapp.processEvents()
+        assert popup.result_edit.height() == loading_height
+
+        popup.show_result("\n".join(["a long translated line"] * 8))
+        qapp.processEvents()
+        assert popup.result_edit.height() > loading_height
+        popup.hide()
+
+        popup.show_popup("second", QPoint(10, 10))
+        qapp.processEvents()
+        assert popup.result_edit.height() == loading_height
+    finally:
+        popup.close()
 
 
 def test_compact_popup_uses_current_application_theme_when_created(qapp):
@@ -380,3 +412,176 @@ def test_shutdown_interrupts_and_joins_translation_workers(monkeypatch, qapp):
     assert worker.interrupted
     assert worker.wait_timeout is not None
     assert not worker.running
+
+
+class _SilentWorker:
+    def __init__(self, running=True):
+        self.running = running
+        self.wait_timeout = None
+
+    def isRunning(self):
+        return self.running
+
+    def requestInterruption(self):
+        pass
+
+    def wait(self, timeout):
+        self.wait_timeout = timeout
+        self.running = False
+        return True
+
+
+class _BudgetWorker(_SilentWorker):
+    def __init__(self, timeout_ms, running=True):
+        super().__init__(running=running)
+        self._timeout_ms = timeout_ms
+
+    def effective_timeout_ms(self):
+        return self._timeout_ms
+
+
+def _run_shutdown(monkeypatch, *workers):
+    manager = TranslationManager()
+    monkeypatch.setattr(manager, "close_dialog", lambda: None)
+    for w in workers:
+        manager._threads.add(w)
+    manager.shutdown()
+    return manager
+
+
+def test_shutdown_budget_follows_the_slowest_running_provider(monkeypatch, qapp):
+    from translation.providers.deepseek import DeepSeekProvider
+
+    floor_ms = DeepSeekProvider.MIN_TIMEOUT * 1000
+    worker = _BudgetWorker(timeout_ms=floor_ms)
+    _run_shutdown(monkeypatch, worker)
+
+    assert worker.wait_timeout >= floor_ms, (
+        f"只等了 {worker.wait_timeout}ms，短于该引擎自己的 {floor_ms}ms 超时"
+    )
+
+
+def test_shutdown_budget_takes_the_max_across_running_threads(monkeypatch, qapp):
+    slow = _BudgetWorker(timeout_ms=30000)
+    fast = _BudgetWorker(timeout_ms=10000)
+    _run_shutdown(monkeypatch, fast, slow)
+
+    assert slow.wait_timeout >= 30000
+
+
+def test_shutdown_does_not_wait_for_threads_that_already_finished(
+    monkeypatch, qapp
+):
+    done = _BudgetWorker(timeout_ms=30000, running=False)
+    manager = _run_shutdown(monkeypatch, done)
+
+    assert done.wait_timeout is None
+    assert manager._network_shutdown_budget_ms([done]) == 0
+
+
+def test_a_thread_that_cannot_report_its_timeout_still_gets_waited_for(
+    monkeypatch, qapp
+):
+    worker = _SilentWorker()
+    _run_shutdown(monkeypatch, worker)
+
+    assert worker.wait_timeout >= TranslationManager._FALLBACK_NETWORK_TIMEOUT_MS
+
+
+class _FakeOCRThread:
+    """形状对齐真正的 OCRThread：isRunning/cancel/wait，但不真的起一条线程。"""
+
+    def __init__(self):
+        self.running = True
+        self.cancelled = False
+        self.wait_timeout = None
+        self.wait_return = True
+
+    def isRunning(self):
+        return self.running
+
+    def cancel(self):
+        self.cancelled = True
+
+    def wait(self, timeout):
+        self.wait_timeout = timeout
+        if self.wait_return:
+            self.running = False
+        return self.wait_return
+
+
+def test_shutdown_waits_for_and_joins_an_in_flight_ocr_thread():
+    """退出时必须等还在跑的 OCR 线程，不能像网络线程那样只处理 self._threads
+    集合——OCR 线程是单独的 self._ocr_thread 属性，之前完全没被 shutdown()
+    碰过。不等它，解释器终止会撞上一个还在执行 FFI 调用的线程，直接 abort
+    掉整个进程，不是"安静地在后台跑完"那种体面退出。
+    """
+    manager = TranslationManager()
+    manager.close_dialog = lambda: None
+    ocr_thread = _FakeOCRThread()
+    manager._ocr_thread = ocr_thread
+
+    manager.shutdown(timeout_ms=0, ocr_timeout_ms=250)
+
+    assert ocr_thread.cancelled, "cancel() 打不断正在跑的识别，但仍应该调用，避免它跑完后再触发一次信号"
+    assert ocr_thread.wait_timeout == 250, "OCR 的超时应该独立于网络线程的 timeout_ms，不能被网络那份参数顶替"
+    assert not ocr_thread.running
+
+
+def test_shutdown_logs_a_warning_when_the_ocr_thread_does_not_finish_in_time(monkeypatch):
+    manager = TranslationManager()
+    manager.close_dialog = lambda: None
+    ocr_thread = _FakeOCRThread()
+    ocr_thread.wait_return = False  # 模拟等到超时、线程仍未结束
+    manager._ocr_thread = ocr_thread
+
+    warnings = []
+
+    def _record(msg, *_a, **_k):
+        # log_warning 收到的是可翻译的 LogMsg（core.logger.T(...) 的返回值），
+        # 它没有 __str__，str() 拿到的只是默认 repr；要看实际文案得走 render()。
+        warnings.append(msg.render() if hasattr(msg, "render") else str(msg))
+
+    monkeypatch.setattr("translation.translation_manager.log_warning", _record)
+
+    manager.shutdown(timeout_ms=0, ocr_timeout_ms=10)
+
+    assert ocr_thread.running, "wait 超时应该如实反映线程还在跑，不能假装它结束了"
+    assert any("OCR" in w for w in warnings)
+
+
+def test_shutdown_is_a_noop_when_no_ocr_thread_was_ever_started():
+    """从没截过图翻译过的会话，_ocr_thread 属性根本不存在；退出不该因此报错。"""
+    manager = TranslationManager()
+    manager.close_dialog = lambda: None
+    assert not hasattr(manager, "_ocr_thread")
+
+    manager.shutdown(timeout_ms=0, ocr_timeout_ms=10)  # 不应抛异常
+
+
+def _assert_badge_elided(badge, full_text, padding):
+    max_width = dialog_scaled(220)
+    assert badge.text() != full_text and badge.text().endswith("…")
+    assert badge.toolTip() == full_text
+    assert badge.maximumWidth() == max_width
+    assert badge.fontMetrics().horizontalAdvance(badge.text()) <= max_width - 2 * dialog_scaled(padding)
+
+
+def test_long_engine_names_are_elided_on_both_windows(qapp):
+    from translation.translation_dialog import TranslationDialog
+
+    long_name = "My very long self-hosted model name " * 4
+    popup = TranslationPopup()
+    dialog = TranslationDialog()
+    try:
+        popup.set_backend_status(long_name, True)
+        _assert_badge_elided(popup.backend_badge, long_name, 8)
+        dialog.set_backend_badge(long_name, True)
+        _assert_badge_elided(dialog.backend_badge, long_name, 10)
+
+        popup.set_backend_status("DeepL", True)
+        assert popup.backend_badge.text() == "DeepL"
+        assert popup.backend_badge.toolTip() == ""
+    finally:
+        popup.close()
+        dialog.close()

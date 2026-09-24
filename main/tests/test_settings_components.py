@@ -31,8 +31,7 @@ def theme(monkeypatch):
 
 # components 里成对取值的派生函数，以及它们的 (light, dark) 期望值
 DERIVED_COLORS = {
-    "theme_surface_color": ("rgba(239, 244, 250, 0.91)", "#202124"),
-    "theme_sidebar_color": ("rgba(246, 249, 252, 0.54)", "#25272B"),
+    "theme_surface_color": ("#FAFBFC", "#202124"),
     "theme_border_color": ("rgba(255, 255, 255, 0.76)", "rgba(255, 255, 255, 0.08)"),
     "theme_input_background": ("rgba(255, 255, 255, 0.78)", "#2B2D31"),
     "theme_popup_background": ("#FFFFFF", "#2A2C30"),
@@ -79,7 +78,7 @@ class TestThemeTextStyle:
 
     def test_default_style_uses_the_theme_text_colour(self, theme):
         assert components.theme_text_style() == (
-            "font-size: 13px; color: #111111; background: transparent;")
+            "font-size: 14px; color: #111111; background: transparent;")
 
     def test_font_size_is_honoured(self, theme):
         for size in (9, 13, 20):
@@ -87,11 +86,11 @@ class TestThemeTextStyle:
 
     def test_bold_appends_a_font_weight(self, theme):
         assert components.theme_text_style(bold=True) == (
-            "font-size: 13px; color: #111111; background: transparent; font-weight: 600;")
+            "font-size: 14px; color: #111111; background: transparent; font-weight: 600;")
 
     def test_extra_css_is_appended_after_a_single_space(self, theme):
         assert components.theme_text_style(extra="margin-left: 4px;") == (
-            "font-size: 13px; color: #111111; background: transparent; margin-left: 4px;")
+            "font-size: 14px; color: #111111; background: transparent; margin-left: 4px;")
 
     def test_whitespace_only_extra_adds_nothing(self, theme):
         for extra in ("", "   ", "\t\n"):
@@ -115,7 +114,7 @@ class TestThemeCaptionStyle:
 
     def test_caption_uses_the_muted_colour_and_a_smaller_default_size(self, theme):
         assert components.theme_caption_style() == (
-            "font-size: 12px; color: #888888; background: transparent;")
+            "font-size: 13px; color: #888888; background: transparent;")
 
     def test_caption_never_goes_bold(self, theme):
         """说明文字没有 bold 参数，样式串里也不该出现字重"""
@@ -124,7 +123,7 @@ class TestThemeCaptionStyle:
 
     def test_extra_css_is_appended(self, theme):
         assert components.theme_caption_style(extra="margin: 0;") == (
-            "font-size: 12px; color: #888888; background: transparent; margin: 0;")
+            "font-size: 13px; color: #888888; background: transparent; margin: 0;")
 
     def test_whitespace_only_extra_adds_nothing(self, theme):
         for extra in ("", "  ", "\n"):

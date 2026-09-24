@@ -13,34 +13,70 @@ from PySide6.QtCore import QObject, Qt
 from PySide6.QtGui import QCursor
 from core import log_info, log_error
 from core.logger import T
-from core.shortcut_manager import ShortcutManager, ShortcutHandler, load_inapp_bindings
+from core.shortcut_manager import (
+    ShortcutManager, ShortcutHandler, event_key,
+    load_inapp_bindings, load_inapp_mouse_bindings, match_inapp_binding,
+)
 
 
 class _PinHandlerBase(ShortcutHandler):
     """钉图快捷键处理器的共用基类"""
 
     # 需要从配置读取的钉图快捷键列表
-    _PIN_KEYS = ["inapp_copy_pin", "inapp_thumbnail", "inapp_toggle_toolbar", "inapp_delete"]
+    _PIN_KEYS = [
+        "inapp_copy_pin", "inapp_copy_pin_text", "inapp_pin_reset_size",
+        "inapp_thumbnail", "inapp_toggle_toolbar", "inapp_delete",
+    ]
 
     def __init__(self, controller: 'PinShortcutController'):
         self._controller = controller
         # 从配置读取钉图相关绑定
-        self._bindings = load_inapp_bindings(self._PIN_KEYS)
+        self.reload_bindings()
 
     def reload_bindings(self):
         """重新读取配置（设置变更后调用）"""
         self._bindings = load_inapp_bindings(self._PIN_KEYS)
+        self._mouse_bindings = load_inapp_mouse_bindings(self._PIN_KEYS)
 
     def _find_pin_under_cursor(self):
         return self._controller._find_pin_under_cursor()
 
     def _match(self, event, cfg_key: str) -> bool:
-        """检查按键事件是否匹配某个配置的快捷键"""
-        binding = self._bindings.get(cfg_key)
-        if not binding:
-            return False
-        want_key, want_mods = binding
-        return event.key() == want_key and event.modifiers() == want_mods
+        """检查事件是否匹配某个配置的快捷键（键盘组合或鼠标键）"""
+        return match_inapp_binding(
+            event, cfg_key, self._bindings, self._mouse_bindings
+        )
+
+    def handle_mouse(self, event) -> bool:
+        """中键走和键盘完全相同的那条 if 链，见 ShortcutHandler.handle_mouse。"""
+        return self.handle_key(event)
+
+    def _handle_shared(self, pin, event) -> bool:
+        """编辑与非编辑模式下行为一致的那几个快捷键。"""
+        if self._match(event, "inapp_copy_pin"):
+            ocr_layer = getattr(pin, 'ocr_text_layer', None)
+            if ocr_layer and ocr_layer.get_selected_text():
+                ocr_layer._copy_selected_text()
+                return True
+            pin.copy_to_clipboard()
+            return True
+
+        if self._match(event, "inapp_copy_pin_text"):
+            pin.copy_all_text()
+            return True
+
+        if self._match(event, "inapp_toggle_toolbar"):
+            pin.toggle_toolbar()
+            return True
+
+        if self._match(event, "inapp_pin_reset_size"):
+            # 缩略图模式下窗口尺寸由缩略图逻辑决定，与右键菜单一样不提供此项
+            if getattr(pin, '_thumbnail_mode', False):
+                return False
+            pin.reset_to_original_size()
+            return True
+
+        return False
 
     # ------------------------------------------------------------------
     # 系统热键拦截
@@ -124,20 +160,10 @@ class PinEditShortcutHandler(_PinHandlerBase):
         if not (pin.canvas and pin.canvas.is_editing):
             return False
 
-        key = event.key()
+        key = event_key(event)
 
-        # 配置的复制快捷键
-        if self._match(event, "inapp_copy_pin"):
-            ocr_layer = getattr(pin, 'ocr_text_layer', None)
-            if ocr_layer and ocr_layer.get_selected_text():
-                ocr_layer._copy_selected_text()
-                return True
-            pin.copy_to_clipboard()
-            return True
-
-        # 切换工具栏（编辑模式下与普通模式行为一致，hide_toolbar 会同时退出编辑）
-        if self._match(event, "inapp_toggle_toolbar"):
-            pin.toggle_toolbar()
+        # 复制 / 复制文字 / 工具栏（hide_toolbar 会同时退出编辑）/ 恢复大小
+        if self._handle_shared(pin, event):
             return True
 
         # ESC：退出编辑模式
@@ -201,25 +227,14 @@ class PinNormalShortcutHandler(_PinHandlerBase):
         if pin.canvas and pin.canvas.is_editing:
             return False
 
-        key = event.key()
+        key = event_key(event)
 
-        # 配置的复制快捷键
-        if self._match(event, "inapp_copy_pin"):
-            ocr_layer = getattr(pin, 'ocr_text_layer', None)
-            if ocr_layer and ocr_layer.get_selected_text():
-                ocr_layer._copy_selected_text()
-                return True
-            pin.copy_to_clipboard()
+        if self._handle_shared(pin, event):
             return True
 
         # 切换缩略图模式
         if self._match(event, "inapp_thumbnail"):
             pin.toggle_thumbnail_mode()
-            return True
-
-        # 切换工具栏
-        if self._match(event, "inapp_toggle_toolbar"):
-            pin.toggle_toolbar()
             return True
 
         # ESC：关闭钉图

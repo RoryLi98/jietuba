@@ -29,8 +29,13 @@ import time
 from typing import Optional
 from PySide6.QtCore import QCoreApplication, QObject, QPoint, QTimer, Signal
 
+from core.i18n import make_tr
 from core.logger import log_info, log_debug, log_error, log_warning, T
 from core.ui_theme import get_ui_theme
+
+
+# 服务名显示在翻译窗口的标签上，和窗口共用一个翻译上下文
+_tr = make_tr("TranslationDialog")
 
 
 class TranslationManager(QObject):
@@ -103,9 +108,11 @@ class TranslationManager(QObject):
 
     def _backend_name(self) -> str:
         try:
-            return self._translation_service.provider_name()
+            return self._translation_service.provider_label(
+                _tr, overrides=self._provider_overrides()
+            )
         except ValueError:
-            return self.tr("Engine not configured")
+            return _tr("Engine not configured")
 
     def _activate_surface(self, target: str) -> None:
         """Keep the full editor and compact popup mutually exclusive."""
@@ -654,14 +661,34 @@ class TranslationManager(QObject):
         self._popup = None
         self._stop_current_thread()
 
-    def shutdown(self, timeout_ms: int = 11000) -> None:
-        """Close translation UI and let all network workers finish before exit."""
+    _SHUTDOWN_SLACK_MS = 1000
+    _FALLBACK_NETWORK_TIMEOUT_MS = 10000
+
+    def _network_shutdown_budget_ms(self, threads) -> int:
+        budget = 0
+        for thread in threads:
+            if not thread.isRunning():
+                continue
+            per_thread = getattr(thread, "effective_timeout_ms", None)
+            budget = max(
+                budget,
+                per_thread() if callable(per_thread)
+                else self._FALLBACK_NETWORK_TIMEOUT_MS,
+            )
+        return (budget + self._SHUTDOWN_SLACK_MS) if budget else 0
+
+    def shutdown(
+        self, timeout_ms: int | None = None, ocr_timeout_ms: int = 3000
+    ) -> None:
+        """Close translation UI and let all network/OCR workers finish before exit."""
         self.close_dialog()
         threads = list(self._threads)
         for thread in threads:
             if thread.isRunning():
                 thread.requestInterruption()
 
+        if timeout_ms is None:
+            timeout_ms = self._network_shutdown_budget_ms(threads)
         deadline = time.monotonic() + max(0, timeout_ms) / 1000
         for thread in threads:
             if not thread.isRunning():
@@ -671,7 +698,20 @@ class TranslationManager(QObject):
                 continue
             if thread.isRunning():
                 log_warning(T("退出时翻译网络线程未在期限内结束"), "Translation")
-    
+
+        # OCR 线程同样必须等，且不能只当成网络线程处理：解释器终止和一个还在
+        # 执行 Python/FFI 代码的线程撞在一起，会让进程直接 abort 掉，不是"这个
+        # 线程安静地在后台跑完"那种优雅结束（实测退出码 0xC0000409）。cancel()
+        # 只是个标志位，OCR 识别本身是一次不可中断的同步 FFI 调用，打不断正在
+        # 跑的那一次——真正让退出安全的是下面这个 wait()。超时给得比网络翻译
+        # 短：本地识别通常远快于网络请求，不需要陪它等到 11 秒。
+        ocr_thread = getattr(self, "_ocr_thread", None)
+        if ocr_thread is not None and ocr_thread.isRunning():
+            if hasattr(ocr_thread, "cancel"):
+                ocr_thread.cancel()
+            if not ocr_thread.wait(max(0, ocr_timeout_ms)):
+                log_warning(T("退出时 OCR 线程未在期限内结束"), "Translation")
+
     def is_dialog_open(self) -> bool:
         """检查翻译窗口是否打开"""
         return self._is_dialog_valid() and self._dialog.isVisible()

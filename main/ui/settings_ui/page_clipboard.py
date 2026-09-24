@@ -5,21 +5,22 @@ import shutil
 import sys
 
 from core.logger import log_exception, T
+from core.ui_scale import dialog_scaled
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
+    QWidget, QVBoxLayout, QScrollArea, QSizePolicy,
     QFileDialog, QProgressDialog,
 )
-from PySide6.QtCore import Qt, QThread, Signal, QSize
+from PySide6.QtCore import Qt, QThread, Signal
 from ui.dialogs import (
     show_info_dialog, show_warning_dialog, show_confirm_dialog,
     show_confirm_checkbox_dialog,
 )
 from ui.fluent_lite import (
     SwitchSettingCard, SettingCard as FSettingCard,
-    FluentIcon, SpinBox, CaptionLabel,
+    FluentIcon, SpinBox, ComboBox, CaptionLabel,
     PushButton, PrimaryPushButton, TransparentToolButton,
 )
-from .components import SettingCardGroup, WhiteCard, apply_theme_text_style
+from .components import SettingCardGroup
 
 
 def create_clipboard_page(dialog) -> QWidget:
@@ -31,8 +32,8 @@ def create_clipboard_page(dialog) -> QWidget:
     view = QWidget()
     view.setStyleSheet("background: transparent;")
     layout = QVBoxLayout(view)
-    layout.setContentsMargins(0, 0, 10, 0)
-    layout.setSpacing(20)
+    layout.setContentsMargins(0, 0, dialog_scaled(10), 0)
+    layout.setSpacing(dialog_scaled(20))
 
     # ════ 基本设置 ════
     grp_basic = SettingCardGroup(dialog.tr("Basic Settings"), view)
@@ -46,6 +47,23 @@ def create_clipboard_page(dialog) -> QWidget:
     enabled_card.setChecked(dialog.config_manager.get_clipboard_enabled())
     dialog.clipboard_enabled_toggle = enabled_card
     grp_basic.addSettingCard(enabled_card)
+
+    scan_interval_card = FSettingCard(
+        FluentIcon.STOP_WATCH,
+        dialog.tr("Window Scan Interval"),
+        dialog.tr("How often the foreground window is sampled to find the paste target (only while this panel is open)"),
+        parent=grp_basic,
+    )
+    dialog.clipboard_scan_interval_combo = ComboBox(scan_interval_card)
+    scan_interval_options = dialog.config_manager.get_clipboard_foreground_scan_interval_options()
+    current_scan_interval = dialog.config_manager.get_clipboard_foreground_scan_interval_ms()
+    for ms in scan_interval_options:
+        dialog.clipboard_scan_interval_combo.addItem(f"{ms} ms", userData=ms)
+    idx = dialog.clipboard_scan_interval_combo.findData(current_scan_interval)
+    if idx >= 0:
+        dialog.clipboard_scan_interval_combo.setCurrentIndex(idx)
+    scan_interval_card.addControl(dialog.clipboard_scan_interval_combo)
+    grp_basic.addSettingCard(scan_interval_card)
 
     layout.addWidget(grp_basic)
 
@@ -63,11 +81,7 @@ def create_clipboard_page(dialog) -> QWidget:
     dialog.clipboard_history_limit_spin.setValue(
         dialog.config_manager.get_clipboard_history_limit()
     )
-    dialog.clipboard_history_limit_spin.setFixedWidth(150)
-    limit_card.hBoxLayout.addWidget(
-        dialog.clipboard_history_limit_spin, 0, Qt.AlignmentFlag.AlignRight
-    )
-    limit_card.hBoxLayout.addSpacing(16)
+    limit_card.addControl(dialog.clipboard_history_limit_spin)
     grp_history.addSettingCard(limit_card)
 
     layout.addWidget(grp_history)
@@ -85,61 +99,49 @@ def create_clipboard_page(dialog) -> QWidget:
         parent=grp_data,
     )
     dialog._clipboard_storage_card = storage_card
-    open_folder_btn = PushButton(dialog.tr("Open Folder"), storage_card)
-    open_folder_btn.clicked.connect(
-        lambda: _open_clipboard_data_folder(dialog, _get_clipboard_db_path(dialog))
-    )
-    change_folder_btn = PushButton(dialog.tr("Change Location"), storage_card)
+    change_folder_btn = PushButton(dialog.tr("Change"), storage_card)
     change_folder_btn.clicked.connect(
         lambda: _change_clipboard_data_location(dialog)
     )
-    storage_card.hBoxLayout.addWidget(
-        open_folder_btn, 0, Qt.AlignmentFlag.AlignRight
+    open_folder_btn = PushButton(dialog.tr("Open"), storage_card)
+    open_folder_btn.clicked.connect(
+        lambda: _open_clipboard_data_folder(dialog, _get_clipboard_db_path(dialog))
     )
-    storage_card.hBoxLayout.addWidget(
-        change_folder_btn, 0, Qt.AlignmentFlag.AlignRight
-    )
-    storage_card.hBoxLayout.addSpacing(16)
+    storage_card.addControl(change_folder_btn)
+    storage_card.addControl(open_folder_btn)
     grp_data.addSettingCard(storage_card)
 
     # 清理
-    cleanup_card = WhiteCard(grp_data)
-    cleanup_h = QHBoxLayout(cleanup_card)
-    cleanup_h.setContentsMargins(20, 12, 20, 12)
-    cleanup_h.setSpacing(12)
+    cleanup_card = FSettingCard(
+        FluentIcon.DELETE,
+        dialog.tr("Clear Clipboard History"),
+        dialog.tr("Delete all clipboard history records"),
+        parent=grp_data,
+    )
 
-    cleanup_left = QVBoxLayout()
-    cleanup_left.setSpacing(2)
-    cleanup_title = QLabel(dialog.tr("Clear Clipboard History"), cleanup_card)
-    apply_theme_text_style(cleanup_title, 14)
-    cleanup_left.addWidget(cleanup_title)
-
-    dialog._clipboard_size_label = QLabel(dialog.tr("← Get storage size"), cleanup_card)
-    apply_theme_text_style(dialog._clipboard_size_label, 12, caption=True)
+    # 体积要扫一遍磁盘才知道，所以是按需刷新的。刷新按钮和结果排在控件列
+    # 左边，不占那一列——占了的话这张卡的按钮就和别的卡片错开了。
+    dialog._clipboard_size_label = CaptionLabel(
+        dialog.tr("← Get storage size"), cleanup_card
+    )
+    # CaptionLabel 默认可换行、可被压到零宽（那是给卡片描述用的），这里是一行
+    # 结果文字，得按内容占位，否则会被旁边吃满宽度的文字区挤没。
+    dialog._clipboard_size_label.setWordWrap(False)
+    dialog._clipboard_size_label.setSizePolicy(
+        QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
+    )
     dialog._calc_clipboard_storage_size = _calc_clipboard_storage_size
-
-    # 手动刷新按钮 + 大小标签
-    size_row = QHBoxLayout()
-    size_row.setSpacing(4)
     refresh_btn = TransparentToolButton(FluentIcon.SYNC, cleanup_card)
-    refresh_btn.setFixedSize(48, 48)
-    refresh_btn.setIconSize(QSize(32, 32))
+    refresh_btn.setBaseMetrics(48, 32)
     refresh_btn.clicked.connect(lambda: _refresh_clipboard_size_async(dialog))
     dialog._clipboard_refresh_btn = refresh_btn
-    size_row.addWidget(refresh_btn)
-    size_row.addWidget(dialog._clipboard_size_label)
-
-    cleanup_desc = QLabel(dialog.tr("Delete all clipboard history records"), cleanup_card)
-    apply_theme_text_style(cleanup_desc, 12, caption=True)
-    cleanup_left.addWidget(cleanup_desc)
-
-    cleanup_h.addLayout(cleanup_left, 1)
-    cleanup_h.addLayout(size_row)
+    size_index = cleanup_card.hBoxLayout.count() - 1
+    cleanup_card.hBoxLayout.insertWidget(size_index, refresh_btn)
+    cleanup_card.hBoxLayout.insertWidget(size_index + 1, dialog._clipboard_size_label)
 
     clear_btn = PrimaryPushButton(dialog.tr("Clear History"), cleanup_card)
     clear_btn.clicked.connect(lambda: _clear_clipboard_history(dialog))
-    cleanup_h.addWidget(clear_btn)
-    cleanup_card.setFixedHeight(72)
+    cleanup_card.addControl(clear_btn)
     grp_data.addSettingCard(cleanup_card)
 
     layout.addWidget(grp_data)
@@ -294,6 +296,8 @@ def _change_clipboard_data_location(dialog):
             if not confirmed:
                 return
 
+        _close_open_clipboard_windows()
+
         if not cm.release_storage():
             show_warning_dialog(dialog, dialog.tr("Error"), dialog.tr("Failed to close the current clipboard database."))
             return
@@ -380,6 +384,22 @@ def _on_clipboard_move_failed(dialog, cm, progress, worker, old_db_path: str, me
         dialog._clipboard_move_thread = None
         dialog._clipboard_move_progress = None
     show_warning_dialog(dialog, dialog.tr("Error"), message)
+
+
+def _close_open_clipboard_windows():
+    """迁移期间后端会被释放，窗口上的任何操作都会静默失效，先关掉。
+
+    以前窗口一失焦就自己隐藏，碰不到这段时间；设成粘贴后常驻之后就碰得到了。
+    用 close 而不是 hide：closeEvent 会注销快捷键处理器、并关掉已弹出的
+    右键菜单，那些菜单项按下去同样会打到已经释放的后端。
+    """
+    try:
+        from PySide6.QtWidgets import QApplication
+        for widget in QApplication.topLevelWidgets():
+            if hasattr(widget, "request_data_refresh") and widget.isVisible():
+                widget.close()
+    except Exception:
+        pass
 
 
 def _refresh_open_clipboard_windows():

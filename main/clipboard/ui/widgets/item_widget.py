@@ -113,9 +113,6 @@ class ClipboardItemWidget(QFrame):
         content_label.setObjectName("contentLabel")
         content_label.setTextFormat(Qt.TextFormat.PlainText)
         content_label.setWordWrap(False)
-        # 行高来自字体度量（字体已随界面缩放），豁免尺寸缩放避免二次放大
-        from core.ui_scale import mark_unscaled
-        mark_unscaled(content_label)
 
         font_metrics = content_label.fontMetrics()
         line_height = font_metrics.height()

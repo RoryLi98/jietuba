@@ -308,8 +308,20 @@ Replace it?</source>
         <translation>删除选中图元</translation>
     </message>
     <message>
+        <source>Restore Last Region</source>
+        <translation>恢复上次选区</translation>
+    </message>
+    <message>
         <source>Copy Pinned Image</source>
         <translation>复制钉图内容</translation>
+    </message>
+    <message>
+        <source>Copy All Text</source>
+        <translation>复制全部文本</translation>
+    </message>
+    <message>
+        <source>Reset Size</source>
+        <translation>重置大小</translation>
     </message>
     <message>
         <source>Toggle Thumbnail</source>
@@ -332,6 +344,10 @@ Replace it?</source>
         <translation>截图翻译</translation>
     </message>
     <message>
+        <source>Recognize Text</source>
+        <translation>文字识别</translation>
+    </message>
+    <message>
         <source>Cursor Move Keys</source>
         <translation>鼠标微移按键</translation>
     </message>
@@ -348,10 +364,6 @@ Replace it?</source>
     <message>
         <source>Stitching Engine</source>
         <translation>拼接引擎</translation>
-    </message>
-    <message>
-        <source>Rust Hash (Recommended)</source>
-        <translation>哈希值匹配 (推荐)</translation>
     </message>
     <message>
         <source>Python Hash (Debug)</source>
@@ -414,12 +426,32 @@ Replace it?</source>
     
     <!-- Smart Selection Page -->
     <message>
-        <source>Enable Smart Selection</source>
-        <translation>启用智能选区</translation>
+        <source>Detection Mode</source>
+        <translation>检测方式</translation>
     </message>
     <message>
-        <source>Automatically recognizes UI elements at mouse cursor position.</source>
-        <translation>自动识别鼠标光标位置的窗口。</translation>
+        <source>Snap the selection to the window or control under the cursor. Control detection reads the accessibility tree and takes longer on large windows.</source>
+        <translation>让选区自动贴合光标下的窗口或控件。检测元素需要读取无障碍树，窗口越大耗时越久。</translation>
+    </message>
+    <message>
+        <source>Off</source>
+        <translation>关闭</translation>
+    </message>
+    <message>
+        <source>Window</source>
+        <translation>窗口</translation>
+    </message>
+    <message>
+        <source>Control</source>
+        <translation>控件</translation>
+    </message>
+    <message>
+        <source>Selection Switch Animation</source>
+        <translation>选区切换动画</translation>
+    </message>
+    <message>
+        <source>Slide the selection when it moves from one window or control to another.</source>
+        <translation>选区在窗口或控件之间移动时滑动过渡。</translation>
     </message>
     <message>
         <source>💡 How to use:</source>
@@ -448,8 +480,16 @@ Replace it?</source>
         <translation>截图时自动保存为文件。</translation>
     </message>
     <message>
-        <source>Save Folder:</source>
-        <translation>保存文件夹:</translation>
+        <source>Write File Path to Clipboard</source>
+        <translation>写入文件路径到剪贴板</translation>
+    </message>
+    <message>
+        <source>Lets tools that only recognize a file path (e.g. some terminal apps) paste the screenshot too. Requires Auto-save Screenshots to be enabled.</source>
+        <translation>让只认文件路径的工具（如部分终端程序）也能粘贴截图。需要开启"自动保存截图"。</translation>
+    </message>
+    <message>
+        <source>Save Folder</source>
+        <translation>保存文件夹</translation>
     </message>
     <message>
         <source>Save Format:</source>
@@ -750,6 +790,42 @@ Replace it?</source>
         <translation>可选，留空使用默认值</translation>
     </message>
     <message>
+        <source>Baidu Translate</source>
+        <translation>百度翻译</translation>
+    </message>
+    <message>
+        <source>Baidu APPID</source>
+        <translation>百度 APPID</translation>
+    </message>
+    <message>
+        <source>Baidu Secret Key</source>
+        <translation>百度密钥</translation>
+    </message>
+    <message>
+        <source>Paired with APPID in the Baidu console</source>
+        <translation>控制台「开发者信息」里与 APPID 成对的密钥</translation>
+    </message>
+    <message>
+        <source>Baidu Translate Open Platform</source>
+        <translation>百度翻译开放平台 · 开发者信息</translation>
+    </message>
+    <message>
+        <source>DeepSeek API Key</source>
+        <translation>DeepSeek API Key</translation>
+    </message>
+    <message>
+        <source>Model</source>
+        <translation>模型</translation>
+    </message>
+    <message>
+        <source>API Base URL</source>
+        <translation>API 地址</translation>
+    </message>
+    <message>
+        <source>LLM translation: better with context and idioms, but slower, billed per token, and may refuse some content</source>
+        <translation>大模型翻译：更懂上下文和习惯用法，但更慢、按 token 计费，且可能拒绝部分内容</translation>
+    </message>
+    <message>
         <source>Translation Options</source>
         <translation>翻译选项</translation>
     </message>
@@ -776,6 +852,93 @@ Replace it?</source>
     <message>
         <source>Keep original text formatting</source>
         <translation>保持原文格式</translation>
+    </message>
+    <message><source>Color Formats</source><translation>颜色格式</translation></message>
+    <message><source>Which formats the magnifier shows, and which one the copy shortcut uses.</source><translation>放大镜上显示哪些格式，以及按键复制的是哪一个。</translation></message>
+    <message><source>Manage Color Formats</source><translation>管理颜色格式</translation></message>
+    <message>
+        <source>Custom LLM-1</source>
+        <translation>自定义 LLM-1</translation>
+    </message>
+    <message>
+        <source>Custom LLM-2</source>
+        <translation>自定义 LLM-2</translation>
+    </message>
+    <message>
+        <source>Custom LLM-3</source>
+        <translation>自定义 LLM-3</translation>
+    </message>
+    <message>
+        <source>API Key</source>
+        <translation>API Key</translation>
+    </message>
+    <message>
+        <source>Temperature</source>
+        <translation>温度</translation>
+    </message>
+    <message>
+        <source>Timeout (s)</source>
+        <translation>超时（秒）</translation>
+    </message>
+    <message>
+        <source>Instructions</source>
+        <translation>附加要求</translation>
+    </message>
+    <message>
+        <source>Display Name</source>
+        <translation>显示名称</translation>
+    </message>
+    <message>
+        <source>Shown in the translation window</source>
+        <translation>显示在翻译窗口上</translation>
+    </message>
+    <message>
+        <source>Extra Body</source>
+        <translation>附加请求体</translation>
+    </message>
+    <message>
+        <source>JSON Mode</source>
+        <translation>JSON 模式</translation>
+    </message>
+    <message>
+        <source>Ask for JSON replies. If the service rejects it, the request is retried without; turn it off to skip that retry</source>
+        <translation>要求模型以 JSON 回复。服务不支持时会去掉后自动重试一次；关闭可省掉这次重试</translation>
+    </message>
+    <message>
+        <source>Optional for local models</source>
+        <translation>本地模型可不填</translation>
+    </message>
+    <message>
+        <source>Server default</source>
+        <translation>使用服务端默认值</translation>
+    </message>
+    <message>
+        <source>e.g. Keep product names untranslated</source>
+        <translation>例如：产品名保留原文</translation>
+    </message>
+    <message>
+        <source>Any OpenAI-compatible service. Ollama: http://localhost:11434/v1, LM Studio: http://localhost:1234/v1</source>
+        <translation>任意 OpenAI 兼容服务。Ollama：http://localhost:11434/v1，LM Studio：http://localhost:1234/v1</translation>
+    </message>
+    <message>
+        <source>Fetch Models</source>
+        <translation>获取模型</translation>
+    </message>
+    <message>
+        <source>Test Connection</source>
+        <translation>测试连接</translation>
+    </message>
+    <message>
+        <source>Testing...</source>
+        <translation>测试中…</translation>
+    </message>
+    <message>
+        <source>Fetching models...</source>
+        <translation>正在获取模型…</translation>
+    </message>
+    <message>
+        <source>No models returned</source>
+        <translation>服务没有返回任何模型</translation>
     </message>
 </context>
 
@@ -906,6 +1069,10 @@ Replace it?</source>
     <message>
         <source>Screenshot translate (OCR + Translate)</source>
         <translation>截图翻译（OCR + 翻译）</translation>
+    </message>
+    <message>
+        <source>Recognize text (OCR)</source>
+        <translation>文字识别（OCR）</translation>
     </message>
     <message>
         <source>Scan QR code / barcode</source>
@@ -1063,6 +1230,10 @@ Replace it?</source>
     <message>
         <source>No text was recognized</source>
         <translation>未识别到文字</translation>
+    </message>
+    <message>
+        <source>Text copied</source>
+        <translation>文字已复制</translation>
     </message>
     <message>
         <source>OCR recognition failed: {error}</source>
@@ -1250,6 +1421,14 @@ Replace it?</source>
         <translation>剪贴板 (2)</translation>
     </message>
     <message>
+        <source>Pin Clipboard Image</source>
+        <translation>生成钉图</translation>
+    </message>
+    <message>
+        <source>Pin Clipboard Image (2)</source>
+        <translation>生成钉图 (2)</translation>
+    </message>
+    <message>
         <source>Hotkey Registration Failed</source>
         <translation>热键注册失败</translation>
     </message>
@@ -1266,6 +1445,18 @@ Replace it?</source>
 <!-- ========== Translation Dialog ========== -->
 <context>
     <name>TranslationDialog</name>
+    <message>
+        <source>Custom LLM-1</source>
+        <translation>自定义 LLM-1</translation>
+    </message>
+    <message>
+        <source>Custom LLM-2</source>
+        <translation>自定义 LLM-2</translation>
+    </message>
+    <message>
+        <source>Custom LLM-3</source>
+        <translation>自定义 LLM-3</translation>
+    </message>
     <message>
         <source>Translator</source>
         <translation>翻译</translation>
@@ -1465,6 +1656,7 @@ Replace it?</source>
         <translation>翻译</translation>
     </message>
     <message><source>Translation Hotkey</source><translation>翻译快捷键</translation></message>
+    <message><source>Pin Clipboard Image</source><translation>生成钉图</translation></message>
     <message>
         <source>Translation Settings</source>
         <translation>翻译设置</translation>
@@ -1621,6 +1813,10 @@ Replace it?</source>
     <message>
         <source>Auto Paste After Selection</source>
         <translation>选择后自动粘贴</translation>
+    </message>
+    <message>
+        <source>Close After Paste</source>
+        <translation>粘贴后关闭窗口</translation>
     </message>
     <message>
         <source>Move to Top After Paste</source>
@@ -2276,6 +2472,14 @@ Replace it?</source>
         <translation>保留的最大项目数（0 = 无限制）</translation>
     </message>
     <message>
+        <source>Window Scan Interval</source>
+        <translation>窗口扫描频率</translation>
+    </message>
+    <message>
+        <source>How often the foreground window is sampled to find the paste target (only while this panel is open)</source>
+        <translation>面板打开时按此频率识别前台窗口以确定粘贴目标（仅面板可见时生效）</translation>
+    </message>
+    <message>
         <source>Auto Cleanup Old Items</source>
         <translation>自动清理旧项目</translation>
     </message>
@@ -2294,10 +2498,6 @@ Replace it?</source>
     <message>
         <source>Clipboard module not available</source>
         <translation>剪贴板模块不可用</translation>
-    </message>
-    <message>
-        <source>Open Folder</source>
-        <translation>打开</translation>
     </message>
     <message>
         <source>Clear Clipboard History</source>
@@ -2351,6 +2551,42 @@ Replace it?</source>
 
 <context>
     <name>ArrowSettingsPanel</name>
+    <message>
+        <source>Solid Arrow</source>
+        <translation>实心箭头</translation>
+    </message>
+    <message>
+        <source>Solid Double Arrow</source>
+        <translation>实心双向箭头</translation>
+    </message>
+    <message>
+        <source>Outlined Arrow</source>
+        <translation>空心箭头</translation>
+    </message>
+    <message>
+        <source>Line Arrow</source>
+        <translation>线条箭头</translation>
+    </message>
+    <message>
+        <source>Line Double Arrow</source>
+        <translation>线条双向箭头</translation>
+    </message>
+    <message>
+        <source>Thin Arrow</source>
+        <translation>细杆箭头</translation>
+    </message>
+    <message>
+        <source>Thin Double Arrow</source>
+        <translation>细杆双向箭头</translation>
+    </message>
+    <message>
+        <source>Dimension Line</source>
+        <translation>标注线</translation>
+    </message>
+    <message>
+        <source>Dimension Arrow</source>
+        <translation>标注双向箭头</translation>
+    </message>
     <message>
         <source>Arrow Style</source>
         <translation>箭头样式</translation>
@@ -2515,6 +2751,42 @@ Replace it?</source>
         <source>Yellow</source>
         <translation>黄色</translation>
     </message>
+    <message>
+        <source>Text Outline</source>
+        <translation>文字描边</translation>
+    </message>
+    <message>
+        <source>Text Shadow</source>
+        <translation>文字阴影</translation>
+    </message>
+    <message>
+        <source>Custom Outline Color</source>
+        <translation>自定义描边颜色</translation>
+    </message>
+    <message>
+        <source>Custom Shadow Color</source>
+        <translation>自定义阴影颜色</translation>
+    </message>
+    <message>
+        <source>Shadow Opacity</source>
+        <translation>阴影透明度</translation>
+    </message>
+    <message>
+        <source>Outline: Thin</source>
+        <translation>描边：细</translation>
+    </message>
+    <message>
+        <source>Outline: Medium</source>
+        <translation>描边：中</translation>
+    </message>
+    <message>
+        <source>Outline: Thick</source>
+        <translation>描边：粗</translation>
+    </message>
+    <message>
+        <source>Outline: Extra Thick</source>
+        <translation>描边：特粗</translation>
+    </message>
 </context>
 
 <context>
@@ -2534,18 +2806,6 @@ Replace it?</source>
     <message>
         <source>Used when copying color info in magnifier.</source>
         <translation>按 C 复制颜色信息时使用</translation>
-    </message>
-    <message>
-        <source>RGB+HEX</source>
-        <translation>RGB+HEX</translation>
-    </message>
-    <message>
-        <source>RGB only</source>
-        <translation>单RGB</translation>
-    </message>
-    <message>
-        <source>HEX only</source>
-        <translation>单HEX</translation>
     </message>
 </context>
 
@@ -2783,6 +3043,42 @@ Replace it?</source>
         <translation>Google API Key</translation>
     </message>
     <message>
+        <source>Baidu APPID</source>
+        <translation>百度 APPID</translation>
+    </message>
+    <message>
+        <source>Baidu Secret Key</source>
+        <translation>百度密钥</translation>
+    </message>
+    <message>
+        <source>Paired with APPID in the Baidu console</source>
+        <translation>控制台「开发者信息」里与 APPID 成对的密钥</translation>
+    </message>
+    <message>
+        <source>Baidu Translate Open Platform</source>
+        <translation>百度翻译开放平台 · 开发者信息</translation>
+    </message>
+    <message>
+        <source>DeepSeek API Key</source>
+        <translation>DeepSeek API Key</translation>
+    </message>
+    <message>
+        <source>Model</source>
+        <translation>模型</translation>
+    </message>
+    <message>
+        <source>API Base URL</source>
+        <translation>API 地址</translation>
+    </message>
+    <message>
+        <source>APPID</source>
+        <translation>APPID</translation>
+    </message>
+    <message>
+        <source>API Key</source>
+        <translation>API Key</translation>
+    </message>
+    <message>
         <source>AWS 区域</source>
         <translation>AWS 区域</translation>
     </message>
@@ -2968,6 +3264,22 @@ Replace it?</source>
         <source>当前按下</source>
         <translation>当前按下</translation>
     </message>
+    <message>
+        <source>Custom LLM-1</source>
+        <translation>自定义 LLM-1</translation>
+    </message>
+    <message>
+        <source>Custom LLM-2</source>
+        <translation>自定义 LLM-2</translation>
+    </message>
+    <message>
+        <source>Custom LLM-3</source>
+        <translation>自定义 LLM-3</translation>
+    </message>
+    <message>
+        <source>Optional for local models</source>
+        <translation>本地模型可不填</translation>
+    </message>
 </context>
 
 <!-- ========== GIF Record Toolbar ========== -->
@@ -3058,7 +3370,16 @@ Replace it?</source>
     <message><source>Success</source><translation>成功</translation></message>
     <!-- 杂项页分组标题 -->
     <message><source>Startup</source><translation>启动</translation></message>
-    <message><source>Pin Window</source><translation>钉图窗口</translation></message>
+    <message><source>Show Magnifier</source><translation>显示放大镜</translation></message>
+    <message><source>Follows the cursor while selecting, and picks the color under it.</source><translation>选区时跟随光标显示，并可取光标下的颜色。</translation></message>
+    <message><source>Pixel Grid</source><translation>像素网格线</translation></message>
+    <message><source>Outline each pixel in the magnified view. Hidden at low zoom, where the lines would cover the pixels.</source><translation>在放大图上勾出每个像素的边界。倍率低时自动不画，否则网格线会盖住像素本身。</translation></message>
+    <message><source>Shortcut Hint</source><translation>快捷键提示</translation></message>
+    <message><source>Show the color-copy shortcut under the readings. Off makes the magnifier shorter.</source><translation>在数值下方显示复制颜色的快捷键。关掉后放大镜会变矮一些。</translation></message>
+    <message><source>Color Swatch</source><translation>取色色块</translation></message>
+    <message><source>Show the picked color in the top-right corner of the magnified view.</source><translation>在放大图右上角显示当前取到的颜色。</translation></message>
+    <message><source>Magnifier</source><translation>放大镜</translation></message>
+    <message><source>Pin Settings</source><translation>钉图设定</translation></message>
     <message><source>Operation</source><translation>操作</translation></message>
     <!-- 关于页 -->
     <message><source>Features</source><translation>功能特色</translation></message>
@@ -3089,6 +3410,20 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.</translation></message>
     <message><source>Source Code</source><translation>源代码</translation></message>
     <message><source>Open GitHub</source><translation>打开GitHub</translation></message>
+    <message><source>Version</source><translation>版本</translation></message>
+    <message><source>Check for Updates</source><translation>检查更新</translation></message>
+    <message><source>Checking...</source><translation>正在检查...</translation></message>
+    <message><source>Update Check</source><translation>更新检查</translation></message>
+    <message><source>You're using the latest version (%1).</source><translation>您正在使用最新版本（%1）。</translation></message>
+    <message><source>Update Available</source><translation>有可用更新</translation></message>
+    <message><source>Current version: %1</source><translation>当前版本：%1</translation></message>
+    <message><source>Latest version: %1</source><translation>最新版本：%1</translation></message>
+    <message><source>What's new:</source><translation>更新内容：</translation></message>
+    <message><source>No release notes provided.</source><translation>未提供更新说明。</translation></message>
+    <message><source>Download:</source><translation>下载地址：</translation></message>
+    <message><source>Open Download Page</source><translation>打开下载页面</translation></message>
+    <message><source>Update Check Failed</source><translation>更新检查失败</translation></message>
+    <message><source>Unable to check for updates. Please check your network connection and try again.</source><translation>无法检查更新。请检查网络连接后重试。</translation></message>
     <!-- 开发者页 -->
     <message><source>Long Screenshot</source><translation>长截图</translation></message>
     <message><source>Tools</source><translation>工具</translation></message>
@@ -3197,7 +3532,6 @@ SOFTWARE.</translation></message>
 
 <context>
     <name>SettingsDialog</name>
-    <message><source>Change Location</source><translation>更改</translation></message>
     <message><source>Current clipboard database path is unavailable.</source><translation>无法获取当前剪贴板数据库路径。</translation></message>
     <message><source>Choose Clipboard Data Folder</source><translation>选择剪贴板数据文件夹</translation></message>
     <message><source>Info</source><translation>提示</translation></message>
@@ -3231,6 +3565,70 @@ SOFTWARE.</translation></message>
     <message>
         <source>Choose a display mode.</source>
         <translation>选择显示模式。</translation>
+    </message>
+    <message>
+        <source>Toolbar &amp; Panel Scale</source>
+        <translation>工具栏与面板缩放</translation>
+    </message>
+    <message>
+        <source>Size of toolbars, tool panels and popups.</source>
+        <translation>工具栏的显示大小。</translation>
+    </message>
+    <message>
+        <source>Window Scale</source>
+        <translation>窗口缩放</translation>
+    </message>
+    <message>
+        <source>Font and size of application windows.</source>
+        <translation>应用窗口的字体与尺寸。</translation>
+    </message>
+    <message>
+        <source>Selection Border Width</source>
+        <translation>选区边框粗细</translation>
+    </message>
+    <message>
+        <source>Thickness of the selection outline.</source>
+        <translation>选区边框线条的粗细。</translation>
+    </message>
+    <message>
+        <source>Selection Handles</source>
+        <translation>选区手柄</translation>
+    </message>
+    <message>
+        <source>Hidden handles can still be dragged to resize.</source>
+        <translation>隐藏后依然可以拖动边角调整选区。</translation>
+    </message>
+    <message>
+        <source>Selection Handle Size</source>
+        <translation>选区手柄大小</translation>
+    </message>
+    <message>
+        <source>Size of the selection handles.</source>
+        <translation>选区手柄的大小。</translation>
+    </message>
+    <message>
+        <source>8 handles</source>
+        <translation>8 个手柄</translation>
+    </message>
+    <message>
+        <source>4 corners</source>
+        <translation>仅四角</translation>
+    </message>
+    <message>
+        <source>None</source>
+        <translation>不显示</translation>
+    </message>
+    <message>
+        <source>Small</source>
+        <translation>小</translation>
+    </message>
+    <message>
+        <source>Medium</source>
+        <translation>中</translation>
+    </message>
+    <message>
+        <source>Large</source>
+        <translation>大</translation>
     </message>
     <message>
         <source>System</source>
@@ -3269,18 +3667,13 @@ SOFTWARE.</translation></message>
         <source>Change Number Style</source>
         <translation>更改序号样式</translation>
     </message>
-    <message>
-        <source>Change Mosaic Style</source>
-        <translation>更改马赛克种类</translation>
-    </message>
-    <message>
-        <source>Change Mosaic Size</source>
-        <translation>更改马赛克粒度</translation>
-    </message>
 </context>
-
 <context>
     <name>HotkeyEdit</name>
+    <message>
+        <source>Unrecognized shortcut — this key is not supported for global hotkeys</source>
+        <translation>无法识别的快捷键——全局热键不支持这个按键</translation>
+    </message>
     <message>
         <source>This hotkey is assigned more than once.</source>
         <translation>此快捷键被重复分配。</translation>
@@ -3339,6 +3732,10 @@ SOFTWARE.</translation></message>
     <message>
         <source>Scan code</source>
         <translation>扫码</translation>
+    </message>
+    <message>
+        <source>Recognize text</source>
+        <translation>文字识别</translation>
     </message>
     <message>
         <source>GIF recording</source>
@@ -3436,95 +3833,99 @@ SOFTWARE.</translation></message>
         <translation>打开链接</translation>
     </message>
 </context>
-
-<!-- ========== UI Scale & Hotkey Validation ========== -->
 <context>
-    <name>SettingsDialog</name>
+    <name>TextRecognitionWindow</name>
     <message>
-        <source>UI Scale</source>
-        <translation>界面缩放</translation>
+        <source>Text recognition</source>
+        <translation>文字识别</translation>
     </message>
     <message>
-        <source>Adjust the size of interface text. Applied immediately.</source>
-        <translation>调整界面文字的大小，保存后立即生效。</translation>
+        <source>Recognizing...</source>
+        <translation>识别中...</translation>
     </message>
     <message>
-        <source>Screenshot</source>
-        <translation>截图</translation>
+        <source>Recognized %1 characters</source>
+        <translation>识别到 %1 个字符</translation>
     </message>
     <message>
-        <source>Screenshot (2)</source>
-        <translation>截图（备用）</translation>
+        <source>No text found in the selection.</source>
+        <translation>选区内没有识别到文字。</translation>
     </message>
     <message>
-        <source>Clipboard</source>
-        <translation>剪贴板</translation>
+        <source>This build does not include the text recognition engine.</source>
+        <translation>当前版本不包含文字识别引擎。</translation>
     </message>
     <message>
-        <source>Clipboard (2)</source>
-        <translation>剪贴板（备用）</translation>
+        <source>Text recognition failed.</source>
+        <translation>文字识别失败。</translation>
     </message>
     <message>
-        <source>Translation</source>
-        <translation>翻译</translation>
+        <source>Copy</source>
+        <translation>复制</translation>
     </message>
     <message>
-        <source>Translation (2)</source>
-        <translation>翻译（备用）</translation>
-    </message>
-    <message>
-        <source>Invalid Hotkey</source>
-        <translation>无效的快捷键</translation>
-    </message>
-    <message>
-        <source>The following shortcuts cannot be recognized and will never work:</source>
-        <translation>以下快捷键无法识别，即使保存也不会生效：</translation>
-    </message>
-    <message>
-        <source>Please record them again in the boxes above (e.g. Ctrl+Alt+A, F8, Print).</source>
-        <translation>请在上方对应输入框重新录入组合键（例如 Ctrl+Alt+A、F8、Print）。</translation>
+        <source>Copied</source>
+        <translation>已复制</translation>
     </message>
 </context>
-
-<!-- ========== Baidu Translate Provider ========== -->
 <context>
-    <name>SettingsDialog</name>
+    <name>InAppShortcut</name>
     <message>
-        <source>Baidu Translate</source>
-        <translation>百度翻译</translation>
-    </message>
-    <message>
-        <source>Baidu APP ID</source>
-        <translation>百度 APP ID</translation>
-    </message>
-    <message>
-        <source>Baidu Secret Key</source>
-        <translation>百度密钥</translation>
-    </message>
-    <message>
-        <source>Baidu free tier: 1 QPS, Standard edition. Get APP ID and key at</source>
-        <translation>百度翻译免费版：标准版支持 1 QPS。前往以下地址获取 APP ID 和密钥：</translation>
+        <source>Middle</source>
+        <translation>中键</translation>
     </message>
 </context>
-
-<!-- ========== Global Pin Hotkey ========== -->
+<context>
+    <name>ColorFormatDialog</name>
+    <message><source>Manage Color Formats</source><translation>管理颜色格式</translation></message>
+    <message><source>Checked formats show on the magnifier. The first one is what the copy shortcut puts on the clipboard — drag it to the top to change that.</source><translation>勾选的格式会显示在放大镜上。排在第一位的那个才是按键复制到剪贴板的内容——想换就把它拖到最前面。</translation></message>
+    <message><source>Restore defaults</source><translation>恢复默认</translation></message>
+    <message><source>OK</source><translation>确定</translation></message>
+    <message><source>Cancel</source><translation>取消</translation></message>
+</context>
+<context>
+    <name>KeyChip</name>
+    <message>
+        <source>Mouse Back</source>
+        <translation>鼠标后退键</translation>
+    </message>
+    <message>
+        <source>Mouse Forward</source>
+        <translation>鼠标前进键</translation>
+    </message>
+    <message>
+        <source>Add shortcut</source>
+        <translation>添加快捷键</translation>
+    </message>
+    <message>
+        <source>Press keys…</source>
+        <translation>请按下快捷键…</translation>
+    </message>
+</context>
+<context>
+    <name>HotkeyEdit</name>
+    <message>
+        <source>Not set</source>
+        <translation>未设置</translation>
+    </message>
+    <message>
+        <source>Available</source>
+        <translation>可用</translation>
+    </message>
+    <message>
+        <source>Already in use by another app.</source>
+        <translation>已被其他程序占用。</translation>
+    </message>
+</context>
 <context>
     <name>SettingsDialog</name>
     <message>
-        <source>Pin Hotkey</source>
-        <translation>钉图热键</translation>
+        <source>Works anytime</source>
+        <translation>在任何时候都能触发</translation>
     </message>
     <message>
-        <source>Pin</source>
-        <translation>钉图</translation>
-    </message>
-    <message>
-        <source>Pin (2)</source>
-        <translation>钉图（备用）</translation>
-    </message>
-    <message>
-        <source>Pin latest clipboard</source>
-        <translation>钉住剪贴板最新内容</translation>
+        <source>Only in screenshot and pin windows</source>
+        <translation>只在截图和钉图窗口里生效</translation>
     </message>
 </context>
 </TS>

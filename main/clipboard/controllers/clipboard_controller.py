@@ -5,7 +5,6 @@
 负责数据加载、搜索筛选、分组管理、项目操作、侧边栏溢出计算等业务逻辑。
 """
 
-import ctypes
 import json
 import os
 import re
@@ -17,6 +16,8 @@ from ui.dialogs import show_confirm_dialog
 from ..core import ClipboardManager, ClipboardItem, Group, GroupType
 from ..ui.dialogs.manage_dialog import get_manage_dialog, get_existing_manage_dialog
 from .context_menu_controller import ClipboardContextMenuController, ContextMenuData, MenuAction
+from .foreground_tracker import ForegroundWindowTracker
+from .paste_keystroke import paste_to_target
 from core.logger import T, log_debug, log_info, log_error, log_exception
 
 
@@ -51,53 +52,6 @@ def calc_topbar_capacity(bar_width: int) -> int:
     return 0 if available <= 0 else available // _H_BTN_SLOT
 
 
-# Windows API 常量
-VK_CONTROL = 0x11
-VK_V = 0x56
-KEYEVENTF_KEYUP = 0x0002
-
-
-def get_foreground_window():
-    """获取当前前台窗口句柄"""
-    try:
-        return ctypes.windll.user32.GetForegroundWindow()
-    except Exception as e:
-        log_exception(e, T("获取前台窗口"))
-        return None
-
-
-def set_foreground_window(hwnd):
-    """设置前台窗口"""
-    try:
-        if hwnd:
-            ctypes.windll.user32.SetForegroundWindow(hwnd)
-            return True
-    except Exception as e:
-        log_exception(e, T("设置前台窗口"))
-    return False
-
-
-def send_ctrl_v():
-    """
-    发送 Ctrl+V 按键事件
-    
-    使用 Windows API 模拟按键，实现自动粘贴。
-    """
-    try:
-        # 按下 Ctrl
-        ctypes.windll.user32.keybd_event(VK_CONTROL, 0, 0, 0)
-        # 按下 V
-        ctypes.windll.user32.keybd_event(VK_V, 0, 0, 0)
-        # 释放 V
-        ctypes.windll.user32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)
-        # 释放 Ctrl
-        ctypes.windll.user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
-        return True
-    except Exception as e:
-        log_error(T("发送 Ctrl+V 失败: {e}", e=e), "Clipboard")
-        return False
-
-
 class ClipboardController(QObject):
     """
     剪贴板窗口控制器
@@ -116,6 +70,8 @@ class ClipboardController(QObject):
     loading_state_changed = Signal(bool)  # 加载状态变化
     reload_required = Signal()  # 需要重新加载
     load_completed = Signal()  # 单次加载完全完成（_is_loading 已设为 False）
+    item_inserted = Signal(object, int)  # (item, row) 单条新内容已插入当前列表
+    item_moved_to_top = Signal(int, int)  # (item_id, row) 条目已移到最前
     
     def __init__(self, manager: ClipboardManager):
         super().__init__()
@@ -143,8 +99,8 @@ class ClipboardController(QObject):
         self.auto_paste_enabled = True
         self.paste_with_html = True
         
-        # 记录打开窗口前的活动窗口
-        self._previous_window_hwnd = None
+        # 粘贴目标窗口（窗口显示期间持续跟踪）
+        self._foreground_tracker = ForegroundWindowTracker()
 
         # 右键菜单数据控制逻辑已抽到独立模块
         self._context_menu_controller = ClipboardContextMenuController(self)
@@ -161,6 +117,7 @@ class ClipboardController(QObject):
             config = get_tool_settings_manager()
             self.auto_paste_enabled = config.get_clipboard_auto_paste()
             self.paste_with_html = config.get_app_setting("clipboard_paste_with_html", True)
+            self._foreground_tracker.set_interval(config.get_clipboard_foreground_scan_interval_ms())
         except Exception as e:
             log_exception(e, T("加载剪贴板设置"))
             # 默认开启自动粘贴和带格式粘贴
@@ -254,8 +211,12 @@ class ClipboardController(QObject):
             
             log_info(T("加载完成 - 获取到 {count} 条记录", count=len(new_items)), "Clipboard")
             
-            # 检查是否还有更多数据（使用动态的 page_size）
-            if len(new_items) < current_page_size:
+            # 检查是否还有更多数据（使用动态的 page_size）。判据必须是过滤前的
+            # raw_count：分组内搜索是客户端过滤（_fetch_items_page），这一页
+            # 命中关键词的条数可能远小于 raw_count，用 len(new_items) 判断的话，
+            # 只要这一页里有任何一条被过滤掉就会误判成"最后一页"，导致分组里
+            # 更靠后、同样命中关键词的条目永远加载不到。
+            if raw_count < current_page_size:
                 self._has_more = False
             
             # 追加到当前列表
@@ -511,12 +472,30 @@ class ClipboardController(QObject):
     
     # ==================== 项目操作 ====================
     
-    def paste_item(self, item_id: int, on_close_callback: Optional[Callable] = None) -> bool:
+    def _send_paste_keystroke(self, explicit: bool):
+        """粘贴完成后替用户按一次 Ctrl+V。
+
+        explicit=True 表示用户在右键菜单里明确点了"粘贴"/"特殊粘贴"——这本身
+        就是一次手动粘贴动作，所以不受"选择后自动粘贴"开关约束；那个开关管的
+        只是选中项目（双击/回车/数字键）时要不要顺手替你粘上去。
+        """
+        if not explicit and not self.auto_paste_enabled:
+            return
+
+        target_hwnd = self._foreground_tracker.target_hwnd
+        # 延迟执行，确保剪贴板窗口已关闭/隐藏，焦点不会被它抢回去
+        QTimer.singleShot(50, lambda: paste_to_target(target_hwnd))
+
+    def paste_item(
+        self, item_id: int, on_close_callback: Optional[Callable] = None,
+        explicit: bool = False,
+    ) -> bool:
         """粘贴项目
         
         Args:
             item_id: 项目ID
             on_close_callback: 关闭窗口的回调函数
+            explicit: 是否为用户显式触发的粘贴（右键菜单），True 时无视自动粘贴开关
         
         Returns:
             是否粘贴成功
@@ -534,28 +513,47 @@ class ClipboardController(QObject):
         if self.manager.paste_item(item_id, self.paste_with_html, move_to_top):
             log_info(T("已粘贴项 {item_id} (带格式: {with_html}, 移到最前: {move_to_top})", item_id=item_id, with_html=self.paste_with_html, move_to_top=move_to_top), "Clipboard")
             
+            if move_to_top:
+                self.move_item_to_top(item_id)
+
             # 调用关闭回调
             if on_close_callback:
                 on_close_callback()
             
-            # 自动粘贴：发送 Ctrl+V
-            if self.auto_paste_enabled:
-                # 先恢复之前的窗口焦点，再发送 Ctrl+V
-                def do_paste():
-                    if self._previous_window_hwnd:
-                        set_foreground_window(self._previous_window_hwnd)
-                    # 稍微延迟确保焦点切换完成
-                    QTimer.singleShot(30, send_ctrl_v)
-                
-                # 延迟执行，确保剪贴板窗口已关闭/隐藏
-                QTimer.singleShot(50, do_paste)
-            
+            self._send_paste_keystroke(explicit)
             return True
         return False
+
+    def move_item_to_top(self, item_id: int):
+        """把条目在当前列表里移到置顶块之后，与后端刚改过的 item_order 对齐。
+
+        后端只改数据库，界面不会自己知道。粘贴写入的内容往往和剪贴板里已有的
+        一致，不会触发剪贴板监听，所以不能指望靠一次刷新顺带把顺序带出来。
+        """
+        index = next(
+            (i for i, existing in enumerate(self.current_items) if existing.id == item_id),
+            None,
+        )
+        if index is None:
+            return
+
+        item = self.current_items[index]
+        # 置顶项排在 item_order 之前，顺序不受影响
+        if item.is_pinned:
+            return
+
+        row = self._first_unpinned_row()
+        if index == row:
+            return
+
+        self.current_items.pop(index)
+        self.current_items.insert(row, item)
+        self.item_moved_to_top.emit(item_id, row)
 
     def paste_transformed_text(
         self, item_id: int, transform_key: str,
         on_close_callback: Optional[Callable] = None,
+        explicit: bool = False,
     ) -> bool:
         """对文本项内容做加工后写入系统剪贴板并触发粘贴。
 
@@ -564,6 +562,7 @@ class ClipboardController(QObject):
             transform_key: 转换键名（对应 TRANSFORM_REGISTRY 的 key，
                 特殊值 "special_paste_plain_text" 表示粘贴纯文本不带格式）
             on_close_callback: 关闭窗口的回调函数
+            explicit: 是否为用户显式触发的粘贴（右键菜单），True 时无视自动粘贴开关
 
         Returns:
             是否成功
@@ -576,12 +575,7 @@ class ClipboardController(QObject):
                 log_info(T("保持顺序粘贴项 {item_id}", item_id=item_id), "Clipboard")
                 if on_close_callback:
                     on_close_callback()
-                if self.auto_paste_enabled:
-                    def do_paste_order():
-                        if self._previous_window_hwnd:
-                            set_foreground_window(self._previous_window_hwnd)
-                        QTimer.singleShot(30, send_ctrl_v)
-                    QTimer.singleShot(50, do_paste_order)
+                self._send_paste_keystroke(explicit)
                 return True
             return False
 
@@ -599,12 +593,7 @@ class ClipboardController(QObject):
             log_info(T("粘贴纯文本项 {item_id}", item_id=item_id), "Clipboard")
             if on_close_callback:
                 on_close_callback()
-            if self.auto_paste_enabled:
-                def do_paste():
-                    if self._previous_window_hwnd:
-                        set_foreground_window(self._previous_window_hwnd)
-                    QTimer.singleShot(30, send_ctrl_v)
-                QTimer.singleShot(50, do_paste)
+            self._send_paste_keystroke(explicit)
             return True
 
         from ..core.text_transform import TRANSFORM_REGISTRY
@@ -642,20 +631,13 @@ class ClipboardController(QObject):
         if on_close_callback:
             on_close_callback()
 
-        # 自动粘贴：发送 Ctrl+V
-        if self.auto_paste_enabled:
-            def do_paste():
-                if self._previous_window_hwnd:
-                    set_foreground_window(self._previous_window_hwnd)
-                QTimer.singleShot(30, send_ctrl_v)
-
-            QTimer.singleShot(50, do_paste)
-
+        self._send_paste_keystroke(explicit)
         return True
 
     def paste_file_text(
         self, item_id: int, transform_key: str,
         on_close_callback: Optional[Callable] = None,
+        explicit: bool = False,
     ) -> bool:
         """将文件项转换为纯文本后写入剪贴板并触发粘贴。"""
         import pyclipboard
@@ -696,14 +678,7 @@ class ClipboardController(QObject):
         if on_close_callback:
             on_close_callback()
 
-        if self.auto_paste_enabled:
-            def do_paste():
-                if self._previous_window_hwnd:
-                    set_foreground_window(self._previous_window_hwnd)
-                QTimer.singleShot(30, send_ctrl_v)
-
-            QTimer.singleShot(50, do_paste)
-
+        self._send_paste_keystroke(explicit)
         return True
 
     def delete_item(self, item_id: int) -> bool:
@@ -818,22 +793,69 @@ class ClipboardController(QObject):
     
     # ==================== 窗口状态管理 ====================
     
+    def set_paste_target_exclusion(self, predicate):
+        """注册哪个窗口不能当粘贴目标——拾取窗口自己。"""
+        self._foreground_tracker.set_excluded(predicate)
+
     def on_window_show(self):
         """窗口显示时调用"""
-        # 记录当前前台窗口（在显示剪贴板窗口之前）
-        self._previous_window_hwnd = get_foreground_window()
+        # showEvent 早于窗口取得焦点，此刻前台还是用户原来那个窗口
+        self._foreground_tracker.start()
         # 重新加载数据
         self.load_history()
+
+    def on_window_hide(self):
+        """窗口隐藏时调用"""
+        self._foreground_tracker.stop()
     
-    def on_new_content(self, is_window_visible: bool):
+    def on_new_content(self, is_window_visible: bool, item: Optional[ClipboardItem] = None):
         """新内容到达时调用
-        
+
         Args:
             is_window_visible: 窗口是否可见
+            item: 监听回调带来的新条目，为空时只能整表重查
         """
         # 只在窗口可见时刷新
-        if is_window_visible:
-            self.load_history()
+        if not is_window_visible:
+            return
+        if item is not None and self.insert_item(item):
+            return
+        self.load_history()
+
+    def insert_item(self, item: ClipboardItem) -> bool:
+        """把单条新内容插进当前列表，成功返回 True。
+
+        返回 False 表示这条内容落在哪一行得由查询决定，调用方需要整表重查。
+        """
+        if self._is_loading or not self._can_insert_incrementally():
+            return False
+
+        # 重复内容会被后端移到最前而不是新增，旧行还在列表里，位置也变了
+        if any(existing.id == item.id for existing in self.current_items):
+            return False
+
+        row = self._first_unpinned_row()
+        self.current_items.insert(row, item)
+        # 分页按偏移量取数，头部多一行就必须跟着后移，否则下一页会重复取到交界那条
+        self._current_offset += 1
+        self.item_inserted.emit(item, row)
+        return True
+
+    def _can_insert_incrementally(self) -> bool:
+        """分组、搜索、筛选视图下新条目属不属于当前列表要由查询决定，这里判断不了。"""
+        return (
+            self.current_group_id is None
+            and not self._search_text
+            and not self._content_type
+            and self._time_range is None
+        )
+
+    def _first_unpinned_row(self) -> int:
+        """排序是 is_pinned DESC, item_order DESC，新条目排在置顶块之后。"""
+        for index, existing in enumerate(self.current_items):
+            if not existing.is_pinned:
+                return index
+        return len(self.current_items)
 
     # ==================== 侧边栏溢出 ====================
 

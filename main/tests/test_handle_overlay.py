@@ -19,7 +19,7 @@ import math
 
 import pytest
 from PySide6.QtCore import QPointF, QRect, QRectF
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, QRegion
 from PySide6.QtWidgets import QApplication
 
 
@@ -205,6 +205,38 @@ def test_move_invalidates_both_old_and_new_positions(view, qapp):
     assert dirty.contains(view._handle_overlay._painted), "失效区域没盖住新位置"
 
 
+def test_a_partial_repaint_keeps_the_old_handle_area_on_the_books(view, qapp):
+    """只覆盖图元脏区的被动重绘，不能让浮层忘掉手柄的旧位置。
+
+    浮层压在 viewport 上，图元失效自己的脏区就会顺带重绘这一块浮层。改字体
+    （加粗、斜体、字号）时这种被动重绘会落在"几何已经变了、refresh() 还没轮到"
+    的中间态：它只擦掉图元脏区里的手柄，而手柄有一半画在锚点外侧，凸出图元
+    包围盒的那一截还留在屏幕上。浮层若把这一帧记成"手柄现在在哪"，下一次
+    refresh() 的并集就不再盖住那一截——取消加粗后文字右边留下的那道手柄边。
+    """
+    from canvas.items import TextItem
+
+    item = TextItem("Bold residue 12345", QPointF(200, 200), QFont("Arial", 28), QColor("red"))
+    _select(view, item)
+    qapp.processEvents()
+    overlay = view._handle_overlay
+    before = QRect(overlay._painted)
+    assert not before.isEmpty(), "前置条件：应已画出手柄"
+
+    item.set_font_point_size(14)          # 文字变窄，手柄跟着左移；先不通知浮层
+    passive = QRegion(view.mapFromScene(item.sceneBoundingRect()).boundingRect())
+    assert not QRegion(before).subtracted(passive).isEmpty(), (
+        "前置条件：图元自己的脏区盖不住旧手柄，否则这条用例测不到东西"
+    )
+    overlay._painted = overlay._still_on_screen(passive, overlay._handles_viewport_rect())
+
+    with _UpdateSpy(overlay) as spy:
+        view._update_edit_handles()
+    assert spy.union().contains(before), (
+        f"失效区域 {spy.union()} 没盖住旧手柄 {before}，旧位置的像素没人擦"
+    )
+
+
 @pytest.mark.parametrize("angle", [15, 45, 90, 137])
 def test_rotated_text_move_invalidates_old_position(view, qapp, angle):
     """旋转过的文字被拖动时，旧位置的手柄像素必须被失效掉。
@@ -300,7 +332,9 @@ def test_text_handles_anchor_to_rotated_corners(view, qapp, angle):
     view.request_handles_repaint()
     qapp.processEvents()
 
-    local = item.boundingRect()
+    # interaction_rect()，不是 boundingRect()：后者是命中测试用的包围盒，
+    # 比交互矩形多出一圈点击旷量（CLICK_MARGIN），手柄不该跟着那圈旷量走。
+    local = item.interaction_rect()
     _assert_anchored(
         view.smart_edit_controller.layer_editor,
         item,
@@ -497,10 +531,17 @@ def test_export_does_not_bake_handles_into_the_image(view, qapp):
 
     改造前它们画在 scene.drawForeground，而 export 只隐藏了选区框、
     没管控制点。
-    """
-    from canvas.items import RectItem
 
-    item = RectItem(QRectF(100, 100, 200, 150), QPen(QColor("red"), 3))
+    用画笔笔画而不是矩形：选中的图元自己会画一圈实线框，那是场景内容、本就该
+    进 render（真实导出前会先清掉选中，见 tools/action.py 的 _exit_edit_mode）。
+    笔画是唯一不画这圈框的，拿它当被选中的对象，两次渲染的差异就只可能来自手柄。
+    """
+    from canvas.items import StrokeItem
+
+    path = QPainterPath(QPointF(100, 100))
+    path.lineTo(QPointF(300, 250))
+    item = StrokeItem(path, QPen(QColor("red"), 3))
+    assert not item.shows_selection_frame()
     view.canvas_scene.addItem(item)
 
     def _render():

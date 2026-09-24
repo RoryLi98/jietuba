@@ -303,8 +303,20 @@ Replace it?</source>
         <translation>선택 항목 삭제</translation>
     </message>
     <message>
+        <source>Restore Last Region</source>
+        <translation>이전 선택 영역 복원</translation>
+    </message>
+    <message>
         <source>Copy Pinned Image</source>
         <translation>고정 이미지 복사</translation>
+    </message>
+    <message>
+        <source>Copy All Text</source>
+        <translation>모든 텍스트 복사</translation>
+    </message>
+    <message>
+        <source>Reset Size</source>
+        <translation>크기 초기화</translation>
     </message>
     <message>
         <source>Toggle Thumbnail</source>
@@ -327,6 +339,10 @@ Replace it?</source>
         <translation>스크린샷 번역</translation>
     </message>
     <message>
+        <source>Recognize Text</source>
+        <translation>텍스트 인식</translation>
+    </message>
+    <message>
         <source>Cursor Move Keys</source>
         <translation>커서 이동 키</translation>
     </message>
@@ -343,10 +359,6 @@ Replace it?</source>
     <message>
         <source>Stitching Engine</source>
         <translation>합성 엔진</translation>
-    </message>
-    <message>
-        <source>Rust Hash (Recommended)</source>
-        <translation>Rust 해시 (권장)</translation>
     </message>
     <message>
         <source>Python Hash (Debug)</source>
@@ -409,12 +421,32 @@ Replace it?</source>
     
     <!-- Smart Selection Page -->
     <message>
-        <source>Enable Smart Selection</source>
-        <translation>스마트 선택 사용</translation>
+        <source>Detection Mode</source>
+        <translation>감지 방식</translation>
     </message>
     <message>
-        <source>Automatically recognizes UI elements at mouse cursor position.</source>
-        <translation>마우스 커서 위치의 UI 요소를 자동으로 인식합니다.</translation>
+        <source>Snap the selection to the window or control under the cursor. Control detection reads the accessibility tree and takes longer on large windows.</source>
+        <translation>커서 아래의 창 또는 컨트롤에 선택 영역을 자동으로 맞춥니다. 컨트롤 감지는 접근성 트리를 읽으므로 창이 클수록 오래 걸립니다.</translation>
+    </message>
+    <message>
+        <source>Off</source>
+        <translation>끄기</translation>
+    </message>
+    <message>
+        <source>Window</source>
+        <translation>창</translation>
+    </message>
+    <message>
+        <source>Control</source>
+        <translation>컨트롤</translation>
+    </message>
+    <message>
+        <source>Selection Switch Animation</source>
+        <translation>선택 영역 전환 애니메이션</translation>
+    </message>
+    <message>
+        <source>Slide the selection when it moves from one window or control to another.</source>
+        <translation>선택 영역이 창이나 컨트롤 사이를 이동할 때 미끄러지듯 전환합니다.</translation>
     </message>
     <message>
         <source>💡 How to use:</source>
@@ -443,8 +475,16 @@ Replace it?</source>
         <translation>캡처 시 파일로 자동 저장합니다.</translation>
     </message>
     <message>
-        <source>Save Folder:</source>
-        <translation>저장 폴더:</translation>
+        <source>Write File Path to Clipboard</source>
+        <translation>클립보드에 파일 경로 쓰기</translation>
+    </message>
+    <message>
+        <source>Lets tools that only recognize a file path (e.g. some terminal apps) paste the screenshot too. Requires Auto-save Screenshots to be enabled.</source>
+        <translation>파일 경로만 인식하는 도구(일부 터미널 앱 등)에서도 스크린샷을 붙여넣을 수 있게 합니다. "스크린샷 자동 저장"을 켜야 적용됩니다.</translation>
+    </message>
+    <message>
+        <source>Save Folder</source>
+        <translation>저장 폴더</translation>
     </message>
     <message>
         <source>Save Format:</source>
@@ -772,6 +812,125 @@ Replace it?</source>
         <source>Keep original text formatting</source>
         <translation>원본 텍스트 서식을 유지</translation>
     </message>
+    <message>
+        <source>Baidu APPID</source>
+        <translation>Baidu APPID</translation>
+    </message>
+    <message>
+        <source>Baidu Secret Key</source>
+        <translation>Baidu 시크릿 키</translation>
+    </message>
+    <message>
+        <source>Paired with APPID in the Baidu console</source>
+        <translation>Baidu 콘솔의 개발자 정보에서 APPID와 짝을 이루는 키</translation>
+    </message>
+    <message>
+        <source>Baidu Translate Open Platform</source>
+        <translation>Baidu 번역 개방 플랫폼</translation>
+    </message>
+    <message>
+        <source>DeepSeek API Key</source>
+        <translation>DeepSeek API 키</translation>
+    </message>
+    <message>
+        <source>Model</source>
+        <translation>모델</translation>
+    </message>
+    <message>
+        <source>API Base URL</source>
+        <translation>API 기본 URL</translation>
+    </message>
+    <message>
+        <source>LLM translation: better with context and idioms, but slower, billed per token, and may refuse some content</source>
+        <translation>LLM 번역: 문맥과 관용 표현에 강하지만 느리고 토큰 단위로 과금되며 일부 내용은 거부될 수 있습니다</translation>
+    </message>
+    <message><source>Color Formats</source><translation>색상 형식</translation></message>
+    <message><source>Which formats the magnifier shows, and which one the copy shortcut uses.</source><translation>돋보기에 표시할 형식과 단축키로 복사할 형식을 정합니다.</translation></message>
+    <message><source>Manage Color Formats</source><translation>색상 형식 관리</translation></message>
+    <message>
+        <source>Custom LLM-1</source>
+        <translation>사용자 지정 LLM-1</translation>
+    </message>
+    <message>
+        <source>Custom LLM-2</source>
+        <translation>사용자 지정 LLM-2</translation>
+    </message>
+    <message>
+        <source>Custom LLM-3</source>
+        <translation>사용자 지정 LLM-3</translation>
+    </message>
+    <message>
+        <source>API Key</source>
+        <translation>API 키</translation>
+    </message>
+    <message>
+        <source>Temperature</source>
+        <translation>온도</translation>
+    </message>
+    <message>
+        <source>Timeout (s)</source>
+        <translation>시간 제한(초)</translation>
+    </message>
+    <message>
+        <source>Instructions</source>
+        <translation>추가 지시</translation>
+    </message>
+    <message>
+        <source>Display Name</source>
+        <translation>표시 이름</translation>
+    </message>
+    <message>
+        <source>Shown in the translation window</source>
+        <translation>번역 창에 표시됩니다</translation>
+    </message>
+    <message>
+        <source>Extra Body</source>
+        <translation>추가 요청 본문</translation>
+    </message>
+    <message>
+        <source>JSON Mode</source>
+        <translation>JSON 모드</translation>
+    </message>
+    <message>
+        <source>Ask for JSON replies. If the service rejects it, the request is retried without; turn it off to skip that retry</source>
+        <translation>JSON 형식 응답을 요청합니다. 서비스가 지원하지 않으면 빼고 한 번 다시 시도합니다. 끄면 재시도를 건너뜁니다</translation>
+    </message>
+    <message>
+        <source>Optional for local models</source>
+        <translation>로컬 모델은 비워도 됨</translation>
+    </message>
+    <message>
+        <source>Server default</source>
+        <translation>서버 기본값</translation>
+    </message>
+    <message>
+        <source>e.g. Keep product names untranslated</source>
+        <translation>예: 제품명은 번역하지 않음</translation>
+    </message>
+    <message>
+        <source>Any OpenAI-compatible service. Ollama: http://localhost:11434/v1, LM Studio: http://localhost:1234/v1</source>
+        <translation>모든 OpenAI 호환 서비스. Ollama: http://localhost:11434/v1, LM Studio: http://localhost:1234/v1</translation>
+    </message>
+    <message>
+        <source>Fetch Models</source>
+        <translation>모델 가져오기</translation>
+    </message>
+    <message>
+        <source>Test Connection</source>
+        <translation>연결 테스트</translation>
+    </message>
+    <message>
+        <source>Testing...</source>
+        <translation>테스트 중…</translation>
+    </message>
+    <message>
+        <source>Fetching models...</source>
+        <translation>모델 가져오는 중…</translation>
+    </message>
+    <message>
+        <source>No models returned</source>
+        <translation>반환된 모델이 없습니다</translation>
+    </message>
 </context>
 
 <context>
@@ -896,6 +1055,10 @@ Replace it?</source>
     <message>
         <source>Screenshot translate (OCR + Translate)</source>
         <translation>스크린샷 번역 (OCR + 번역)</translation>
+    </message>
+    <message>
+        <source>Recognize text (OCR)</source>
+        <translation>텍스트 인식(OCR)</translation>
     </message>
     <message>
         <source>Scan QR code / barcode</source>
@@ -1053,6 +1216,10 @@ Replace it?</source>
     <message>
         <source>No text was recognized</source>
         <translation>텍스트를 인식하지 못했습니다</translation>
+    </message>
+    <message>
+        <source>Text copied</source>
+        <translation>텍스트를 복사했습니다</translation>
     </message>
     <message>
         <source>OCR recognition failed: {error}</source>
@@ -1240,6 +1407,14 @@ Replace it?</source>
         <translation>클립보드 (2)</translation>
     </message>
     <message>
+        <source>Pin Clipboard Image</source>
+        <translation>고정 이미지 생성</translation>
+    </message>
+    <message>
+        <source>Pin Clipboard Image (2)</source>
+        <translation>고정 이미지 생성 (2)</translation>
+    </message>
+    <message>
         <source>Hotkey Registration Failed</source>
         <translation>단축키 등록 실패</translation>
     </message>
@@ -1256,6 +1431,18 @@ Replace it?</source>
 <!-- ========== Translation Dialog ========== -->
 <context>
     <name>TranslationDialog</name>
+    <message>
+        <source>Custom LLM-1</source>
+        <translation>사용자 지정 LLM-1</translation>
+    </message>
+    <message>
+        <source>Custom LLM-2</source>
+        <translation>사용자 지정 LLM-2</translation>
+    </message>
+    <message>
+        <source>Custom LLM-3</source>
+        <translation>사용자 지정 LLM-3</translation>
+    </message>
     <message>
         <source>Translation Result</source>
         <translation>번역 결과</translation>
@@ -1397,6 +1584,7 @@ Replace it?</source>
         <translation>번역</translation>
     </message>
     <message><source>Translation Hotkey</source><translation>번역 단축키</translation></message>
+    <message><source>Pin Clipboard Image</source><translation>고정 이미지 생성</translation></message>
     <message>
         <source>Translation Settings</source>
         <translation>번역 설정</translation>
@@ -1544,6 +1732,10 @@ Replace it?</source>
     <message>
         <source>Auto Paste After Selection</source>
         <translation>선택 후 자동 붙여넣기</translation>
+    </message>
+    <message>
+        <source>Close After Paste</source>
+        <translation>붙여넣기 후 창 닫기</translation>
     </message>
     <message>
         <source>Move to Top After Paste</source>
@@ -2196,6 +2388,14 @@ Replace it?</source>
         <translation>유지할 최대 항목 수 (0 = 무제한)</translation>
     </message>
     <message>
+        <source>Window Scan Interval</source>
+        <translation>창 스캔 주기</translation>
+    </message>
+    <message>
+        <source>How often the foreground window is sampled to find the paste target (only while this panel is open)</source>
+        <translation>패널이 열려 있는 동안 이 주기로 전경 창을 검사해 붙여넣기 대상을 찾습니다(패널이 열려 있을 때만 동작)</translation>
+    </message>
+    <message>
         <source>Auto Cleanup Old Items</source>
         <translation>오래된 항목 자동 정리</translation>
     </message>
@@ -2214,10 +2414,6 @@ Replace it?</source>
     <message>
         <source>Clipboard module not available</source>
         <translation>클립보드 모듈을 사용할 수 없습니다</translation>
-    </message>
-    <message>
-        <source>Open Folder</source>
-        <translation>열기</translation>
     </message>
     <message>
         <source>Clear Clipboard History</source>
@@ -2271,6 +2467,42 @@ Replace it?</source>
 
 <context>
     <name>ArrowSettingsPanel</name>
+    <message>
+        <source>Solid Arrow</source>
+        <translation>채움 화살표</translation>
+    </message>
+    <message>
+        <source>Solid Double Arrow</source>
+        <translation>채움 양방향 화살표</translation>
+    </message>
+    <message>
+        <source>Outlined Arrow</source>
+        <translation>외곽선 화살표</translation>
+    </message>
+    <message>
+        <source>Line Arrow</source>
+        <translation>선 화살표</translation>
+    </message>
+    <message>
+        <source>Line Double Arrow</source>
+        <translation>선 양방향 화살표</translation>
+    </message>
+    <message>
+        <source>Thin Arrow</source>
+        <translation>얇은 화살표</translation>
+    </message>
+    <message>
+        <source>Thin Double Arrow</source>
+        <translation>얇은 양방향 화살표</translation>
+    </message>
+    <message>
+        <source>Dimension Line</source>
+        <translation>치수선</translation>
+    </message>
+    <message>
+        <source>Dimension Arrow</source>
+        <translation>치수 양방향 화살표</translation>
+    </message>
     <message>
         <source>Arrow Style</source>
         <translation>화살표 스타일</translation>
@@ -2435,6 +2667,42 @@ Replace it?</source>
         <source>Yellow</source>
         <translation>노란색</translation>
     </message>
+    <message>
+        <source>Text Outline</source>
+        <translation>텍스트 외곽선</translation>
+    </message>
+    <message>
+        <source>Text Shadow</source>
+        <translation>텍스트 그림자</translation>
+    </message>
+    <message>
+        <source>Custom Outline Color</source>
+        <translation>사용자 지정 외곽선 색상</translation>
+    </message>
+    <message>
+        <source>Custom Shadow Color</source>
+        <translation>사용자 지정 그림자 색상</translation>
+    </message>
+    <message>
+        <source>Shadow Opacity</source>
+        <translation>그림자 불투명도</translation>
+    </message>
+    <message>
+        <source>Outline: Thin</source>
+        <translation>외곽선: 얇게</translation>
+    </message>
+    <message>
+        <source>Outline: Medium</source>
+        <translation>외곽선: 보통</translation>
+    </message>
+    <message>
+        <source>Outline: Thick</source>
+        <translation>외곽선: 굵게</translation>
+    </message>
+    <message>
+        <source>Outline: Extra Thick</source>
+        <translation>외곽선: 아주 굵게</translation>
+    </message>
 </context>
 
 <context>
@@ -2454,18 +2722,6 @@ Replace it?</source>
     <message>
         <source>Used when copying color info in magnifier.</source>
         <translation>돋보기에서 색상 정보를 복사할 때 사용합니다.</translation>
-    </message>
-    <message>
-        <source>RGB+HEX</source>
-        <translation>RGB+HEX</translation>
-    </message>
-    <message>
-        <source>RGB only</source>
-        <translation>RGB만</translation>
-    </message>
-    <message>
-        <source>HEX only</source>
-        <translation>HEX만</translation>
     </message>
 </context>
 
@@ -2916,6 +3172,50 @@ Replace it?</source>
         <source>当前按下</source>
         <translation>누르는 중</translation>
     </message>
+    <message>
+        <source>Baidu APPID</source>
+        <translation>Baidu APPID</translation>
+    </message>
+    <message>
+        <source>Baidu Secret Key</source>
+        <translation>Baidu 시크릿 키</translation>
+    </message>
+    <message>
+        <source>Paired with APPID in the Baidu console</source>
+        <translation>Baidu 콘솔의 개발자 정보에서 APPID와 짝을 이루는 키</translation>
+    </message>
+    <message>
+        <source>Baidu Translate Open Platform</source>
+        <translation>Baidu 번역 개방 플랫폼</translation>
+    </message>
+    <message>
+        <source>DeepSeek API Key</source>
+        <translation>DeepSeek API 키</translation>
+    </message>
+    <message>
+        <source>Model</source>
+        <translation>모델</translation>
+    </message>
+    <message>
+        <source>API Base URL</source>
+        <translation>API 기본 URL</translation>
+    </message>
+    <message>
+        <source>Custom LLM-1</source>
+        <translation>사용자 지정 LLM-1</translation>
+    </message>
+    <message>
+        <source>Custom LLM-2</source>
+        <translation>사용자 지정 LLM-2</translation>
+    </message>
+    <message>
+        <source>Custom LLM-3</source>
+        <translation>사용자 지정 LLM-3</translation>
+    </message>
+    <message>
+        <source>Optional for local models</source>
+        <translation>로컬 모델은 비워도 됨</translation>
+    </message>
 </context>
 
 <!-- ========== GIF Record Toolbar ========== -->
@@ -3005,7 +3305,16 @@ Replace it?</source>
     <message><source>Success</source><translation>성공</translation></message>
     <!-- Misc page group headers -->
     <message><source>Startup</source><translation>시작</translation></message>
-    <message><source>Pin Window</source><translation>고정 창</translation></message>
+    <message><source>Show Magnifier</source><translation>돋보기 표시</translation></message>
+    <message><source>Follows the cursor while selecting, and picks the color under it.</source><translation>선택 중 커서를 따라다니며 커서 아래의 색을 추출합니다.</translation></message>
+    <message><source>Pixel Grid</source><translation>픽셀 격자</translation></message>
+    <message><source>Outline each pixel in the magnified view. Hidden at low zoom, where the lines would cover the pixels.</source><translation>확대 화면에서 각 픽셀의 경계를 그립니다. 배율이 낮을 때는 선이 픽셀을 덮으므로 자동으로 숨깁니다.</translation></message>
+    <message><source>Shortcut Hint</source><translation>단축키 안내</translation></message>
+    <message><source>Show the color-copy shortcut under the readings. Off makes the magnifier shorter.</source><translation>수치 아래에 색 복사 단축키를 표시합니다. 끄면 돋보기가 조금 짧아집니다.</translation></message>
+    <message><source>Color Swatch</source><translation>추출 색상 칩</translation></message>
+    <message><source>Show the picked color in the top-right corner of the magnified view.</source><translation>확대 화면 오른쪽 위에 현재 추출한 색을 표시합니다.</translation></message>
+    <message><source>Magnifier</source><translation>돋보기</translation></message>
+    <message><source>Pin Settings</source><translation>핀 고정 설정</translation></message>
     <message><source>Operation</source><translation>동작</translation></message>
     <!-- About page -->
     <message><source>Features</source><translation>기능</translation></message>
@@ -3036,6 +3345,20 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.</translation></message>
     <message><source>Source Code</source><translation>소스 코드</translation></message>
     <message><source>Open GitHub</source><translation>GitHub 열기</translation></message>
+    <message><source>Version</source><translation>버전</translation></message>
+    <message><source>Check for Updates</source><translation>업데이트 확인</translation></message>
+    <message><source>Checking...</source><translation>확인 중...</translation></message>
+    <message><source>Update Check</source><translation>업데이트 확인</translation></message>
+    <message><source>You're using the latest version (%1).</source><translation>최신 버전(%1)을 사용 중입니다.</translation></message>
+    <message><source>Update Available</source><translation>업데이트 사용 가능</translation></message>
+    <message><source>Current version: %1</source><translation>현재 버전: %1</translation></message>
+    <message><source>Latest version: %1</source><translation>최신 버전: %1</translation></message>
+    <message><source>What's new:</source><translation>업데이트 내용:</translation></message>
+    <message><source>No release notes provided.</source><translation>릴리스 노트가 없습니다.</translation></message>
+    <message><source>Download:</source><translation>다운로드:</translation></message>
+    <message><source>Open Download Page</source><translation>다운로드 페이지 열기</translation></message>
+    <message><source>Update Check Failed</source><translation>업데이트 확인 실패</translation></message>
+    <message><source>Unable to check for updates. Please check your network connection and try again.</source><translation>업데이트를 확인할 수 없습니다. 네트워크 연결을 확인하고 다시 시도하세요.</translation></message>
     <!-- Developer page -->
     <message><source>Long Screenshot</source><translation>긴 스크린샷</translation></message>
     <message><source>Tools</source><translation>도구</translation></message>
@@ -3135,7 +3458,6 @@ SOFTWARE.</translation></message>
 
 <context>
     <name>SettingsDialog</name>
-    <message><source>Change Location</source><translation>위치 변경</translation></message>
     <message><source>Current clipboard database path is unavailable.</source><translation>현재 클립보드 데이터베이스 위치를 가져올 수 없습니다.</translation></message>
     <message><source>Choose Clipboard Data Folder</source><translation>클립보드 데이터 폴더 선택</translation></message>
     <message><source>Info</source><translation>정보</translation></message>
@@ -3169,6 +3491,70 @@ SOFTWARE.</translation></message>
     <message>
         <source>Choose a display mode.</source>
         <translation>표시 모드를 선택하세요.</translation>
+    </message>
+    <message>
+        <source>Toolbar &amp; Panel Scale</source>
+        <translation>도구 모음 및 패널 배율</translation>
+    </message>
+    <message>
+        <source>Size of toolbars, tool panels and popups.</source>
+        <translation>도구 모음의 표시 크기입니다.</translation>
+    </message>
+    <message>
+        <source>Window Scale</source>
+        <translation>창 크기</translation>
+    </message>
+    <message>
+        <source>Font and size of application windows.</source>
+        <translation>애플리케이션 창의 글꼴과 크기입니다.</translation>
+    </message>
+    <message>
+        <source>Selection Border Width</source>
+        <translation>선택 영역 테두리 두께</translation>
+    </message>
+    <message>
+        <source>Thickness of the selection outline.</source>
+        <translation>선택 영역 테두리 선의 두께입니다.</translation>
+    </message>
+    <message>
+        <source>Selection Handles</source>
+        <translation>선택 핸들</translation>
+    </message>
+    <message>
+        <source>Hidden handles can still be dragged to resize.</source>
+        <translation>숨겨도 드래그하여 크기를 조절할 수 있습니다.</translation>
+    </message>
+    <message>
+        <source>Selection Handle Size</source>
+        <translation>선택 핸들 크기</translation>
+    </message>
+    <message>
+        <source>Size of the selection handles.</source>
+        <translation>선택 핸들의 크기입니다.</translation>
+    </message>
+    <message>
+        <source>8 handles</source>
+        <translation>핸들 8개</translation>
+    </message>
+    <message>
+        <source>4 corners</source>
+        <translation>모서리 4개</translation>
+    </message>
+    <message>
+        <source>None</source>
+        <translation>표시 안 함</translation>
+    </message>
+    <message>
+        <source>Small</source>
+        <translation>작게</translation>
+    </message>
+    <message>
+        <source>Medium</source>
+        <translation>보통</translation>
+    </message>
+    <message>
+        <source>Large</source>
+        <translation>크게</translation>
     </message>
     <message>
         <source>System</source>
@@ -3207,18 +3593,13 @@ SOFTWARE.</translation></message>
         <source>Change Number Style</source>
         <translation>번호 스타일 변경</translation>
     </message>
-    <message>
-        <source>Change Mosaic Style</source>
-        <translation>모자이크 종류 변경</translation>
-    </message>
-    <message>
-        <source>Change Mosaic Size</source>
-        <translation>모자이크 입자 크기 변경</translation>
-    </message>
 </context>
-
 <context>
     <name>HotkeyEdit</name>
+    <message>
+        <source>Unrecognized shortcut — this key is not supported for global hotkeys</source>
+        <translation>인식할 수 없는 단축키——전역 단축키는 이 키를 지원하지 않습니다</translation>
+    </message>
     <message>
         <source>This hotkey is assigned more than once.</source>
         <translation>이 단축키가 중복으로 지정되었습니다.</translation>
@@ -3277,6 +3658,10 @@ SOFTWARE.</translation></message>
     <message>
         <source>Scan code</source>
         <translation>코드 스캔</translation>
+    </message>
+    <message>
+        <source>Recognize text</source>
+        <translation>텍스트 인식</translation>
     </message>
     <message>
         <source>GIF recording</source>
@@ -3374,95 +3759,99 @@ SOFTWARE.</translation></message>
         <translation>링크 열기</translation>
     </message>
 </context>
-
-<!-- ========== UI Scale & Hotkey Validation ========== -->
 <context>
-    <name>SettingsDialog</name>
+    <name>TextRecognitionWindow</name>
     <message>
-        <source>UI Scale</source>
-        <translation>UI 배율</translation>
+        <source>Text recognition</source>
+        <translation>텍스트 인식</translation>
     </message>
     <message>
-        <source>Adjust the size of interface text. Applied immediately.</source>
-        <translation>인터페이스 글자 크기를 조절합니다. 저장 후 즉시 적용됩니다.</translation>
+        <source>Recognizing...</source>
+        <translation>인식 중...</translation>
     </message>
     <message>
-        <source>Screenshot</source>
-        <translation>스크린샷</translation>
+        <source>Recognized %1 characters</source>
+        <translation>%1자를 인식했습니다</translation>
     </message>
     <message>
-        <source>Screenshot (2)</source>
-        <translation>스크린샷(보조)</translation>
+        <source>No text found in the selection.</source>
+        <translation>선택 영역에서 텍스트를 찾지 못했습니다.</translation>
     </message>
     <message>
-        <source>Clipboard</source>
-        <translation>클립보드</translation>
+        <source>This build does not include the text recognition engine.</source>
+        <translation>이 빌드에는 텍스트 인식 엔진이 포함되어 있지 않습니다.</translation>
     </message>
     <message>
-        <source>Clipboard (2)</source>
-        <translation>클립보드(보조)</translation>
+        <source>Text recognition failed.</source>
+        <translation>텍스트 인식에 실패했습니다.</translation>
     </message>
     <message>
-        <source>Translation</source>
-        <translation>번역</translation>
+        <source>Copy</source>
+        <translation>복사</translation>
     </message>
     <message>
-        <source>Translation (2)</source>
-        <translation>번역(보조)</translation>
-    </message>
-    <message>
-        <source>Invalid Hotkey</source>
-        <translation>잘못된 단축키</translation>
-    </message>
-    <message>
-        <source>The following shortcuts cannot be recognized and will never work:</source>
-        <translation>다음 단축키는 인식되지 않아 저장해도 작동하지 않습니다:</translation>
-    </message>
-    <message>
-        <source>Please record them again in the boxes above (e.g. Ctrl+Alt+A, F8, Print).</source>
-        <translation>위의 입력란에서 다시 조합키를 입력해 주세요(예: Ctrl+Alt+A, F8, Print).</translation>
+        <source>Copied</source>
+        <translation>복사됨</translation>
     </message>
 </context>
-
-<!-- ========== Baidu Translate Provider ========== -->
 <context>
-    <name>SettingsDialog</name>
+    <name>InAppShortcut</name>
     <message>
-        <source>Baidu Translate</source>
-        <translation>바이두 번역</translation>
-    </message>
-    <message>
-        <source>Baidu APP ID</source>
-        <translation>바이두 APP ID</translation>
-    </message>
-    <message>
-        <source>Baidu Secret Key</source>
-        <translation>바이두 시크릿 키</translation>
-    </message>
-    <message>
-        <source>Baidu free tier: 1 QPS, Standard edition. Get APP ID and key at</source>
-        <translation>바이두 번역 무료판: 표준판은 1 QPS. APP ID와 키 발급:</translation>
+        <source>Middle</source>
+        <translation>가운데 버튼</translation>
     </message>
 </context>
-
-<!-- ========== Global Pin Hotkey ========== -->
+<context>
+    <name>ColorFormatDialog</name>
+    <message><source>Manage Color Formats</source><translation>색상 형식 관리</translation></message>
+    <message><source>Checked formats show on the magnifier. The first one is what the copy shortcut puts on the clipboard — drag it to the top to change that.</source><translation>선택한 형식이 돋보기에 표시됩니다. 단축키로 복사되는 것은 맨 위의 형식이므로, 바꾸려면 위로 끌어다 놓으세요.</translation></message>
+    <message><source>Restore defaults</source><translation>기본값 복원</translation></message>
+    <message><source>OK</source><translation>확인</translation></message>
+    <message><source>Cancel</source><translation>취소</translation></message>
+</context>
+<context>
+    <name>KeyChip</name>
+    <message>
+        <source>Mouse Back</source>
+        <translation>마우스 뒤로 버튼</translation>
+    </message>
+    <message>
+        <source>Mouse Forward</source>
+        <translation>마우스 앞으로 버튼</translation>
+    </message>
+    <message>
+        <source>Add shortcut</source>
+        <translation>단축키 추가</translation>
+    </message>
+    <message>
+        <source>Press keys…</source>
+        <translation>키를 누르세요…</translation>
+    </message>
+</context>
+<context>
+    <name>HotkeyEdit</name>
+    <message>
+        <source>Not set</source>
+        <translation>설정 안 됨</translation>
+    </message>
+    <message>
+        <source>Available</source>
+        <translation>사용 가능</translation>
+    </message>
+    <message>
+        <source>Already in use by another app.</source>
+        <translation>다른 앱에서 사용 중입니다.</translation>
+    </message>
+</context>
 <context>
     <name>SettingsDialog</name>
     <message>
-        <source>Pin Hotkey</source>
-        <translation>핀 단축키</translation>
+        <source>Works anytime</source>
+        <translation>언제든지 실행됩니다</translation>
     </message>
     <message>
-        <source>Pin</source>
-        <translation>핀</translation>
-    </message>
-    <message>
-        <source>Pin (2)</source>
-        <translation>핀 (2)</translation>
-    </message>
-    <message>
-        <source>Pin latest clipboard</source>
-        <translation>최신 클립보드 고정</translation>
+        <source>Only in screenshot and pin windows</source>
+        <translation>스크린샷 및 고정 창에서만 작동</translation>
     </message>
 </context>
 </TS>
