@@ -1045,6 +1045,10 @@ Replace it?</source>
         <translation>翻译</translation>
     </message>
     <message>
+        <source>Open in Translation Window</source>
+        <translation>在翻译窗口中打开</translation>
+    </message>
+    <message>
         <source>Translate OCR text</source>
         <translation>翻译识别文字</translation>
     </message>
@@ -3274,6 +3278,7 @@ SOFTWARE.</translation></message>
         <translation>更改马赛克粒度</translation>
     </message>
 </context>
+
 <context>
     <name>HotkeyEdit</name>
     <message>
@@ -3429,6 +3434,97 @@ SOFTWARE.</translation></message>
     <message>
         <source>Open link</source>
         <translation>打开链接</translation>
+    </message>
+</context>
+
+<!-- ========== UI Scale & Hotkey Validation ========== -->
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>UI Scale</source>
+        <translation>界面缩放</translation>
+    </message>
+    <message>
+        <source>Adjust the size of interface text. Applied immediately.</source>
+        <translation>调整界面文字的大小，保存后立即生效。</translation>
+    </message>
+    <message>
+        <source>Screenshot</source>
+        <translation>截图</translation>
+    </message>
+    <message>
+        <source>Screenshot (2)</source>
+        <translation>截图（备用）</translation>
+    </message>
+    <message>
+        <source>Clipboard</source>
+        <translation>剪贴板</translation>
+    </message>
+    <message>
+        <source>Clipboard (2)</source>
+        <translation>剪贴板（备用）</translation>
+    </message>
+    <message>
+        <source>Translation</source>
+        <translation>翻译</translation>
+    </message>
+    <message>
+        <source>Translation (2)</source>
+        <translation>翻译（备用）</translation>
+    </message>
+    <message>
+        <source>Invalid Hotkey</source>
+        <translation>无效的快捷键</translation>
+    </message>
+    <message>
+        <source>The following shortcuts cannot be recognized and will never work:</source>
+        <translation>以下快捷键无法识别，即使保存也不会生效：</translation>
+    </message>
+    <message>
+        <source>Please record them again in the boxes above (e.g. Ctrl+Alt+A, F8, Print).</source>
+        <translation>请在上方对应输入框重新录入组合键（例如 Ctrl+Alt+A、F8、Print）。</translation>
+    </message>
+</context>
+
+<!-- ========== Baidu Translate Provider ========== -->
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Baidu Translate</source>
+        <translation>百度翻译</translation>
+    </message>
+    <message>
+        <source>Baidu APP ID</source>
+        <translation>百度 APP ID</translation>
+    </message>
+    <message>
+        <source>Baidu Secret Key</source>
+        <translation>百度密钥</translation>
+    </message>
+    <message>
+        <source>Baidu free tier: 1 QPS, Standard edition. Get APP ID and key at</source>
+        <translation>百度翻译免费版：标准版支持 1 QPS。前往以下地址获取 APP ID 和密钥：</translation>
+    </message>
+</context>
+
+<!-- ========== Global Pin Hotkey ========== -->
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Pin Hotkey</source>
+        <translation>钉图热键</translation>
+    </message>
+    <message>
+        <source>Pin</source>
+        <translation>钉图</translation>
+    </message>
+    <message>
+        <source>Pin (2)</source>
+        <translation>钉图（备用）</translation>
+    </message>
+    <message>
+        <source>Pin latest clipboard</source>
+        <translation>钉住剪贴板最新内容</translation>
     </message>
 </context>
 </TS>

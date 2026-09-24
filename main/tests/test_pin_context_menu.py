@@ -28,6 +28,7 @@ CALLBACKS = (
     "copy_to_clipboard",
     "save_image",
     "_on_translate_clicked",
+    "_on_translate_open_window_clicked",
     "reset_to_original_size",
     "rotate_image_cw",
     "rotate_image_ccw",

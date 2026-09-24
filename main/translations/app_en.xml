@@ -1036,6 +1036,10 @@ Replace it?</translation>
         <translation>Translate</translation>
     </message>
     <message>
+        <source>Open in Translation Window</source>
+        <translation>Open in Translation Window</translation>
+    </message>
+    <message>
         <source>Translate OCR text</source>
         <translation>Translate OCR text</translation>
     </message>
@@ -3187,6 +3191,7 @@ SOFTWARE.</translation></message>
         <translation>Change Mosaic Size</translation>
     </message>
 </context>
+
 <context>
     <name>HotkeyEdit</name>
     <message>
@@ -3342,6 +3347,97 @@ SOFTWARE.</translation></message>
     <message>
         <source>Open link</source>
         <translation>Open link</translation>
+    </message>
+</context>
+
+<!-- ========== UI Scale & Hotkey Validation ========== -->
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>UI Scale</source>
+        <translation>UI Scale</translation>
+    </message>
+    <message>
+        <source>Adjust the size of interface text. Applied immediately.</source>
+        <translation>Adjust the size of interface text. Applied immediately.</translation>
+    </message>
+    <message>
+        <source>Screenshot</source>
+        <translation>Screenshot</translation>
+    </message>
+    <message>
+        <source>Screenshot (2)</source>
+        <translation>Screenshot (2)</translation>
+    </message>
+    <message>
+        <source>Clipboard</source>
+        <translation>Clipboard</translation>
+    </message>
+    <message>
+        <source>Clipboard (2)</source>
+        <translation>Clipboard (2)</translation>
+    </message>
+    <message>
+        <source>Translation</source>
+        <translation>Translation</translation>
+    </message>
+    <message>
+        <source>Translation (2)</source>
+        <translation>Translation (2)</translation>
+    </message>
+    <message>
+        <source>Invalid Hotkey</source>
+        <translation>Invalid Hotkey</translation>
+    </message>
+    <message>
+        <source>The following shortcuts cannot be recognized and will never work:</source>
+        <translation>The following shortcuts cannot be recognized and will never work:</translation>
+    </message>
+    <message>
+        <source>Please record them again in the boxes above (e.g. Ctrl+Alt+A, F8, Print).</source>
+        <translation>Please record them again in the boxes above (e.g. Ctrl+Alt+A, F8, Print).</translation>
+    </message>
+</context>
+
+<!-- ========== Baidu Translate Provider ========== -->
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Baidu Translate</source>
+        <translation>Baidu Translate</translation>
+    </message>
+    <message>
+        <source>Baidu APP ID</source>
+        <translation>Baidu APP ID</translation>
+    </message>
+    <message>
+        <source>Baidu Secret Key</source>
+        <translation>Baidu Secret Key</translation>
+    </message>
+    <message>
+        <source>Baidu free tier: 1 QPS, Standard edition. Get APP ID and key at</source>
+        <translation>Baidu free tier: 1 QPS, Standard edition. Get APP ID and key at</translation>
+    </message>
+</context>
+
+<!-- ========== Global Pin Hotkey ========== -->
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Pin Hotkey</source>
+        <translation>Pin Hotkey</translation>
+    </message>
+    <message>
+        <source>Pin</source>
+        <translation>Pin</translation>
+    </message>
+    <message>
+        <source>Pin (2)</source>
+        <translation>Pin (2)</translation>
+    </message>
+    <message>
+        <source>Pin latest clipboard</source>
+        <translation>Pin latest clipboard</translation>
     </message>
 </context>
 </TS>

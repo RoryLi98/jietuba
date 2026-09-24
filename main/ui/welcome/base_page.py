@@ -424,7 +424,7 @@ def _dev_bootstrap():
         def set_screenshot_save_path(self, v):
             pass
 
-        def get_clipboard_hotkey(self): return self._def("clipboard_hotkey", "ctrl+2")
+        def get_clipboard_hotkey(self): return self._def("clipboard_hotkey", "ctrl+4")
         def get_clipboard_hotkey_2(self): return self._def("clipboard_hotkey_2", "")
         def set_clipboard_hotkey(self, v): pass
         def set_clipboard_hotkey_2(self, v): pass
@@ -433,11 +433,18 @@ def _dev_bootstrap():
         def set_clipboard_history_limit(self, v): pass
 
         def get_translation_hotkey(self):
-            return self._def("translation_hotkey", "")
+            return self._def("translation_hotkey", "ctrl+3")
         def get_translation_hotkey_2(self):
             return self._def("translation_hotkey_2", "")
         def set_translation_hotkey(self, v): pass
         def set_translation_hotkey_2(self, v): pass
+
+        def get_pin_hotkey(self):
+            return self._def("pin_hotkey", "ctrl+2")
+        def get_pin_hotkey_2(self):
+            return self._def("pin_hotkey_2", "")
+        def set_pin_hotkey(self, v): pass
+        def set_pin_hotkey_2(self, v): pass
 
         def get_clipboard_enabled(self): return self._def("clipboard_enabled", True)
         def set_clipboard_enabled(self, v): pass

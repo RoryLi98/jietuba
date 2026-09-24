@@ -301,6 +301,11 @@ class ClipboardWindow(QWidget, FramelessMixin):
             config = get_tool_settings_manager()
             default_width = config.get_app_setting("clipboard_window_width", 450)
             default_height = config.get_app_setting("clipboard_window_height", 600)
+            # 首次默认尺寸跟随界面缩放；用户保存的实际尺寸不做二次缩放
+            from core import ui_scale
+            default_width, default_height = ui_scale.scaled_window_size(
+                default_width, default_height
+            )
         except Exception as e:
             log_exception(e, T("加载剪贴板窗口几何设置"))
             default_width = 450

@@ -148,6 +148,9 @@ class PreviewPanel(QWidget):
 
         self.preview_label = QLabel()
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # 尺寸拷贝自运行时几何（父面板已缩放），豁免避免二次放大
+        from core.ui_scale import mark_unscaled
+        mark_unscaled(self.preview_label)
         self.preview_label.setFixedSize(self.width(), self.height())
         self.preview_label.setStyleSheet(
             "background: rgba(0, 0, 0, 0.25);"

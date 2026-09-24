@@ -115,6 +115,11 @@ def hotkey_identity(hotkey_str: str):
 class ShortcutHandler(ABC):
     """快捷键处理器接口，各模块实现此接口注册到管理器"""
 
+    # True 表示该 handler 需要捕获「系统级热键按下」本身（如热键录入框）。
+    # 全局热键被临时禁用（suppressed）时，普通 handler 不会再收到 WM_HOTKEY，
+    # 但 capture_mode 的 handler 仍会收到，否则录入框无法重新录制已注册的组合键。
+    capture_mode: bool = False
+
     @abstractmethod
     def is_active(self) -> bool:
         """当前是否处于活跃状态（应该接收按键）"""
@@ -194,8 +199,13 @@ class _HotkeyEventFilter(QAbstractNativeEventFilter):
                     hotkey_id = msg.wParam
                     cb = self._id_to_callback.get(hotkey_id)
                     if cb:
-                        # 全局热键被临时禁用时，handler 链也不应有机会拦截
-                        if self._manager.global_hotkeys_suppressed:
+                        # 全局热键被临时禁用时忽略回调；但热键录入框处于
+                        # 捕获状态时仍要放行，否则禁用期间无法重新录制
+                        # 已注册的组合键（WM_HOTKEY 被 OS 层消费，Qt 收不到）。
+                        if (
+                            self._manager.global_hotkeys_suppressed
+                            and not self._manager._hotkey_capture_active()
+                        ):
                             log_debug(
                                 T("系统热键已临时禁用，忽略回调 (id={hotkey_id})", hotkey_id=hotkey_id),
                                 "Shortcut",
@@ -315,6 +325,16 @@ class ShortcutManager(QObject):
     def has_registered_hotkeys(self) -> bool:
         """当前是否持有已注册的全局热键（键盘或鼠标侧键）。"""
         return bool(self._id_to_callback) or bool(self._mouse_callbacks)
+
+    def _hotkey_capture_active(self) -> bool:
+        """是否有 capture_mode 的 handler（热键录入框）正在捕获系统热键。"""
+        for handler in self._handlers:
+            try:
+                if getattr(handler, 'capture_mode', False) and handler.is_active():
+                    return True
+            except RuntimeError:
+                continue
+        return False
 
     # ==================================================================
     # Qt KeyPress 分发
@@ -644,6 +664,10 @@ class ShortcutManager(QObject):
 
         self._id_to_callback.clear()
         self._id_to_metadata.clear()
+        # 全部注销后 ID 空间归零。否则 ID 单调递增，长期运行会烧穿
+        # check_hotkey_availability 使用的固定探测 ID 9999，导致对实际
+        # 空闲的组合键误报「已被占用」。
+        self._next_hotkey_id = 1
 
         for token in self._mouse_callbacks:
             ShortcutManager._registered_mouse_buttons_global.discard(token)
@@ -654,8 +678,65 @@ class ShortcutManager(QObject):
     # 热键字符串解析
     # ==================================================================
 
-    @staticmethod
-    def _parse_hotkey(hotkey: str) -> Tuple[int, int]:
+    # Qt.Key → Windows VK。覆盖 get_key_display_map() 中录入框能产出的全部
+    # 命名键：此前 _parse_hotkey 只认其中一小部分，导致设置界面明明判定
+    # 合法的热键（如 print/home/pageup/方向键）在注册时静默失败。
+    # 注意 Qt6 里 Key_Space 等可打印字符键的值是 ASCII（0x20），
+    # 而非 0x01000000 段，因此必须用枚举成员作键，不能硬编码数值。
+    _QT_KEY_TO_VK: Optional[Dict[int, int]] = None
+
+    @classmethod
+    def _qt_key_to_vk(cls) -> Dict[int, int]:
+        if cls._QT_KEY_TO_VK is None:
+            from PySide6.QtCore import Qt
+            cls._QT_KEY_TO_VK = {
+                Qt.Key.Key_Escape: 0x1B,
+                Qt.Key.Key_Tab: 0x09,
+                Qt.Key.Key_Backtab: 0x09,   # VK_TAB + Shift 修饰
+                Qt.Key.Key_Backspace: 0x08,
+                Qt.Key.Key_Return: 0x0D,
+                Qt.Key.Key_Enter: 0x0D,     # 小键盘回车，同一 VK
+                Qt.Key.Key_Insert: 0x2D,
+                Qt.Key.Key_Delete: 0x2E,
+                Qt.Key.Key_Pause: 0x13,
+                Qt.Key.Key_Print: 0x2C,
+                Qt.Key.Key_SysReq: 0x2C,
+                Qt.Key.Key_Clear: 0x0C,
+                Qt.Key.Key_Home: 0x24,
+                Qt.Key.Key_End: 0x23,
+                Qt.Key.Key_Left: 0x25,
+                Qt.Key.Key_Up: 0x26,
+                Qt.Key.Key_Right: 0x27,
+                Qt.Key.Key_Down: 0x28,
+                Qt.Key.Key_PageUp: 0x21,
+                Qt.Key.Key_PageDown: 0x22,
+                Qt.Key.Key_Space: 0x20,
+                # 标点（Qt 用 ASCII 值，Windows 用 OEM VK）
+                Qt.Key.Key_Semicolon: 0xBA,
+                Qt.Key.Key_Equal: 0xBB,
+                Qt.Key.Key_Comma: 0xBC,
+                Qt.Key.Key_Minus: 0xBD,
+                Qt.Key.Key_Period: 0xBE,
+                Qt.Key.Key_Slash: 0xBF,
+                Qt.Key.Key_QuoteLeft: 0xC0,
+                Qt.Key.Key_BracketLeft: 0xDB,
+                Qt.Key.Key_Backslash: 0xDC,
+                Qt.Key.Key_BracketRight: 0xDD,
+                Qt.Key.Key_Apostrophe: 0xDE,
+            }
+        return cls._QT_KEY_TO_VK
+
+    # Shift+数字/标点 在美式布局下产生的字符 → 对应 VK。
+    # 录入框捕获 Shift+1 时 event.key() 已变成 Key_Exclam，产出 "shift+!"。
+    _SHIFTED_CHAR_TO_VK = {
+        '!': 0x31, '@': 0x32, '#': 0x33, '$': 0x34, '%': 0x35,
+        '^': 0x36, '&': 0x37, '*': 0x38, '(': 0x39, ')': 0x30,
+        '_': 0xBD, '+': 0xBB, '{': 0xDB, '}': 0xDD, '|': 0xDC,
+        ':': 0xBA, '"': 0xDE, '~': 0xC0, '<': 0xBC, '>': 0xBE, '?': 0xBF,
+    }
+
+    @classmethod
+    def _parse_hotkey(cls, hotkey: str) -> Tuple[int, int]:
         """将 'ctrl+shift+a' 风格字符串解析为 (modifiers, vk)。"""
         if not hotkey or not isinstance(hotkey, str):
             raise ValueError("无效的热键字符串")
@@ -682,47 +763,67 @@ class ShortcutManager(QObject):
         if not key:
             raise ValueError("缺少主键位")
 
-        vk = None
-        if len(key) == 1 and 'a' <= key <= 'z':
-            vk = ord(key.upper())
-        elif key.isdigit() and len(key) == 1:
-            vk = ord(key)
-        elif key.startswith('f') and key[1:].isdigit():
-            n = int(key[1:])
-            if 1 <= n <= 24:
-                vk = 0x70 + (n - 1)
-        elif key in ("printscreen", "prtsc"):
-            vk = 0x2C
-        elif key == "esc":
-            vk = 0x1B
-        elif key in ("`", "oem3", "backquote", "grave"):
-            vk = 0xC0
-        elif key in ("-", "minus"):
-            vk = 0xBD
-        elif key in ("=", "equals", "equal"):
-            vk = 0xBB
-        elif key in ("[", "lbracket"):
-            vk = 0xDB
-        elif key in ("]", "rbracket"):
-            vk = 0xDD
-        elif key in ("\\", "backslash"):
-            vk = 0xDC
-        elif key in (";", "semicolon"):
-            vk = 0xBA
-        elif key in ("'", "quote"):
-            vk = 0xDE
-        elif key in (",", "comma"):
-            vk = 0xBC
-        elif key in (".", "period"):
-            vk = 0xBE
-        elif key in ("/", "slash"):
-            vk = 0xBF
+        vk = cls._resolve_key_vk(key)
 
         if vk is None:
             raise ValueError(f"不支持的键: {key}")
 
         mods |= MOD_NOREPEAT
         return mods, vk
+
+    @classmethod
+    def _resolve_key_vk(cls, key: str) -> Optional[int]:
+        """把主键名解析为 Windows VK，失败返回 None。"""
+        # 字母 / 数字
+        if len(key) == 1 and 'a' <= key <= 'z':
+            return ord(key.upper())
+        if key.isdigit() and len(key) == 1:
+            return ord(key)
+
+        # F1-F24
+        if key.startswith('f') and key[1:].isdigit():
+            n = int(key[1:])
+            if 1 <= n <= 24:
+                return 0x70 + (n - 1)
+            return None
+
+        # 录入框通过 get_key_display_map() 产出的命名键（print、home、
+        # pageup、方向键、space 等），按显示名小写或别名查表
+        str_to_qt = get_key_parse_map()
+        if key in str_to_qt:
+            vk = cls._qt_key_to_vk().get(str_to_qt[key])
+            if vk is not None:
+                return vk
+
+        # Shift+标点（如 "shift+!"）
+        if len(key) == 1:
+            if key in cls._SHIFTED_CHAR_TO_VK:
+                return cls._SHIFTED_CHAR_TO_VK[key]
+
+        # 标点及既有别名
+        if key in ("`", "oem3", "backquote", "grave"):
+            return 0xC0
+        if key in ("-", "minus"):
+            return 0xBD
+        if key in ("=", "equals", "equal", "plus"):
+            return 0xBB
+        if key in ("[", "lbracket"):
+            return 0xDB
+        if key in ("]", "rbracket"):
+            return 0xDD
+        if key in ("\\", "backslash"):
+            return 0xDC
+        if key in (";", "semicolon"):
+            return 0xBA
+        if key in ("'", "quote"):
+            return 0xDE
+        if key in (",", "comma"):
+            return 0xBC
+        if key in (".", "period"):
+            return 0xBE
+        if key in ("/", "slash"):
+            return 0xBF
+        return None
 
 
 # ======================================================================
@@ -858,6 +959,8 @@ def parse_shortcut_to_qt(text: str):
             key = _Qt.Key(key_map[p])
         elif len(p) == 1 and p.isalpha():
             key = _Qt.Key(ord(p.upper()))
+        elif len(p) == 1 and p.isdigit():
+            key = _Qt.Key(ord(p))
         elif p.startswith("f") and p[1:].isdigit():
             fn = int(p[1:])
             if 1 <= fn <= 24:
@@ -866,6 +969,19 @@ def parse_shortcut_to_qt(text: str):
     if key == _Qt.Key.Key_unknown:
         return None
     return (key, mods)
+
+
+def is_hotkey_parsable(hotkey: str) -> bool:
+    """检查全局热键字符串能否被解析并注册（不实际注册）。
+
+    录入框能产出的键远多于早期解析器支持的键；此函数用于
+    保存前校验和状态提示，避免无效热键静默失败。
+    """
+    try:
+        ShortcutManager._parse_hotkey(hotkey)
+        return True
+    except (ValueError, TypeError):
+        return False
 
 
 def is_reserved_inapp_shortcut(text: str) -> bool:

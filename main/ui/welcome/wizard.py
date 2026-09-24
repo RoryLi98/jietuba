@@ -254,7 +254,10 @@ class WelcomeWizard(FrostedFramelessDialog):
         # 否则 setWindowFlags 会清除固定大小约束，导致拖动时布局反复重算、高度抖动。
         # MSWindowsFixedSizeDialogHint 在 Windows 上额外锁定窗口不可调整大小。
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.MSWindowsFixedSizeDialogHint)
-        self.setFixedSize(self.WINDOW_W, self.WINDOW_H)
+        # 固定尺寸会被 ui_scale 按比例放大，这里夹到屏幕可用范围内，
+        # 避免大比例 + 小屏幕时窗口底部超出屏幕
+        from core import ui_scale
+        self.setFixedSize(*ui_scale.scaled_window_size(self.WINDOW_W, self.WINDOW_H))
         self.setStyleSheet("background: transparent; border: none;")
 
         self._build_ui()

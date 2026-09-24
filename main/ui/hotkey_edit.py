@@ -10,12 +10,47 @@ from PySide6.QtGui import QKeyEvent, QKeySequence
 
 from core.shortcut_manager import (
     ShortcutManager, ShortcutHandler, get_key_display_map, hotkey_identity,
+    is_hotkey_parsable,
 )
 from core import safe_event
 from core.i18n import make_tr
 from core.ui_theme import get_ui_theme
 
 _tr = make_tr("HotkeyEdit")
+
+# Windows VK → Qt.Key：handle_hotkey 把系统热键合成回录入事件时使用。
+# 覆盖命名键与标点（字母/数字/F 键由取值范围直接判断）。
+_VK_TO_QT_KEY = {
+    0x08: Qt.Key.Key_Backspace,
+    0x09: Qt.Key.Key_Tab,
+    0x0C: Qt.Key.Key_Clear,
+    0x0D: Qt.Key.Key_Return,
+    0x13: Qt.Key.Key_Pause,
+    0x1B: Qt.Key.Key_Escape,
+    0x20: Qt.Key.Key_Space,
+    0x21: Qt.Key.Key_PageUp,
+    0x22: Qt.Key.Key_PageDown,
+    0x23: Qt.Key.Key_End,
+    0x24: Qt.Key.Key_Home,
+    0x25: Qt.Key.Key_Left,
+    0x26: Qt.Key.Key_Up,
+    0x27: Qt.Key.Key_Right,
+    0x28: Qt.Key.Key_Down,
+    0x2C: Qt.Key.Key_Print,
+    0x2D: Qt.Key.Key_Insert,
+    0x2E: Qt.Key.Key_Delete,
+    0xBA: Qt.Key.Key_Semicolon,
+    0xBB: Qt.Key.Key_Equal,
+    0xBC: Qt.Key.Key_Comma,
+    0xBD: Qt.Key.Key_Minus,
+    0xBE: Qt.Key.Key_Period,
+    0xBF: Qt.Key.Key_Slash,
+    0xC0: Qt.Key.Key_QuoteLeft,
+    0xDB: Qt.Key.Key_BracketLeft,
+    0xDC: Qt.Key.Key_Backslash,
+    0xDD: Qt.Key.Key_BracketRight,
+    0xDE: Qt.Key.Key_Apostrophe,
+}
 
 
 class _HotkeyEditHandler(ShortcutHandler):
@@ -26,6 +61,9 @@ class _HotkeyEditHandler(ShortcutHandler):
     - handle_key:    拦截 Qt KeyPress，阻止截图/钉图等 handler 抢走按键
     - handle_hotkey: 拦截 WM_HOTKEY 系统热键，阻止触发截图/剪贴板回调
     """
+
+    # 需要在「全局热键已禁用」时继续收到 WM_HOTKEY，见 ShortcutHandler.capture_mode
+    capture_mode = True
 
     def __init__(self, line_edit: '_HotkeyLineEdit'):
         self._line_edit = line_edit
@@ -73,7 +111,7 @@ class _HotkeyEditHandler(ShortcutHandler):
         if mods_bits & MOD_WIN:
             qt_mods |= Qt.KeyboardModifier.MetaModifier
 
-        # vk → Qt.Key（字母 A-Z / 数字 0-9 / F1-F24）
+        # vk → Qt.Key（字母 A-Z / 数字 0-9 / F1-F24 / 命名键 / 标点）
         qt_key = Qt.Key.Key_unknown
         if 0x41 <= vk <= 0x5A:           # A-Z
             qt_key = Qt.Key(vk)
@@ -81,6 +119,8 @@ class _HotkeyEditHandler(ShortcutHandler):
             qt_key = Qt.Key(vk)
         elif 0x70 <= vk <= 0x87:         # F1-F24
             qt_key = Qt.Key(Qt.Key.Key_F1.value + (vk - 0x70))
+        else:
+            qt_key = _VK_TO_QT_KEY.get(vk, Qt.Key.Key_unknown)
 
         if qt_key == Qt.Key.Key_unknown:
             return True  # 无法映射，只拦截
@@ -183,6 +223,16 @@ class HotkeyEdit(QWidget):
             self._system_available = False
             self._render_status()
             return False
+
+        # 先校验能否解析：无法解析的热键永远不会注册成功，
+        # 与「已被其他程序占用」是两种不同的问题，提示要区分开。
+        if not is_hotkey_parsable(hotkey):
+            self.status_lbl.setText("⚠️")
+            self.status_lbl.setToolTip(
+                "⚠️ Unrecognized shortcut — this key is not supported for global hotkeys"
+            )
+            self.status_lbl.setStyleSheet("color: orange; font-weight: bold;")
+            return
 
         # Check availability using our HotkeySystem
         self._system_available = self.hotkey_system.check_hotkey_availability(hotkey)
@@ -353,6 +403,10 @@ class _HotkeyLineEdit(QLineEdit):
                 if not text:
                     text = event.text().upper()
                 key_text = text
+            # "+" 会破坏热键字符串的加号分隔格式（无法与分隔符区分），
+            # 统一捕获为别名 "plus"，_parse_hotkey 会还原成 VK_ADD 所在的键位
+            if key_text == "+":
+                key_text = "plus"
         
         # 4. Update Display
         

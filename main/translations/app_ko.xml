@@ -1035,6 +1035,10 @@ Replace it?</source>
         <translation>번역</translation>
     </message>
     <message>
+        <source>Open in Translation Window</source>
+        <translation>번역 창에서 열기</translation>
+    </message>
+    <message>
         <source>Translate OCR text</source>
         <translation>OCR 텍스트 번역</translation>
     </message>
@@ -3212,6 +3216,7 @@ SOFTWARE.</translation></message>
         <translation>모자이크 입자 크기 변경</translation>
     </message>
 </context>
+
 <context>
     <name>HotkeyEdit</name>
     <message>
@@ -3367,6 +3372,97 @@ SOFTWARE.</translation></message>
     <message>
         <source>Open link</source>
         <translation>링크 열기</translation>
+    </message>
+</context>
+
+<!-- ========== UI Scale & Hotkey Validation ========== -->
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>UI Scale</source>
+        <translation>UI 배율</translation>
+    </message>
+    <message>
+        <source>Adjust the size of interface text. Applied immediately.</source>
+        <translation>인터페이스 글자 크기를 조절합니다. 저장 후 즉시 적용됩니다.</translation>
+    </message>
+    <message>
+        <source>Screenshot</source>
+        <translation>스크린샷</translation>
+    </message>
+    <message>
+        <source>Screenshot (2)</source>
+        <translation>스크린샷(보조)</translation>
+    </message>
+    <message>
+        <source>Clipboard</source>
+        <translation>클립보드</translation>
+    </message>
+    <message>
+        <source>Clipboard (2)</source>
+        <translation>클립보드(보조)</translation>
+    </message>
+    <message>
+        <source>Translation</source>
+        <translation>번역</translation>
+    </message>
+    <message>
+        <source>Translation (2)</source>
+        <translation>번역(보조)</translation>
+    </message>
+    <message>
+        <source>Invalid Hotkey</source>
+        <translation>잘못된 단축키</translation>
+    </message>
+    <message>
+        <source>The following shortcuts cannot be recognized and will never work:</source>
+        <translation>다음 단축키는 인식되지 않아 저장해도 작동하지 않습니다:</translation>
+    </message>
+    <message>
+        <source>Please record them again in the boxes above (e.g. Ctrl+Alt+A, F8, Print).</source>
+        <translation>위의 입력란에서 다시 조합키를 입력해 주세요(예: Ctrl+Alt+A, F8, Print).</translation>
+    </message>
+</context>
+
+<!-- ========== Baidu Translate Provider ========== -->
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Baidu Translate</source>
+        <translation>바이두 번역</translation>
+    </message>
+    <message>
+        <source>Baidu APP ID</source>
+        <translation>바이두 APP ID</translation>
+    </message>
+    <message>
+        <source>Baidu Secret Key</source>
+        <translation>바이두 시크릿 키</translation>
+    </message>
+    <message>
+        <source>Baidu free tier: 1 QPS, Standard edition. Get APP ID and key at</source>
+        <translation>바이두 번역 무료판: 표준판은 1 QPS. APP ID와 키 발급:</translation>
+    </message>
+</context>
+
+<!-- ========== Global Pin Hotkey ========== -->
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Pin Hotkey</source>
+        <translation>핀 단축키</translation>
+    </message>
+    <message>
+        <source>Pin</source>
+        <translation>핀</translation>
+    </message>
+    <message>
+        <source>Pin (2)</source>
+        <translation>핀 (2)</translation>
+    </message>
+    <message>
+        <source>Pin latest clipboard</source>
+        <translation>최신 클립보드 고정</translation>
     </message>
 </context>
 </TS>

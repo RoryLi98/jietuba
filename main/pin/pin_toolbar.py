@@ -67,7 +67,7 @@ class PinToolbar(Toolbar):
         screen = pin_window.screen() or QApplication.primaryScreen()
         screen_rect = screen.geometry()
 
-        spacing = 2
+        spacing = 6
         toolbar_width = self.width()
         toolbar_height = self.height()
         panel_extra = self._get_max_panel_height()

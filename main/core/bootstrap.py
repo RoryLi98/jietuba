@@ -515,10 +515,15 @@ def run():
     # 4. Windows 任务栏图标（必须在 QApplication 创建之前）
     set_app_user_model_id("jietuba.app")
 
-    # 5. 单实例检查
+    # 5. 界面缩放：读取配置并接管样式表入口（必须早于任何窗口创建）
+    from core import ui_scale
+    ui_scale.load_ui_scale_from_config()
+    ui_scale.install_stylesheet_patch()
+
+    # 6. 单实例检查
     ensure_single_instance()
 
-    # 6. 启动主应用
+    # 7. 启动主应用
     from main_app import MainApp
     main = MainApp()
     main.run()

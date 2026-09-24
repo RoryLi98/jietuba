@@ -13,11 +13,43 @@ ocr_text_layer.py - OCR 可交互文字层（钉图专用）
 """
 import unicodedata
 from PySide6.QtWidgets import QWidget, QApplication
-from PySide6.QtCore import Qt, QRect, QPoint, QRectF
-from PySide6.QtGui import QPainter, QColor
+from PySide6.QtCore import Qt, QRect, QPoint, QRectF, QThread, Signal
+from PySide6.QtGui import QPainter, QColor, QFont, QFontMetricsF
 from typing import List, Dict, Optional, Tuple
-from core import log_info, log_debug, safe_event
+from core import log_info, log_debug, log_warning, safe_event
 from core.logger import log_exception, T
+
+# 原位译文贴片外观
+_CHIP_BG = QColor(252, 252, 252, 242)
+_CHIP_BORDER = QColor(40, 40, 40, 80)
+_CHIP_TEXT = QColor(24, 24, 24)
+_CHIP_RADIUS = 4.0
+_CHIP_PADDING = 2.0
+_UI_FONT_FAMILY = "Microsoft YaHei UI"
+
+
+class _TranslateWorker(QThread):
+    """原位翻译后台线程：调用同步翻译服务，结果经信号回主线程。"""
+
+    finished_ok = Signal(object)  # TranslationResult 或 None（异常）
+
+    def __init__(self, text: str, params: Dict, parent=None):
+        super().__init__(parent)
+        self._text = text
+        self._params = dict(params)
+
+    def run(self):
+        try:
+            from translation.service import create_default_translation_service
+            from translation.models import TranslationRequest
+
+            request = TranslationRequest(self._text, **self._params)
+            service = create_default_translation_service()
+            result = service.translate(request)
+            self.finished_ok.emit(result)
+        except Exception as exc:
+            log_exception(exc, T("原位翻译请求失败"))
+            self.finished_ok.emit(None)
 
 
 class OCRTextItem:
@@ -147,7 +179,10 @@ class OCRTextItem:
 
 class OCRTextLayer(QWidget):
     """OCR 可交互文字层（完全透明，Word 风格文字选择）"""
-    
+
+    # 原位翻译开关状态变化（True=正在显示译文贴片）
+    translation_changed = Signal(bool)
+
     def __init__(self, parent=None, original_width: int = 100, original_height: int = 100):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -189,6 +224,12 @@ class OCRTextLayer(QWidget):
         
         # 懒加载标志：字符位置是否已计算（优化加载性能）
         self._char_positions_calculated = False
+
+        # ── 原位翻译状态 ──
+        self._translate_mode = False
+        # 译文贴片：[{'norm_rect': QRectF（原始图像坐标）, 'text': str}]
+        self._translate_chips: List[Dict] = []
+        self._translate_thread: Optional[_TranslateWorker] = None
 
     def _is_active(self) -> bool:
         """是否可用：外部启用且未处于绘图模式"""
@@ -342,6 +383,17 @@ class OCRTextLayer(QWidget):
         self.text_items = items
         self.original_width = original_width
         self.original_height = original_height
+        # 新识别结果加载时，丢弃旧的译文贴片；进行中的请求结果一并作废
+        self._translate_chips = []
+        if self._translate_thread is not None:
+            try:
+                self._translate_thread.finished_ok.disconnect(self._on_translated)
+            except (RuntimeError, TypeError):
+                pass
+            self._translate_thread = None
+        if self._translate_mode:
+            self._translate_mode = False
+            self.translation_changed.emit(False)
         # 保存真实原始尺寸，用于 set_image_transform 映射
         self._true_orig_width = original_width
         self._true_orig_height = original_height
@@ -408,23 +460,14 @@ class OCRTextLayer(QWidget):
         self.clear_selection()
         self.update()
     
-    def get_all_text(self, separator: str = "\n") -> str:
-        """
-        获取所有识别的文字（按阅读顺序拼接，同行合并）
-        
-        Args:
-            separator: 行之间的分隔符，默认换行
-            
-        Returns:
-            str: 所有识别的文字（同一行用空格连接，不同行用 separator 分隔）
-        """
+    def _group_text_lines(self) -> List[List["OCRTextItem"]]:
+        """按阅读顺序把文字块分组为行（行高容差判断是否同一行）"""
         if not self.text_items:
-            return ""
-        
-        # 按行分组（使用行高容差判断是否同一行）
-        if len(self.text_items) <= 1:
-            return self.text_items[0].text if self.text_items else ""
-        
+            return []
+
+        if len(self.text_items) == 1:
+            return [self.text_items]
+
         # 收集每个文字块的位置信息
         items_with_pos = []
         for item in self.text_items:
@@ -435,34 +478,253 @@ class OCRTextLayer(QWidget):
                 'center_y': center_y,
                 'height': height
             })
-        
+
         # 计算行高容差
         avg_height = sum(b['height'] for b in items_with_pos) / len(items_with_pos)
         line_tolerance = avg_height * 0.8
-        
+
         # 分行（文字块已按阅读顺序排列）
-        lines = []
-        current_line = []
+        groups: List[List[OCRTextItem]] = []
+        current_line: List[OCRTextItem] = []
         current_line_y = None
-        
+
         for block in items_with_pos:
             if current_line_y is None:
-                current_line = [block['item'].text]
+                current_line = [block['item']]
                 current_line_y = block['center_y']
             elif abs(block['center_y'] - current_line_y) <= line_tolerance:
-                # 同一行，用空格连接
-                current_line.append(block['item'].text)
+                # 同一行
+                current_line.append(block['item'])
             else:
                 # 新的一行
-                lines.append(" ".join(current_line))
-                current_line = [block['item'].text]
+                groups.append(current_line)
+                current_line = [block['item']]
                 current_line_y = block['center_y']
-        
-        # 别忘了最后一行
+
         if current_line:
-            lines.append(" ".join(current_line))
-        
+            groups.append(current_line)
+
+        return groups
+
+    def get_all_text(self, separator: str = "\n") -> str:
+        """
+        获取所有识别的文字（按阅读顺序拼接，同行合并）
+
+        Args:
+            separator: 行之间的分隔符，默认换行
+
+        Returns:
+            str: 所有识别的文字（同一行用空格连接，不同行用 separator 分隔）
+        """
+        groups = self._group_text_lines()
+        lines = [" ".join(item.text for item in group) for group in groups]
         return separator.join(lines)
+
+    # ==================================================================
+    # 原位翻译：把每行 OCR 文字的译文直接贴回原文位置
+    # ==================================================================
+
+    def is_translation_active(self) -> bool:
+        """当前是否正在显示译文贴片"""
+        return self._translate_mode
+
+    def is_translation_running(self) -> bool:
+        """翻译请求是否正在进行"""
+        return self._translate_thread is not None
+
+    def toggle_in_place_translation(self) -> None:
+        """原位翻译开关：未翻译时发起翻译，已翻译时恢复原文"""
+        if self._translate_mode:
+            self._set_translate_mode(False)
+            return
+        self.start_in_place_translation()
+
+    def start_in_place_translation(self) -> None:
+        """异步翻译全部文字行，完成后切换到译文贴片显示"""
+        if self._translate_thread is not None or not self.text_items:
+            return
+
+        groups = self._group_text_lines()
+        texts = [" ".join(item.text for item in group) for group in groups]
+        full_text = "\n".join(texts)
+        if not full_text.strip():
+            return
+
+        from settings import get_tool_settings_manager
+        config = get_tool_settings_manager()
+        params = {
+            key: value
+            for key, value in config.get_translation_request_params().items()
+            if key in ("target_lang", "source_lang", "preserve_formatting")
+        }
+
+        self._translate_thread = _TranslateWorker(full_text, params, parent=self)
+        self._translate_thread.finished_ok.connect(self._on_translated)
+        self._translate_thread.start()
+        log_info(T("原位翻译开始: {line_count} 行", line_count=len(texts)), "OCRLayer")
+
+    def cancel_in_place_translation(self) -> None:
+        """清除译文贴片并恢复原文显示"""
+        if self._translate_thread is not None:
+            try:
+                self._translate_thread.finished_ok.disconnect(self._on_translated)
+            except (RuntimeError, TypeError):
+                pass
+            self._translate_thread = None
+        self._set_translate_mode(False)
+
+    def _set_translate_mode(self, active: bool):
+        self._translate_mode = bool(active)
+        if active:
+            self.clear_selection()
+        else:
+            self._translate_chips = []
+        self.update()
+        self.translation_changed.emit(self._translate_mode)
+
+    def _on_translated(self, result):
+        """翻译完成（主线程）：把译文行映射回原文行位置"""
+        self._translate_thread = None
+
+        if result is None:
+            self._show_translate_error(T("翻译请求失败，请稍后重试"))
+            return
+        if not getattr(result, "success", False):
+            message = getattr(result, "error_message", "") or T("翻译失败")
+            self._show_translate_error(message)
+            return
+
+        translated = (getattr(result, "translated_text", "") or "").strip()
+        if not translated:
+            self._show_translate_error(T("翻译结果为空"))
+            return
+
+        groups = self._group_text_lines()
+        lines = translated.split("\n")
+        chips: List[Dict] = []
+
+        if len(lines) == len(groups):
+            # 译文行与原文行一一对应：每行一个贴片
+            for group, line in zip(groups, lines):
+                line = line.strip()
+                if not line:
+                    continue
+                chips.append({
+                    'norm_rect': self._union_rect(group),
+                    'text': line,
+                })
+        else:
+            # 行数对不上（译文合并/拆分了段落）：整段译文贴在整体包围盒上
+            if self._text_union_rect is not None:
+                chips.append({
+                    'norm_rect': QRectF(self._text_union_rect),
+                    'text': translated,
+                })
+
+        if not chips:
+            self._show_translate_error(T("翻译结果为空"))
+            return
+
+        self._translate_chips = chips
+        self._set_translate_mode(True)
+        log_info(T("原位翻译完成: {chip_count} 个译文块", chip_count=len(chips)), "OCRLayer")
+
+    def _show_translate_error(self, message: str):
+        """原位翻译失败提示"""
+        log_warning(T("原位翻译失败: {message}", message=message), "OCRLayer")
+        try:
+            from ui.dialogs import show_warning_dialog
+            show_warning_dialog(self.parent(), T("Translate"), str(message))
+        except Exception as exc:
+            log_exception(exc, T("显示原位翻译错误"))
+
+    @staticmethod
+    def _union_rect(items: List["OCRTextItem"]) -> QRectF:
+        """计算一组文字块的包围矩形（原始图像坐标）"""
+        min_x = min(item.norm_rect.left() for item in items)
+        min_y = min(item.norm_rect.top() for item in items)
+        max_x = max(item.norm_rect.right() for item in items)
+        max_y = max(item.norm_rect.bottom() for item in items)
+        return QRectF(min_x, min_y, max_x - min_x, max_y - min_y)
+
+    def _chip_rects(self) -> List[Tuple[Dict, QRect]]:
+        """把译文贴片映射到当前控件坐标"""
+        scale_x, scale_y = self.get_scale_factors()
+        result = []
+        for chip in self._translate_chips:
+            r = chip['norm_rect']
+            rect = QRect(
+                int(r.x() * scale_x) - _CHIP_PADDING,
+                int(r.y() * scale_y) - _CHIP_PADDING,
+                int(r.width() * scale_x) + _CHIP_PADDING * 2,
+                int(r.height() * scale_y) + _CHIP_PADDING * 2,
+            )
+            result.append((chip, rect.intersected(self.rect())))
+        return result
+
+    def _chip_at(self, pos: QPoint) -> Optional[Dict]:
+        """返回包含给定坐标的译文贴片"""
+        for chip, rect in self._chip_rects():
+            if rect.contains(pos):
+                return chip
+        return None
+
+    def _paint_translation_chips(self, painter: QPainter):
+        """绘制译文贴片（覆盖在原文上方）"""
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+
+        for chip, rect in self._chip_rects():
+            if rect.width() <= 0 or rect.height() <= 0:
+                continue
+
+            painter.setPen(_CHIP_BORDER)
+            painter.setBrush(_CHIP_BG)
+            painter.drawRoundedRect(QRectF(rect), _CHIP_RADIUS, _CHIP_RADIUS)
+
+            text = chip['text']
+            font = self._fit_chip_font(text, rect)
+            painter.setPen(_CHIP_TEXT)
+            painter.setFont(font)
+            text_rect = QRectF(rect).adjusted(3, 1, -3, -1)
+            painter.drawText(
+                text_rect,
+                Qt.AlignmentFlag.AlignCenter | Qt.TextWordWrap,
+                text,
+            )
+
+    @staticmethod
+    def _fit_chip_font(text: str, rect: QRect) -> QFont:
+        """选择能在贴片矩形内容纳译文的字号（逐级缩小，必要时换行）。
+
+        先按贴片高度逐级缩小；高度很大的整段贴片（译文行数与原文行数对不上
+        时整段译文贴在整体包围盒上）可能任何相对字号都装不下，这时继续降到
+        绝对小字号。兜底必须是小字号——回退到跟随高度的字号会让整段译文以
+        巨字溢出贴片。
+        """
+        area = QRectF(rect).adjusted(3, 1, -3, -1)
+        candidates = [
+            max(9, int(rect.height() * factor))
+            for factor in (0.72, 0.62, 0.54, 0.46, 0.40, 0.34,
+                           0.28, 0.22, 0.18, 0.14, 0.11)
+        ]
+        candidates += [16, 14, 12, 10, 9]
+        tried = set()
+        for size in sorted(set(candidates), reverse=True):
+            if size in tried:
+                continue
+            tried.add(size)
+            font = QFont(_UI_FONT_FAMILY)
+            font.setPixelSize(size)
+            metrics = QFontMetricsF(font)
+            bound = metrics.boundingRect(
+                area, Qt.AlignmentFlag.AlignCenter | Qt.TextWordWrap, text
+            )
+            if bound.width() <= area.width() and bound.height() <= area.height():
+                return font
+        font = QFont(_UI_FONT_FAMILY)
+        font.setPixelSize(9)
+        return font
     
     def has_text(self) -> bool:
         """检查是否有识别到的文字"""
@@ -549,7 +811,12 @@ class OCRTextLayer(QWidget):
     
     @safe_event
     def paintEvent(self, event):
-        """绘制选择高亮"""
+        """绘制选择高亮 / 原位译文贴片"""
+        if self._translate_mode and self._translate_chips:
+            painter = QPainter(self)
+            self._paint_translation_chips(painter)
+            return
+
         if not self._is_active() or not self.selection_start or not self.selection_end:
             return
         
@@ -604,18 +871,30 @@ class OCRTextLayer(QWidget):
     
     @safe_event
     def mousePressEvent(self, event):
-        """鼠标按下事件 - Word 风格点击设置光标"""
+        """鼠标按下事件 - Word 风格点击设置光标 / 译文贴片点击复制"""
         if self._is_parent_dragging():
             event.ignore()
             return
-        
+
         if not self._is_active() or event.button() != Qt.MouseButton.LeftButton:
             # 透传给父窗口
             event.ignore()
             return
-        
+
         pos = event.pos()
-        
+
+        # 原位翻译模式：点击译文贴片复制该条译文，其余区域透传
+        if self._translate_mode and self._translate_chips:
+            chip = self._chip_at(pos)
+            if chip is not None:
+                QApplication.clipboard().setText(chip['text'])
+                text_preview = chip['text'][:50] + ('...' if len(chip['text']) > 50 else '')
+                log_info(T("已复制: {text_preview}", text_preview=text_preview), module="OCRTextLayer")
+                event.accept()
+                return
+            event.ignore()
+            return
+
         # 检查是否点击在父窗口的按钮上（关闭按钮、工具栏切换按钮等）
         if self.parent():
             # 检查关闭按钮
@@ -859,7 +1138,12 @@ class OCRTextLayer(QWidget):
         
         # Ctrl+C: 复制
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_C:
-            self._copy_selected_text()
+            if self._translate_mode and self._translate_chips:
+                QApplication.clipboard().setText(
+                    "\n".join(chip['text'] for chip in self._translate_chips)
+                )
+            else:
+                self._copy_selected_text()
             event.accept()
         # Ctrl+A: 全选所有文字
         elif event.modifiers() & Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_A:

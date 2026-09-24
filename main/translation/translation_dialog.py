@@ -333,8 +333,11 @@ class TranslationDialog(FramelessWindow):
         self.setObjectName("dashboardWindow")
         self.setWindowTitle("jietuba")
         self.setMinimumSize(self.MINIMUM_WIDTH, self.MINIMUM_HEIGHT)
-        self.resize(self.DEFAULT_WIDTH, self.DEFAULT_HEIGHT)
-        self.setFont(QFont("Microsoft YaHei UI", 10))
+        from core import ui_scale
+        self.resize(*ui_scale.scaled_window_size(
+            self.DEFAULT_WIDTH, self.DEFAULT_HEIGHT
+        ))
+        self.setFont(QFont("Microsoft YaHei UI", ui_scale.scaled(10)))
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAutoFillBackground(False)

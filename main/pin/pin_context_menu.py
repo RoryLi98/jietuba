@@ -128,7 +128,17 @@ class PinContextMenu:
             )
             translate_action.triggered.connect(self.parent._on_translate_clicked)
             menu.addAction(translate_action)
-            
+
+            # 在独立翻译窗口中打开（保留原有用法）
+            translate_window_action = QAction(
+                self.parent.tr("Open in Translation Window"), self.parent
+            )
+            translate_window_action.triggered.connect(
+                self.parent._on_translate_open_window_clicked
+            )
+            translate_window_action.setEnabled(state.get('has_ocr_result', False))
+            menu.addAction(translate_window_action)
+
             # 恢复原始大小
             reset_size_action = QAction(self.parent.tr("Reset size"), self.parent)
             reset_size_action.triggered.connect(self.parent.reset_to_original_size)

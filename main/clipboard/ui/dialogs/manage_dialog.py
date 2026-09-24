@@ -131,8 +131,11 @@ class ManageDialog(FrostedFramelessDialog):
         self._setup_titlebar()
 
         self.setWindowTitle(self.tr("Clipboard Management"))
+        from core import ui_scale
         self.setMinimumSize(MANAGE_DIALOG_MIN_WIDTH, MANAGE_DIALOG_MIN_HEIGHT)
-        self.resize(MANAGE_DIALOG_WIDTH, MANAGE_DIALOG_HEIGHT)
+        self.resize(*ui_scale.scaled_window_size(
+            MANAGE_DIALOG_WIDTH, MANAGE_DIALOG_HEIGHT
+        ))
         self.setWindowFlags(
             self.windowFlags()
             | Qt.WindowType.Window

@@ -30,21 +30,27 @@ def create_tray_menu(app) -> QMenu:
     menu = CustomTrayMenu()
     menu.setStyleSheet(_menu_style())
 
-    action_screenshot = QAction(_tr("Screenshot"), app)
+    # QAction 统一以菜单为父对象：托盘菜单重建时旧菜单会被销毁，
+    # 动作跟随销毁，避免长期运行中累积泄漏。
+    action_screenshot = QAction(_tr("Screenshot"), menu)
     action_screenshot.triggered.connect(app.start_screenshot)
     menu.addAction(action_screenshot)
 
-    action_clipboard = QAction(_tr("Clipboard"), app)
+    action_clipboard = QAction(_tr("Clipboard"), menu)
     action_clipboard.triggered.connect(app.open_clipboard_window)
     menu.addAction(action_clipboard)
 
-    action_translate = QAction(_tr("Translation"), app)
+    action_translate = QAction(_tr("Translation"), menu)
     action_translate.triggered.connect(app.open_translator)
     menu.addAction(action_translate)
 
+    action_pin = QAction(_tr("Pin latest clipboard"), menu)
+    action_pin.triggered.connect(app.pin_from_selection_or_clipboard)
+    menu.addAction(action_pin)
+
     menu.addSeparator()
 
-    action_global_hotkeys = QAction(_tr("Disable Global Hotkeys"), app)
+    action_global_hotkeys = QAction(_tr("Disable Global Hotkeys"), menu)
     action_global_hotkeys.setCheckable(True)
     action_global_hotkeys.setChecked(
         app.config_manager.get_app_setting("global_hotkeys_disabled", False)
@@ -114,14 +120,14 @@ def _add_pin_actions(menu: QMenu, app):
     pin_count = pin_manager.count()
     has_pins = pin_count > 0
 
-    close_all_action = QAction(_tr("Close all pinned windows"), app)
+    close_all_action = QAction(_tr("Close all pinned windows"), menu)
     close_all_action.setEnabled(has_pins)
     close_all_action.triggered.connect(pin_manager.close_all)
     menu.addAction(close_all_action)
 
     pins_title = _tr("Current pinned windows: {count}").format(count=pin_count)
     if not has_pins:
-        pins_action = QAction(pins_title, app)
+        pins_action = QAction(pins_title, menu)
         pins_action.setEnabled(False)
         menu.addAction(pins_action)
         return
@@ -129,25 +135,25 @@ def _add_pin_actions(menu: QMenu, app):
     pins_menu = QMenu(pins_title, menu)
     pins_menu.setStyleSheet(_menu_style())
 
-    move_center_action = QAction(_tr("Move all pins to center"), app)
+    move_center_action = QAction(_tr("Move all pins to center"), pins_menu)
     move_center_action.triggered.connect(pin_manager.move_all_to_screen_center)
     pins_menu.addAction(move_center_action)
 
-    thumbnail_all_action = QAction(_tr("Thumbnail all pins"), app)
+    thumbnail_all_action = QAction(_tr("Thumbnail all pins"), pins_menu)
     thumbnail_all_action.triggered.connect(lambda: pin_manager.set_all_thumbnail_mode(True))
     pins_menu.addAction(thumbnail_all_action)
 
-    restore_all_action = QAction(_tr("Restore all pin thumbnails"), app)
+    restore_all_action = QAction(_tr("Restore all pin thumbnails"), pins_menu)
     restore_all_action.triggered.connect(lambda: pin_manager.set_all_thumbnail_mode(False))
     pins_menu.addAction(restore_all_action)
 
     pins_menu.addSeparator()
 
-    submenu_close_all_action = QAction(_tr("Close all pins"), app)
+    submenu_close_all_action = QAction(_tr("Close all pins"), pins_menu)
     submenu_close_all_action.triggered.connect(pin_manager.close_all)
     pins_menu.addAction(submenu_close_all_action)
 
-    save_all_action = QAction(_tr("Save all pins as..."), app)
+    save_all_action = QAction(_tr("Save all pins as..."), pins_menu)
     save_all_action.triggered.connect(lambda: _save_all_pins_as(app, pin_manager))
     pins_menu.addAction(save_all_action)
 

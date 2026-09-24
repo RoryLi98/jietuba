@@ -175,10 +175,30 @@ def create_translation_page(dialog) -> QWidget:
     )
     layout.addWidget(grp_azure)
 
+    # ════ 百度翻译 ════
+    grp_baidu = SettingCardGroup(dialog.tr("Baidu Translate"), page)
+    dialog.baidu_translate_app_id_input = _add_text_setting(
+        dialog,
+        grp_baidu,
+        dialog.tr("Baidu APP ID"),
+        dialog.config_manager.get_baidu_translate_app_id(),
+        "20250101000123456",
+    )
+    dialog.baidu_translate_secret_key_input = _add_text_setting(
+        dialog,
+        grp_baidu,
+        dialog.tr("Baidu Secret Key"),
+        dialog.config_manager.get_baidu_translate_secret_key(),
+        dialog.tr("Required"),
+        password=True,
+    )
+    layout.addWidget(grp_baidu)
+
     dialog.deepl_settings_group = grp_api
     dialog.amazon_translate_settings_group = grp_amazon
     dialog.google_translate_settings_group = grp_google
     dialog.azure_translate_settings_group = grp_azure
+    dialog.baidu_translate_settings_group = grp_baidu
     dialog.translation_provider_combo.currentIndexChanged.connect(
         lambda _index: _update_provider_groups(dialog)
     )
@@ -251,6 +271,19 @@ def create_translation_page(dialog) -> QWidget:
     info_label.setStyleSheet("padding: 5px; font-size: 12px; color: #999;")
     layout.addWidget(info_label)
     dialog.deepl_translation_info_label = info_label
+
+    baidu_info_label = QLabel(
+        "💡 " + dialog.tr(
+            "Baidu free tier: 1 QPS, Standard edition. Get APP ID and key at"
+        )
+        + f' <a href="https://fanyi-api.baidu.com/" style="color:{ACCENT};">fanyi-api.baidu.com</a>',
+        page,
+    )
+    baidu_info_label.setOpenExternalLinks(True)
+    baidu_info_label.setWordWrap(True)
+    baidu_info_label.setStyleSheet("padding: 5px; font-size: 12px; color: #999;")
+    layout.addWidget(baidu_info_label)
+    dialog.baidu_translation_info_label = baidu_info_label
     _update_provider_groups(dialog)
 
     layout.addStretch()
@@ -311,9 +344,17 @@ def _update_provider_groups(dialog) -> None:
     dialog.azure_translate_settings_group.setVisible(
         provider_id == "azure"
     )
+    if hasattr(dialog, "baidu_translate_settings_group"):
+        dialog.baidu_translate_settings_group.setVisible(
+            provider_id == "baidu"
+        )
     if hasattr(dialog, "deepl_translation_info_label"):
         dialog.deepl_translation_info_label.setVisible(
             provider_id == "deepl"
+        )
+    if hasattr(dialog, "baidu_translation_info_label"):
+        dialog.baidu_translation_info_label.setVisible(
+            provider_id == "baidu"
         )
     if hasattr(dialog, "split_sentences_toggle"):
         dialog.split_sentences_toggle.setVisible(

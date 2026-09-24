@@ -1048,6 +1048,10 @@ Replace it?</source>
         <translation>翻訳</translation>
     </message>
     <message>
+        <source>Open in Translation Window</source>
+        <translation>翻訳ウィンドウで開く</translation>
+    </message>
+    <message>
         <source>Translate OCR text</source>
         <translation>OCRテキストを翻訳</translation>
     </message>
@@ -3253,6 +3257,7 @@ SOFTWARE.</translation></message>
         <translation>モザイクの粒度を変更</translation>
     </message>
 </context>
+
 <context>
     <name>HotkeyEdit</name>
     <message>
@@ -3408,6 +3413,97 @@ SOFTWARE.</translation></message>
     <message>
         <source>Open link</source>
         <translation>リンクを開く</translation>
+    </message>
+</context>
+
+<!-- ========== UI Scale & Hotkey Validation ========== -->
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>UI Scale</source>
+        <translation>UI スケール</translation>
+    </message>
+    <message>
+        <source>Adjust the size of interface text. Applied immediately.</source>
+        <translation>インターフェース文字のサイズを調整します。保存後すぐに反映されます。</translation>
+    </message>
+    <message>
+        <source>Screenshot</source>
+        <translation>スクリーンショット</translation>
+    </message>
+    <message>
+        <source>Screenshot (2)</source>
+        <translation>スクリーンショット（予備）</translation>
+    </message>
+    <message>
+        <source>Clipboard</source>
+        <translation>クリップボード</translation>
+    </message>
+    <message>
+        <source>Clipboard (2)</source>
+        <translation>クリップボード（予備）</translation>
+    </message>
+    <message>
+        <source>Translation</source>
+        <translation>翻訳</translation>
+    </message>
+    <message>
+        <source>Translation (2)</source>
+        <translation>翻訳（予備）</translation>
+    </message>
+    <message>
+        <source>Invalid Hotkey</source>
+        <translation>無効なホットキー</translation>
+    </message>
+    <message>
+        <source>The following shortcuts cannot be recognized and will never work:</source>
+        <translation>以下のショートカットは認識できず、保存しても機能しません：</translation>
+    </message>
+    <message>
+        <source>Please record them again in the boxes above (e.g. Ctrl+Alt+A, F8, Print).</source>
+        <translation>上の入力欄でもう一度記録してください（例：Ctrl+Alt+A、F8、Print）。</translation>
+    </message>
+</context>
+
+<!-- ========== Baidu Translate Provider ========== -->
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Baidu Translate</source>
+        <translation>Baidu 翻訳</translation>
+    </message>
+    <message>
+        <source>Baidu APP ID</source>
+        <translation>Baidu APP ID</translation>
+    </message>
+    <message>
+        <source>Baidu Secret Key</source>
+        <translation>Baidu シークレットキー</translation>
+    </message>
+    <message>
+        <source>Baidu free tier: 1 QPS, Standard edition. Get APP ID and key at</source>
+        <translation>Baidu 翻訳無料版：標準版は 1 QPS。APP ID とキーの取得はこちら：</translation>
+    </message>
+</context>
+
+<!-- ========== Global Pin Hotkey ========== -->
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Pin Hotkey</source>
+        <translation>ピン留めホットキー</translation>
+    </message>
+    <message>
+        <source>Pin</source>
+        <translation>ピン留め</translation>
+    </message>
+    <message>
+        <source>Pin (2)</source>
+        <translation>ピン留め (2)</translation>
+    </message>
+    <message>
+        <source>Pin latest clipboard</source>
+        <translation>クリップボードの最新をピン留め</translation>
     </message>
 </context>
 </TS>

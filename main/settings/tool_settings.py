@@ -159,10 +159,12 @@ class ToolSettingsManager(QObject):
         # ==================== 1. 快捷键 ====================
         "hotkey": "ctrl+1",                        # 截图热键
         "hotkey_2": "",                            # 截图备用热键
-        "clipboard_hotkey": "ctrl+2",              # 剪贴板管理器的快捷键
-        "clipboard_hotkey_2": "",                  # 剪贴板管理器的备用快捷键
-        "translation_hotkey": "",                  # 翻译主热键
+        "pin_hotkey": "ctrl+2",                    # 全局钉图热键（截图外：钉剪贴板最新；截图内：钉当前选区）
+        "pin_hotkey_2": "",                        # 全局钉图备用热键
+        "translation_hotkey": "ctrl+3",            # 翻译主热键
         "translation_hotkey_2": "",                # 翻译备用热键
+        "clipboard_hotkey": "ctrl+4",              # 剪贴板管理器的快捷键
+        "clipboard_hotkey_2": "",                  # 剪贴板管理器的备用快捷键
         "global_hotkeys_disabled": False,           # 是否禁用全局热键
 
         # 应用内快捷键
@@ -239,6 +241,7 @@ class ToolSettingsManager(QObject):
 
         # ==================== 4. 外观 ====================
         "ui_theme_mode": "system",             # 界面主题（system/light/dark）
+        "ui_scale": 1.0,                       # 界面缩放系数（1.0-2.0，放大界面文字）
         "theme_color": "#40E0D0",              # 主题色（青绿色 Turquoise）
         "mask_color_r": 0,                     # 遮罩色 R（0-255）
         "mask_color_g": 0,                     # 遮罩色 G（0-255）
@@ -257,6 +260,8 @@ class ToolSettingsManager(QObject):
         "azure_translate_api_key": "",
         "azure_translate_region": "",
         "azure_translate_endpoint": "",
+        "baidu_translate_app_id": "",          # 百度翻译 APP ID
+        "baidu_translate_secret_key": "",      # 百度翻译密钥
         "translation_target_lang": "",         # 翻译目标语言（空为跟随系统语言）
         "translation_split_sentences": True,   # 自动分句
         "translation_preserve_formatting": True,  # 保留格式
@@ -650,6 +655,30 @@ class ToolSettingsManager(QObject):
         """保存智能翻译备用全局快捷键。"""
         self.qsettings.setValue("app/translation_hotkey_2", value)
 
+    def get_pin_hotkey(self) -> str:
+        """获取全局钉图热键。"""
+        return self.qsettings.value(
+            "app/pin_hotkey",
+            self.APP_DEFAULT_SETTINGS["pin_hotkey"],
+            type=str,
+        )
+
+    def set_pin_hotkey(self, value: str):
+        """保存全局钉图热键。"""
+        self.qsettings.setValue("app/pin_hotkey", value)
+
+    def get_pin_hotkey_2(self) -> str:
+        """获取全局钉图备用热键。"""
+        return self.qsettings.value(
+            "app/pin_hotkey_2",
+            self.APP_DEFAULT_SETTINGS["pin_hotkey_2"],
+            type=str,
+        )
+
+    def set_pin_hotkey_2(self, value: str):
+        """保存全局钉图备用热键。"""
+        self.qsettings.setValue("app/pin_hotkey_2", value)
+
     # ---------- 应用内快捷键 ----------
     def get_inapp_shortcut(self, key: str) -> str:
         """获取应用内快捷键 (key 示例: 'inapp_confirm')"""
@@ -925,6 +954,11 @@ class ToolSettingsManager(QObject):
                 "region": self.get_azure_translate_region(),
                 "endpoint": self.get_azure_translate_endpoint(),
             }
+        if provider_id == "baidu":
+            return {
+                "app_id": self.get_baidu_translate_app_id(),
+                "secret_key": self.get_baidu_translate_secret_key(),
+            }
         return {}
     
     def get_deepl_api_key(self) -> str:
@@ -1048,7 +1082,33 @@ class ToolSettingsManager(QObject):
             "translation/providers/azure/endpoint",
             (value or "").strip(),
         )
-    
+
+    def get_baidu_translate_app_id(self) -> str:
+        return self.qsettings.value(
+            "translation/providers/baidu/app_id",
+            self.APP_DEFAULT_SETTINGS["baidu_translate_app_id"],
+            type=str,
+        )
+
+    def set_baidu_translate_app_id(self, value: str):
+        self.qsettings.setValue(
+            "translation/providers/baidu/app_id",
+            (value or "").strip(),
+        )
+
+    def get_baidu_translate_secret_key(self) -> str:
+        return self.qsettings.value(
+            "translation/providers/baidu/secret_key",
+            self.APP_DEFAULT_SETTINGS["baidu_translate_secret_key"],
+            type=str,
+        )
+
+    def set_baidu_translate_secret_key(self, value: str):
+        self.qsettings.setValue(
+            "translation/providers/baidu/secret_key",
+            (value or "").strip(),
+        )
+
     def get_translation_target_lang(self) -> str:
         """
         获取翻译目标语言

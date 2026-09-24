@@ -52,6 +52,7 @@ class FluentIcon(Enum):
     DOCUMENT = "Document"
     POWER_BUTTON = "PowerButton"
     PIN = "Pin"
+    TRANSLATE = "Translate"
     SETTING = "Setting"
     STOP_WATCH = "StopWatch"
     FONT = "Font"

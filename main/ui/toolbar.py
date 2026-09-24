@@ -232,7 +232,7 @@ class Toolbar(QWidget):
     # 1.0  → 默认尺寸（按钮 45px，图标 32/36px）
     # 0.8  → 缩小 20%
     # 1.2  → 放大 20%
-    SCALE: float = 0.90
+    SCALE: float = 1.0
 
     # 信号定义
     tool_changed = Signal(str)  # 工具切换信号(tool_id)

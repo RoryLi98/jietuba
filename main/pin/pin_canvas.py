@@ -611,6 +611,18 @@ class PinCanvas(QObject):
         toolbar.save_clicked.connect(self.parent_window.save_image)
         toolbar.copy_clicked.connect(self.parent_window.copy_to_clipboard)
 
+        # 翻译按钮：可勾选，同步原位翻译开关状态
+        if hasattr(toolbar, 'screenshot_translate_clicked'):
+            toolbar.screenshot_translate_clicked.connect(self.parent_window._on_translate_clicked)
+            translate_btn = getattr(toolbar, 'screenshot_translate_btn', None)
+            ocr_layer = getattr(self.parent_window, 'ocr_text_layer', None)
+            if translate_btn is not None:
+                translate_btn.setCheckable(True)
+                if ocr_layer is not None:
+                    ocr_layer.translation_changed.connect(
+                        lambda active, btn=translate_btn: btn.setChecked(active)
+                    )
+
         self.undo_stack.print_stack_status()
 
     # ------------------------------------------------------------------

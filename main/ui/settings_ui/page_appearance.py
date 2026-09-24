@@ -114,6 +114,7 @@ def create_appearance_page(dialog) -> QWidget:
 def _build_application_section(dialog, grp: SettingCardGroup):
     """Application appearance: follow OS, force light or force dark."""
     from core.ui_theme import get_ui_theme
+    from settings import get_tool_settings_manager
 
     card = FSettingCard(
         FluentIcon.APPLICATION,
@@ -133,6 +134,29 @@ def _build_application_section(dialog, grp: SettingCardGroup):
     )
     card.hBoxLayout.addSpacing(16)
     grp.addSettingCard(card)
+
+    # ── 界面缩放 ──────────────────────────────────────
+    from core import ui_scale
+
+    scale_card = FSettingCard(
+        FluentIcon.FONT_SIZE,
+        dialog.tr("UI Scale"),
+        dialog.tr("Adjust the size of interface text. Applied immediately."),
+        parent=grp,
+    )
+    dialog._ui_scale_combo = ComboBox(scale_card)
+    dialog._ui_scale_combo.setFixedWidth(150)
+    for option in ui_scale.UI_SCALE_OPTIONS:
+        dialog._ui_scale_combo.addItem(f"{int(option * 100)}%", userData=option)
+    current_scale = get_tool_settings_manager().get_app_setting("ui_scale", 1.0)
+    scale_idx = dialog._ui_scale_combo.findData(float(current_scale))
+    if scale_idx >= 0:
+        dialog._ui_scale_combo.setCurrentIndex(scale_idx)
+    scale_card.hBoxLayout.addWidget(
+        dialog._ui_scale_combo, 0, Qt.AlignmentFlag.AlignRight
+    )
+    scale_card.hBoxLayout.addSpacing(16)
+    grp.addSettingCard(scale_card)
 
 
 # ================================================================

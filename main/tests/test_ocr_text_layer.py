@@ -364,3 +364,139 @@ class TestLayerBasics:
         layer.original_width = 0
         layer.original_height = 0
         assert layer.get_scale_factors() == (1.0, 1.0)
+
+
+# ============================================================================
+# 原位翻译：行分组 → 译文贴片映射 → 点击复制
+# ============================================================================
+
+class TestInPlaceTranslation:
+    """译文贴回原文位置的核心映射逻辑"""
+
+    @pytest.fixture
+    def layer(self, qapp):
+        from pin.ocr_text_layer import OCRTextLayer
+        lay = OCRTextLayer(original_width=200, original_height=100)
+        lay.resize(200, 100)
+        items = [
+            _item("Hello", x=0, y=0, w=60, h=14),
+            _item("world", x=64, y=0, w=60, h=14),   # 与上一块同行（y 相同）
+            _item("Second line", x=0, y=30, w=120, h=14),
+        ]
+        from pin.ocr_text_layer import OCRTextLayer as C
+        union = C._union_rect(items)
+        lay.load_prepared_ocr_items(items, union, 200, 100)
+        yield lay
+        lay.cleanup()
+
+    def _lines_result(self, text):
+        from types import SimpleNamespace
+        return SimpleNamespace(success=True, translated_text=text)
+
+    def test_same_line_blocks_group_into_one_line(self, layer):
+        groups = layer._group_text_lines()
+        assert len(groups) == 2
+        assert [i.text for i in groups[0]] == ["Hello", "world"]
+        assert [i.text for i in groups[1]] == ["Second line"]
+
+    def test_matching_line_count_maps_one_chip_per_line(self, layer, qapp):
+        # 请求在测试里同步模拟：直接喂 finished 结果
+        layer._on_translated(self._lines_result("你好\n第二行"))
+        assert layer.is_translation_active() is True
+        assert len(layer._translate_chips) == 2
+        assert layer._translate_chips[0]['text'] == "你好"
+        assert layer._translate_chips[1]['text'] == "第二行"
+
+    def test_line_count_mismatch_falls_back_to_union_chip(self, layer, qapp):
+        # 译文行数对不上时，整段译文贴在整体包围盒上
+        layer._on_translated(self._lines_result("one single merged paragraph"))
+        assert layer.is_translation_active() is True
+        assert len(layer._translate_chips) == 1
+        chip_rect = layer._translate_chips[0]['norm_rect']
+        assert chip_rect.width() >= layer._text_union_rect.width()
+
+    def test_failed_result_keeps_original_text(self, layer, qapp, monkeypatch):
+        warnings = []
+        import ui.dialogs as dialogs_mod
+        monkeypatch.setattr(
+            dialogs_mod, "show_warning_dialog",
+            lambda *a, **k: warnings.append(a),
+        )
+        layer._on_translated(None)
+        from types import SimpleNamespace
+        layer._on_translated(SimpleNamespace(
+            success=False, error_message="boom", translated_text="",
+        ))
+        assert layer.is_translation_active() is False
+        assert layer._translate_chips == []
+        assert len(warnings) == 2
+
+    def test_toggle_restores_original_text_and_emits_signal(self, layer, qapp):
+        states = []
+        layer.translation_changed.connect(states.append)
+        layer._on_translated(self._lines_result("你好\n第二行"))
+        assert states == [True]
+        layer.toggle_in_place_translation()  # 再点一次 → 恢复原文
+        assert layer.is_translation_active() is False
+        assert layer._translate_chips == []
+        assert states == [True, False]
+
+    def test_chip_click_copies_translated_text(self, layer, qapp, monkeypatch):
+        layer._on_translated(self._lines_result("你好\n第二行"))
+        from PySide6.QtWidgets import QApplication
+        clipboard = QApplication.clipboard()
+        chip_rect = layer._chip_rects()[0][1]
+        center = chip_rect.center()
+        from PySide6.QtCore import QEvent, QPoint, Qt
+        from PySide6.QtGui import QMouseEvent
+        event = QMouseEvent(
+            QEvent.Type.MouseButtonPress, center,
+            Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        layer.mousePressEvent(event)
+        assert clipboard.text() == "你好"
+
+    def test_chip_hit_test_outside_returns_none(self, layer, qapp):
+        layer._on_translated(self._lines_result("你好\n第二行"))
+        assert layer._chip_at(QPoint(199, 99)) is None
+
+    def test_reloading_ocr_items_resets_translation(self, layer, qapp):
+        layer._on_translated(self._lines_result("你好\n第二行"))
+        assert layer.is_translation_active() is True
+
+        from pin.ocr_text_layer import OCRTextLayer as C
+        items, union = C.prepare_ocr_items({
+            "code": 100,
+            "data": [{"text": "fresh", "box": _box(0, 0, 20, 10), "score": 1.0}],
+        })
+        layer.load_prepared_ocr_items(items, union, 200, 100)
+
+        assert layer.is_translation_active() is False
+        assert layer._translate_chips == []
+
+    def test_start_builds_worker_with_line_joined_text(self, layer, qapp, monkeypatch):
+        captured = {}
+
+        class _FakeSignal:
+            def connect(self, *_args):
+                pass
+
+        class _FakeWorker:
+            finished_ok = _FakeSignal()
+
+            def __init__(self, text, params, parent=None):
+                captured['text'] = text
+                captured['params'] = params
+                captured['parent'] = parent
+
+            def start(self):
+                pass
+
+        import pin.ocr_text_layer as mod
+        monkeypatch.setattr(mod, "_TranslateWorker", _FakeWorker)
+        layer.start_in_place_translation()
+
+        assert captured['text'] == "Hello world\nSecond line"
+        assert "target_lang" in captured['params']
+        assert layer.is_translation_running() is True

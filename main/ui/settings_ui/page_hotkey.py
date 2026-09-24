@@ -2,7 +2,7 @@
 """快捷键设置页 — Fluent Design"""
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
-    QStackedWidget,
+    QStackedWidget, QSizePolicy,
 )
 from PySide6.QtCore import Qt
 
@@ -47,7 +47,7 @@ _EDIT_W = 140
 _EDIT_H = 28
 _SEGMENT_HINT_STYLE = "font-size: 12px; background: transparent;"
 
-# 六个全局快捷键属于同一个冲突域；任意两个业务不能占用同一个实际按键。
+# 全局快捷键属于同一个冲突域；任意两个业务不能占用同一个实际按键。
 GLOBAL_HOTKEY_EDIT_ATTRS = (
     "hotkey_input",
     "hotkey_input_2",
@@ -55,6 +55,8 @@ GLOBAL_HOTKEY_EDIT_ATTRS = (
     "clipboard_hotkey_edit_2",
     "translation_hotkey_edit",
     "translation_hotkey_edit_2",
+    "pin_hotkey_edit",
+    "pin_hotkey_edit_2",
 )
 
 
@@ -66,7 +68,7 @@ def _iter_global_hotkey_edits(dialog):
 
 
 def validate_global_hotkey_edits(dialog, *, check_system: bool = False) -> bool:
-    """校验设置窗口上的六个全局快捷键。
+    """校验设置窗口上的全局快捷键。
 
     这里只回答「哪几个控件属于同一个冲突域」，判重规则本身在
     ui.hotkey_edit.validate_hotkey_group——欢迎向导复用的是同一份。
@@ -96,6 +98,41 @@ def _stack_page_height(row_count: int) -> int:
     return row_count * 46 + max(0, row_count - 1) * 8
 
 
+def _add_hotkey_pair_row(dialog, group, title: str, attr_main: str, attr_backup: str,
+                         main_text: str, backup_text: str, input_style: str) -> None:
+    """全局热键单行卡：标题在左，主/备两个录入框并排在右。
+
+    主备本就是一对，上下堆叠又高又空；单行后卡片高度减半，
+    四组全局热键在默认窗口高度下几乎不用滚动。
+    """
+    card = WhiteCard(group)
+    row = QHBoxLayout(card)
+    row.setContentsMargins(16, 6, 16, 6)
+    row.setSpacing(8)
+
+    lbl = QLabel(title, card)
+    apply_theme_text_style(lbl, 14)
+    row.addWidget(lbl)
+    row.addStretch()
+
+    for attr, value in ((attr_main, main_text), (attr_backup, backup_text)):
+        edit = HotkeyEdit()
+        edit.setText(value)
+        edit.setPlaceholderText(dialog.tr("e.g.: ctrl+shift+a"))
+        # 不写死 200px：默认宽度下两个框会被挤叠；给最小值 + 横向拉伸，
+        # 窄窗口只省略占位符不断裂，宽窗口自动填满卡片。
+        edit.setMinimumWidth(160)
+        edit.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        edit.setStyleSheet(input_style)
+        setattr(dialog, attr, edit)
+        row.addWidget(edit)
+
+    card.setFixedHeight(52)
+    group.addSettingCard(card)
+
+
 def create_hotkey_page(dialog) -> QWidget:
     """创建快捷键设置页面 — Fluent Design"""
     scroll = QScrollArea()
@@ -105,7 +142,7 @@ def create_hotkey_page(dialog) -> QWidget:
     view = QWidget()
     view.setStyleSheet("background: transparent;")
     layout = QVBoxLayout(view)
-    layout.setContentsMargins(0, 0, 10, 0)
+    layout.setContentsMargins(0, 0, 10, 16)
     layout.setSpacing(20)
 
     input_style = dialog._get_input_style()
@@ -114,104 +151,43 @@ def create_hotkey_page(dialog) -> QWidget:
     grp_global = SettingCardGroup(dialog.tr("Global Hotkeys"), view)
 
     # 截图热键（主 + 备用）
-    ss_card = WhiteCard(grp_global)
-    ss_h = QHBoxLayout(ss_card)
-    ss_h.setContentsMargins(20, 8, 20, 8)
-    ss_h.setSpacing(12)
-
-    ss_lbl = QLabel(dialog.tr("Screenshot Hotkey"), ss_card)
-    apply_theme_text_style(ss_lbl, 14)
-    ss_h.addWidget(ss_lbl)
-    ss_h.addStretch()
-
-    ss_v = QVBoxLayout()
-    ss_v.setSpacing(5)
-    dialog.hotkey_input = HotkeyEdit()
-    dialog.hotkey_input.setText(dialog.current_hotkey)
-    dialog.hotkey_input.setPlaceholderText(dialog.tr("e.g.: ctrl+shift+a"))
-    dialog.hotkey_input.setFixedWidth(200)
-    dialog.hotkey_input.setStyleSheet(input_style)
-    ss_v.addWidget(dialog.hotkey_input)
-
-    dialog.hotkey_input_2 = HotkeyEdit()
-    dialog.hotkey_input_2.setText(dialog.config_manager.get_hotkey_2())
-    dialog.hotkey_input_2.setPlaceholderText(dialog.tr("e.g.: ctrl+shift+a"))
-    dialog.hotkey_input_2.setFixedWidth(200)
-    dialog.hotkey_input_2.setStyleSheet(input_style)
-    ss_v.addWidget(dialog.hotkey_input_2)
-    ss_h.addLayout(ss_v)
-    ss_card.setFixedHeight(80)
-    grp_global.addSettingCard(ss_card)
+    _add_hotkey_pair_row(
+        dialog, grp_global, dialog.tr("Screenshot Hotkey"),
+        "hotkey_input", "hotkey_input_2",
+        dialog.current_hotkey, dialog.config_manager.get_hotkey_2(),
+        input_style,
+    )
 
     # 剪贴板热键（主 + 备用）
-    cb_card = WhiteCard(grp_global)
-    cb_h = QHBoxLayout(cb_card)
-    cb_h.setContentsMargins(20, 8, 20, 8)
-    cb_h.setSpacing(12)
-
-    cb_lbl = QLabel(dialog.tr("Clipboard Hotkey"), cb_card)
-    apply_theme_text_style(cb_lbl, 14)
-    cb_h.addWidget(cb_lbl)
-    cb_h.addStretch()
-
-    cb_v = QVBoxLayout()
-    cb_v.setSpacing(5)
-    dialog.clipboard_hotkey_edit = HotkeyEdit()
-    dialog.clipboard_hotkey_edit.setText(dialog.config_manager.get_clipboard_hotkey())
-    dialog.clipboard_hotkey_edit.setPlaceholderText(dialog.tr("e.g.: ctrl+shift+a"))
-    dialog.clipboard_hotkey_edit.setFixedWidth(200)
-    dialog.clipboard_hotkey_edit.setStyleSheet(input_style)
-    cb_v.addWidget(dialog.clipboard_hotkey_edit)
-
-    dialog.clipboard_hotkey_edit_2 = HotkeyEdit()
-    dialog.clipboard_hotkey_edit_2.setText(dialog.config_manager.get_clipboard_hotkey_2())
-    dialog.clipboard_hotkey_edit_2.setPlaceholderText(dialog.tr("e.g.: ctrl+shift+a"))
-    dialog.clipboard_hotkey_edit_2.setFixedWidth(200)
-    dialog.clipboard_hotkey_edit_2.setStyleSheet(input_style)
-    cb_v.addWidget(dialog.clipboard_hotkey_edit_2)
-    cb_h.addLayout(cb_v)
-    cb_card.setFixedHeight(80)
-    grp_global.addSettingCard(cb_card)
+    _add_hotkey_pair_row(
+        dialog, grp_global, dialog.tr("Clipboard Hotkey"),
+        "clipboard_hotkey_edit", "clipboard_hotkey_edit_2",
+        dialog.config_manager.get_clipboard_hotkey(),
+        dialog.config_manager.get_clipboard_hotkey_2(),
+        input_style,
+    )
 
     # 智能翻译热键（主 + 备用）
-    tr_card = WhiteCard(grp_global)
-    tr_h = QHBoxLayout(tr_card)
-    tr_h.setContentsMargins(20, 8, 20, 8)
-    tr_h.setSpacing(12)
-
-    tr_lbl = QLabel(dialog.tr("Translation Hotkey"), tr_card)
-    apply_theme_text_style(tr_lbl, 14)
-    tr_h.addWidget(tr_lbl)
-    tr_h.addStretch()
-
-    tr_v = QVBoxLayout()
-    tr_v.setSpacing(5)
-    dialog.translation_hotkey_edit = HotkeyEdit()
-    dialog.translation_hotkey_edit.setText(
-        dialog.config_manager.get_translation_hotkey()
+    _add_hotkey_pair_row(
+        dialog, grp_global, dialog.tr("Translation Hotkey"),
+        "translation_hotkey_edit", "translation_hotkey_edit_2",
+        dialog.config_manager.get_translation_hotkey(),
+        dialog.config_manager.get_translation_hotkey_2(),
+        input_style,
     )
-    dialog.translation_hotkey_edit.setPlaceholderText(
-        dialog.tr("e.g.: ctrl+shift+a")
-    )
-    dialog.translation_hotkey_edit.setFixedWidth(200)
-    dialog.translation_hotkey_edit.setStyleSheet(input_style)
-    tr_v.addWidget(dialog.translation_hotkey_edit)
 
-    dialog.translation_hotkey_edit_2 = HotkeyEdit()
-    dialog.translation_hotkey_edit_2.setText(
-        dialog.config_manager.get_translation_hotkey_2()
+    # 全局钉图热键（主 + 备用）：截图内钉选区，截图外钉剪贴板最新
+    _add_hotkey_pair_row(
+        dialog, grp_global, dialog.tr("Pin Hotkey"),
+        "pin_hotkey_edit", "pin_hotkey_edit_2",
+        dialog.config_manager.get_pin_hotkey()
+        if hasattr(dialog.config_manager, "get_pin_hotkey") else "",
+        dialog.config_manager.get_pin_hotkey_2()
+        if hasattr(dialog.config_manager, "get_pin_hotkey_2") else "",
+        input_style,
     )
-    dialog.translation_hotkey_edit_2.setPlaceholderText(
-        dialog.tr("e.g.: ctrl+shift+a")
-    )
-    dialog.translation_hotkey_edit_2.setFixedWidth(200)
-    dialog.translation_hotkey_edit_2.setStyleSheet(input_style)
-    tr_v.addWidget(dialog.translation_hotkey_edit_2)
-    tr_h.addLayout(tr_v)
-    tr_card.setFixedHeight(80)
-    grp_global.addSettingCard(tr_card)
 
-    # 全局热键统一判重。连接放在六个输入框全部创建之后，避免初始化过程中
+    # 全局热键统一判重。连接放在全部输入框创建之后，避免初始化过程中
     # 只看到半组控件；最后主动跑一次，以识别配置文件里遗留的旧冲突。
     for edit in _iter_global_hotkey_edits(dialog):
         edit.textChanged.connect(

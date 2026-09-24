@@ -166,27 +166,42 @@ def _refresh_clipboard_size_async(dialog):
         def run(self):
             self.done.emit(_calc_clipboard_storage_size())
 
+    # 重入保护：上一次计算还在进行时直接忽略。体积计算要遍历整个图片
+    # 目录可能耗时数秒，若期间再次触发，旧线程的唯一 Python 引用会被
+    # 覆盖丢弃，QThread 在运行中被析构会触发 Qt qFatal 直接崩溃。
+    old_thread = getattr(dialog, '_clipboard_size_thread', None)
+    if old_thread is not None:
+        try:
+            if old_thread.isRunning():
+                return
+        except RuntimeError:
+            pass
+
     label = getattr(dialog, '_clipboard_size_label', None)
-    state = {'alive': True}
-
-    def _mark_dead(*_args):
-        state['alive'] = False
-
-    if dialog is not None:
-        try:
-            dialog.destroyed.connect(_mark_dead)
-        except RuntimeError:
-            state['alive'] = False
-    if label is not None:
-        try:
-            label.destroyed.connect(_mark_dead)
-        except RuntimeError:
-            state['alive'] = False
+    state = getattr(dialog, '_clipboard_size_state', None)
+    if state is None:
+        state = {'alive': True}
+        if dialog is not None:
+            dialog._clipboard_size_state = state
+            # 只连接一次：每次刷新都重复连接 destroyed 会随点击次数累积
+            def _mark_dialog_dead(*_args):
+                state['alive'] = False
+            try:
+                dialog.destroyed.connect(_mark_dialog_dead)
+            except RuntimeError:
+                state['alive'] = False
+        if label is not None:
+            def _mark_label_dead(*_args):
+                state['alive'] = False
+            try:
+                label.destroyed.connect(_mark_label_dead)
+            except RuntimeError:
+                state['alive'] = False
 
     thread = _SizeThread()
     thread.done.connect(lambda s: _apply_size_to_label(label, s, state))
     thread.finished.connect(thread.deleteLater)
-    # 持有引用防止被 GC
+    # 持有引用防止被 GC（deleteLater 在 finished 之后执行）
     dialog._clipboard_size_thread = thread
     thread.start()
 

@@ -63,8 +63,8 @@ class _KeyboardMap(QWidget):
     """一张静态的可用性示意图：能绑的键高亮，不能绑的置灰。
 
     哪些键能绑不是随手涂的，而是照着 ShortcutManager._parse_hotkey 实际接受的
-    范围来：字母、数字、F1–F24、Esc、以及各种标点都能作主键，Tab / Caps /
-    Enter / Space / Backspace 解析不了。修改解析器时这张表要跟着改。
+    范围来：字母、数字、F1–F24、Esc、Backspace、Tab、Enter、Space
+    以及各种标点都能作主键，Caps 解析不了。修改解析器时这张表要跟着改.
     """
 
     # 每行 (标签, 宽度单位, 是否可绑)。宽度以 1 个字母键为 1 单位。
@@ -77,10 +77,10 @@ class _KeyboardMap(QWidget):
             ("`", 1, BINDABLE),
             *((c, 1, BINDABLE) for c in "1234567890"),
             ("-", 1, BINDABLE), ("=", 1, BINDABLE),
-            ("⌫", 2, UNBOUND),
+            ("⌫", 2, BINDABLE),
         ),
         (
-            ("Tab", 1.5, UNBOUND),
+            ("Tab", 1.5, BINDABLE),
             *((c, 1, BINDABLE) for c in "QWERTYUIOP"),
             ("[", 1, BINDABLE), ("]", 1, BINDABLE), ("\\", 1.5, BINDABLE),
         ),
@@ -88,7 +88,7 @@ class _KeyboardMap(QWidget):
             ("Caps", 1.75, UNBOUND),
             *((c, 1, BINDABLE) for c in "ASDFGHJKL"),
             (";", 1, BINDABLE), ("'", 1, BINDABLE),
-            ("↵", 2.25, UNBOUND),
+            ("↵", 2.25, BINDABLE),
         ),
         (
             ("Shift", 2.25, BINDABLE),
@@ -98,7 +98,7 @@ class _KeyboardMap(QWidget):
         ),
         (
             ("Ctrl", 2, BINDABLE), ("Win", 1.5, BINDABLE), ("Alt", 1.5, BINDABLE),
-            ("Space", 6.5, UNBOUND),
+            ("Space", 6.5, BINDABLE),
             ("Alt", 1.5, BINDABLE), ("Ctrl", 2, BINDABLE),
         ),
     )

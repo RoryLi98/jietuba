@@ -90,7 +90,11 @@ class MainApp(QObject):
         super().__init__()
         self.app = QApplication(sys.argv)
         self.app.setQuitOnLastWindowClosed(False)
-        
+
+        # 界面缩放（系数在 bootstrap 读取，这里应用默认字体）
+        from core import ui_scale
+        ui_scale.apply_app_font(self.app)
+
         # Config - 使用统一的设置管理器
         self.config_manager = get_tool_settings_manager()
 
@@ -260,8 +264,20 @@ class MainApp(QObject):
         # 更新 tooltip
         self.tray_icon.setToolTip(self.tr("jietuba - Click to screenshot"))
 
-        # 重建菜单
+        # 重建菜单。旧菜单显式延迟销毁：实测 PySide6 会让被替换的菜单
+        # 一直存活，不处理的话每次重建（钉图增删、切主题、切语言都会
+        # 触发）都会永久泄漏一个 QMenu 及其动作。
+        old_menu = self.tray_icon.contextMenu()
         self.tray_icon.setContextMenu(self._create_tray_menu())
+        if old_menu is not None:
+            try:
+                if old_menu.isVisible():
+                    # 菜单正展开时不能立即销毁，挂到隐藏信号上延迟回收
+                    old_menu.aboutToHide.connect(old_menu.deleteLater)
+                else:
+                    old_menu.deleteLater()
+            except RuntimeError:
+                pass
 
     def update_hotkey(self, show_error: bool = False):
         """
@@ -312,6 +328,25 @@ class MainApp(QObject):
             else:
                 log_warning(T("智能翻译热键注册失败: {translation_hotkey}", translation_hotkey=translation_hotkey), "Hotkey")
                 failed_hotkeys.append((label, translation_hotkey))
+
+        # 注册全局钉图热键：截图内钉当前选区，截图外钉剪贴板最新内容
+        # （文字也会渲染成图片钉出来）。与截图内 inapp_pin 共用同一套语义，
+        # 即使配置成同一个键也不会双重触发：RegisterHotKey 会被 OS 消费，
+        # 截图内只走 WM_HOTKEY 回调，Qt KeyPress 不会再触发一次。
+        pin_hotkeys = (
+            (self.config_manager.get_pin_hotkey(), self.tr("Pin")),
+            (self.config_manager.get_pin_hotkey_2(), self.tr("Pin (2)")),
+        )
+        for pin_hotkey, label in pin_hotkeys:
+            if not pin_hotkey:
+                continue
+            if self.hotkey_system.register_hotkey(
+                pin_hotkey, self.pin_from_selection_or_clipboard
+            ):
+                log_info(T("全局钉图热键已注册: {pin_hotkey}", pin_hotkey=pin_hotkey), "Hotkey")
+            else:
+                log_warning(T("全局钉图热键注册失败: {pin_hotkey}", pin_hotkey=pin_hotkey), "Hotkey")
+                failed_hotkeys.append((label, pin_hotkey))
         
         # 注册剪切板热键（如果剪切板功能启用）
         if self.config_manager.get_clipboard_enabled():
@@ -617,6 +652,40 @@ class MainApp(QObject):
 
         except Exception as e:
             log_exception(e, T("打开剪切板窗口失败"))
+
+    def pin_from_selection_or_clipboard(self):
+        """统一钉图入口：截图内钉选区，截图外钉剪贴板最新。
+
+        - 截图会话活跃且已有确认选区 → 直接钉当前选区（与 inapp_pin 一致，
+          还会把结果图送进剪贴板）。
+        - 否则 → 钉剪贴板最新内容；文字渲染成图片再钉。
+        """
+        try:
+            sw = getattr(self, "screenshot_window", None)
+            if (sw is not None
+                    and getattr(sw, "_session_active", False)
+                    and sw.isVisible()):
+                scene = getattr(sw, "scene", None)
+                sel = getattr(scene, "selection_model", None) if scene else None
+                if sel is not None and getattr(sel, "is_confirmed", False):
+                    action_handler = getattr(sw, "action_handler", None)
+                    if action_handler is not None:
+                        log_debug(T("全局钉图：截图内，直接钉当前选区"), "PinFromClipboard")
+                        action_handler.handle_pin()
+                        return
+                # 截图开着但还没选区：忽略，避免误把剪贴板钉出来挡住截图
+                log_debug(T("全局钉图：截图中但无确认选区，已忽略"), "PinFromClipboard")
+                return
+        except Exception as e:
+            log_exception(e, T("截图内钉图失败，回退到剪贴板钉图"))
+
+        try:
+            from pin.pin_from_clipboard import create_pin_from_latest_clipboard
+            ok = create_pin_from_latest_clipboard(self.config_manager)
+            if not ok:
+                log_warning(T("剪贴板为空或无可钉内容"), "PinFromClipboard")
+        except Exception as e:
+            log_exception(e, T("从剪贴板钉图失败"))
         
     def quit_app(self):
         # 完全销毁缓存的截图窗口

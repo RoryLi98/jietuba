@@ -98,8 +98,11 @@ class SettingsDialog(FrostedFramelessDialog):
         self._setup_titlebar()
 
         self.setWindowTitle("jietuba")
-        self.resize(900, 670)
-        self.setFont(QFont(DEFAULT_FONT_FAMILY, 10))
+        # 窗口默认尺寸跟随界面缩放，并夹到屏幕可用范围内
+        from core import ui_scale as _ui_scale
+        self.resize(*_ui_scale.scaled_window_size(900, 670))
+        # 基础字体跟随界面缩放（10pt 为未缩放基准值）
+        self.setFont(QFont(DEFAULT_FONT_FAMILY, _ui_scale.scaled(10)))
         self.setObjectName("SettingsDialog")
 
         self._setup_ui()
@@ -233,14 +236,17 @@ class SettingsDialog(FrostedFramelessDialog):
         nav.setMinimumWidth(188)
         nav.setMaximumWidth(196)
 
+        # 左侧导航用单色 Fluent 线框图标（对标 Win11 设置），深浅主题自动 tint。
+        # 小尺寸下糊成一团的两个（翻译、其它）换了更简洁的字形：
+        # 翻译用气泡 + A，其它用布局网格。
         self._nav_items = [
             ("shortcuts", FluentIcon.COMMAND_PROMPT, self.tr("Shortcuts"), 0, NavigationItemPosition.TOP),
             ("capture", FluentIcon.CAMERA, self.tr("Capture Settings"), 1, NavigationItemPosition.TOP),
             ("clipboard", FluentIcon.PASTE, self.tr("Clipboard"), 2, NavigationItemPosition.TOP),
             ("appearance", FluentIcon.BRUSH, self.tr("Appearance"), 3, NavigationItemPosition.TOP),
-            ("translation", FluentIcon.LANGUAGE, self.tr("Translation"), 4, NavigationItemPosition.TOP),
+            ("translation", FluentIcon.TRANSLATE, self.tr("Translation"), 4, NavigationItemPosition.TOP),
             ("log", FluentIcon.HISTORY, self.tr("Log Settings"), 5, NavigationItemPosition.TOP),
-            ("other", FluentIcon.APPLICATION, self.tr("Other"), 6, NavigationItemPosition.TOP),
+            ("other", FluentIcon.LAYOUT, self.tr("Other"), 6, NavigationItemPosition.TOP),
             ("about", FluentIcon.INFO, self.tr("About"), 8, NavigationItemPosition.BOTTOM),
         ]
 
@@ -624,6 +630,10 @@ class SettingsDialog(FrostedFramelessDialog):
             self.translation_hotkey_edit.setText(defaults["translation_hotkey"])
         if hasattr(self, 'translation_hotkey_edit_2'):
             self.translation_hotkey_edit_2.setText(defaults["translation_hotkey_2"])
+        if hasattr(self, 'pin_hotkey_edit'):
+            self.pin_hotkey_edit.setText(defaults.get("pin_hotkey", ""))
+        if hasattr(self, 'pin_hotkey_edit_2'):
+            self.pin_hotkey_edit_2.setText(defaults.get("pin_hotkey_2", ""))
         # 应用内快捷键
         if hasattr(self, '_inapp_edits'):
             for cfg_key, edit in self._inapp_edits.items():
@@ -666,6 +676,12 @@ class SettingsDialog(FrostedFramelessDialog):
             )
             if index >= 0:
                 self._ui_theme_combo.setCurrentIndex(index)
+        if hasattr(self, '_ui_scale_combo'):
+            scale_idx = self._ui_scale_combo.findData(
+                float(defaults.get("ui_scale", 1.0))
+            )
+            if scale_idx >= 0:
+                self._ui_scale_combo.setCurrentIndex(scale_idx)
         if hasattr(self, '_appearance_theme_color'):
             self._appearance_theme_color = QColor(defaults["theme_color"])
             _update_color_btn(self._theme_color_btn, self._appearance_theme_color)
@@ -778,6 +794,14 @@ class SettingsDialog(FrostedFramelessDialog):
             self.azure_translate_endpoint_input.setText(
                 defaults["azure_translate_endpoint"]
             )
+        if hasattr(self, 'baidu_translate_app_id_input'):
+            self.baidu_translate_app_id_input.setText(
+                defaults["baidu_translate_app_id"]
+            )
+        if hasattr(self, 'baidu_translate_secret_key_input'):
+            self.baidu_translate_secret_key_input.setText(
+                defaults["baidu_translate_secret_key"]
+            )
         if hasattr(self, 'translation_target_combo'):
             index = self.translation_target_combo.findData(defaults["translation_target_lang"])
             if index >= 0:
@@ -800,9 +824,9 @@ class SettingsDialog(FrostedFramelessDialog):
     # 保存（accept）
     # ================================================================
 
-    def accept(self):
-        """保存所有设置"""
-        # 六个全局快捷键必须先整体通过校验。这里发生在任何 set_* 之前，
+    def accept(self) -> bool:
+        """保存所有设置。返回 False 表示校验失败被中止（窗口不应关闭）。"""
+        # 全局快捷键必须先整体通过校验。这里发生在任何 set_* 之前，
         # 因而冲突值不会写入配置，窗口也不会关闭。
         if not validate_global_hotkey_edits(self, check_system=True):
             self.content_stack.setCurrentIndex(0)
@@ -815,10 +839,45 @@ class SettingsDialog(FrostedFramelessDialog):
                     "Please fix them before applying."
                 ),
             )
-            return
+            return False
 
         # 防止保存过程中（比如语言切换触发的窗口重建）触发未保存确认弹窗
         self._skip_unsaved_close_prompt = True
+
+        # 0-前置. 校验全局热键能否解析。无法解析的组合键注册必然失败，
+        # 直接拦截保存，避免出现「设置了热键却不生效」的情况。
+        from core.shortcut_manager import is_hotkey_parsable
+        from ui.dialogs import show_warning_dialog
+        invalid_hotkeys = []
+        for attr, label in (
+            ('hotkey_input', self.tr("Screenshot")),
+            ('hotkey_input_2', self.tr("Screenshot (2)")),
+            ('clipboard_hotkey_edit', self.tr("Clipboard")),
+            ('clipboard_hotkey_edit_2', self.tr("Clipboard (2)")),
+            ('translation_hotkey_edit', self.tr("Translation")),
+            ('translation_hotkey_edit_2', self.tr("Translation (2)")),
+            ('pin_hotkey_edit', self.tr("Pin")),
+            ('pin_hotkey_edit_2', self.tr("Pin (2)")),
+        ):
+            editor = getattr(self, attr, None)
+            if editor is None:
+                continue
+            text = editor.text().strip()
+            if text and not text.endswith("+") and not is_hotkey_parsable(text):
+                invalid_hotkeys.append(f"• {label}: {text}")
+        if invalid_hotkeys:
+            show_warning_dialog(
+                self,
+                self.tr("Invalid Hotkey"),
+                self.tr("The following shortcuts cannot be recognized and will never work:")
+                + "\n\n" + "\n".join(invalid_hotkeys)
+                + "\n\n" + self.tr(
+                    "Please record them again in the boxes above (e.g. Ctrl+Alt+A, F8, Print)."
+                ),
+            )
+            # 中止保存，恢复标志让未保存变更检测继续生效
+            self._skip_unsaved_close_prompt = False
+            return False
 
         # 0. 快捷键
         self.config_manager.set_hotkey(self.hotkey_input.text().strip())
@@ -831,6 +890,14 @@ class SettingsDialog(FrostedFramelessDialog):
         if hasattr(self, 'translation_hotkey_edit_2'):
             self.config_manager.set_translation_hotkey_2(
                 self.translation_hotkey_edit_2.text().strip()
+            )
+        if hasattr(self, 'pin_hotkey_edit'):
+            self.config_manager.set_pin_hotkey(
+                self.pin_hotkey_edit.text().strip()
+            )
+        if hasattr(self, 'pin_hotkey_edit_2'):
+            self.config_manager.set_pin_hotkey_2(
+                self.pin_hotkey_edit_2.text().strip()
             )
 
         # 1. 截图交互（双击确认 + 智能选区）
@@ -952,6 +1019,14 @@ class SettingsDialog(FrostedFramelessDialog):
             self.config_manager.set_azure_translate_endpoint(
                 self.azure_translate_endpoint_input.text().strip()
             )
+        if hasattr(self, 'baidu_translate_app_id_input'):
+            self.config_manager.set_baidu_translate_app_id(
+                self.baidu_translate_app_id_input.text().strip()
+            )
+        if hasattr(self, 'baidu_translate_secret_key_input'):
+            self.config_manager.set_baidu_translate_secret_key(
+                self.baidu_translate_secret_key_input.text().strip()
+            )
         if hasattr(self, 'translation_target_combo'):
             self.config_manager.set_translation_target_lang(self.translation_target_combo.currentData())
         if hasattr(self, 'split_sentences_toggle'):
@@ -1038,6 +1113,13 @@ class SettingsDialog(FrostedFramelessDialog):
             from core.ui_theme import get_ui_theme
             get_ui_theme().set_mode(self._ui_theme_combo.currentData())
 
+        # 12. 界面缩放（保存并立即生效）
+        if hasattr(self, '_ui_scale_combo'):
+            scale = float(self._ui_scale_combo.currentData())
+            self.config_manager.set_app_setting("ui_scale", scale)
+            from core import ui_scale
+            ui_scale.set_ui_scale(scale)
+
         from core.theme import get_theme
         theme = get_theme()
         if hasattr(self, '_appearance_theme_color'):
@@ -1052,6 +1134,7 @@ class SettingsDialog(FrostedFramelessDialog):
             super().accept()
         finally:
             self._skip_unsaved_close_prompt = False
+        return True
 
     # ================================================================
     # showEvent / refresh
@@ -1108,6 +1191,11 @@ class SettingsDialog(FrostedFramelessDialog):
             "amazon_translate_secret_key_input",
             "amazon_translate_session_token_input",
             "google_translate_api_key_input",
+            "azure_translate_api_key_input",
+            "azure_translate_region_input",
+            "azure_translate_endpoint_input",
+            "baidu_translate_app_id_input",
+            "baidu_translate_secret_key_input",
         ):
             widget = getattr(self, attr, None)
             if widget is not None:
@@ -1166,7 +1254,12 @@ class SettingsDialog(FrostedFramelessDialog):
                       'amazon_translate_access_key_input',
                       'amazon_translate_secret_key_input',
                       'amazon_translate_session_token_input',
-                      'google_translate_api_key_input'):
+                      'google_translate_api_key_input',
+                      'azure_translate_api_key_input',
+                      'azure_translate_region_input',
+                      'azure_translate_endpoint_input',
+                      'baidu_translate_app_id_input',
+                      'baidu_translate_secret_key_input'):
             w = getattr(self, attr, None)
             if w is not None:
                 snap[attr] = w.text()
@@ -1194,7 +1287,7 @@ class SettingsDialog(FrostedFramelessDialog):
                       'log_level_combo',
                       'language_combo', 'engine_combo', 'cursor_move_combo',
                       'magnifier_color_format_combo', 'log_retention_combo',
-                      '_ui_theme_combo'):
+                      '_ui_theme_combo', '_ui_scale_combo'):
             w = getattr(self, attr, None)
             if w is not None:
                 snap[attr] = w.currentIndex()
@@ -1250,8 +1343,12 @@ class SettingsDialog(FrostedFramelessDialog):
         if self._has_unsaved_changes():
             action = self._confirm_close_with_unsaved_changes()
             if action == "save":
-                self.accept()
-                event.accept()
+                # accept() 可能因校验失败被中止（如热键无效），
+                # 此时保持窗口打开，避免用户编辑内容被静默丢弃
+                if self.accept():
+                    event.accept()
+                else:
+                    event.ignore()
             elif action == "discard":
                 event.accept()
             else:
@@ -1399,6 +1496,26 @@ class SettingsDialog(FrostedFramelessDialog):
             self.google_translate_api_key_input.setText(
                 self.config_manager.get_google_translate_api_key()
             )
+        if hasattr(self, 'azure_translate_api_key_input'):
+            self.azure_translate_api_key_input.setText(
+                self.config_manager.get_azure_translate_api_key()
+            )
+        if hasattr(self, 'azure_translate_region_input'):
+            self.azure_translate_region_input.setText(
+                self.config_manager.get_azure_translate_region()
+            )
+        if hasattr(self, 'azure_translate_endpoint_input'):
+            self.azure_translate_endpoint_input.setText(
+                self.config_manager.get_azure_translate_endpoint()
+            )
+        if hasattr(self, 'baidu_translate_app_id_input'):
+            self.baidu_translate_app_id_input.setText(
+                self.config_manager.get_baidu_translate_app_id()
+            )
+        if hasattr(self, 'baidu_translate_secret_key_input'):
+            self.baidu_translate_secret_key_input.setText(
+                self.config_manager.get_baidu_translate_secret_key()
+            )
         if hasattr(self, 'translation_target_combo'):
             index = self.translation_target_combo.findData(self.config_manager.get_app_setting("translation_target_lang", ""))
             if index >= 0:
@@ -1464,6 +1581,13 @@ class SettingsDialog(FrostedFramelessDialog):
             index = self._ui_theme_combo.findData(get_ui_theme().mode.value)
             if index >= 0:
                 self._ui_theme_combo.setCurrentIndex(index)
+
+        if hasattr(self, '_ui_scale_combo'):
+            scale_idx = self._ui_scale_combo.findData(
+                float(self.config_manager.get_app_setting("ui_scale", 1.0))
+            )
+            if scale_idx >= 0:
+                self._ui_scale_combo.setCurrentIndex(scale_idx)
 
         if hasattr(self, '_theme_color_btn'):
             from core.theme import get_theme

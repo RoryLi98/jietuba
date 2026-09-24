@@ -16,6 +16,8 @@ APP_DEFAULT_SETTINGS = {
     "clipboard_hotkey_2": "ctrl+shift+v",
     "translation_hotkey": "",
     "translation_hotkey_2": "",
+    "pin_hotkey": "ctrl+2",
+    "pin_hotkey_2": "",
     "double_click_copy_close": True,
     "cross_tool_selection": True,
     "text_always_on_top": True,
@@ -55,6 +57,8 @@ APP_DEFAULT_SETTINGS = {
     "azure_translate_api_key": "",
     "azure_translate_region": "",
     "azure_translate_endpoint": "",
+    "baidu_translate_app_id": "",
+    "baidu_translate_secret_key": "",
     "translation_target_lang": "",
     "translation_split_sentences": True,
     "translation_preserve_formatting": True,
@@ -64,6 +68,7 @@ APP_DEFAULT_SETTINGS = {
     "clipboard_auto_cleanup": False,
     "magnifier_color_copy_format": "rgb_hex",
     "ui_theme_mode": "system",
+    "ui_scale": 1.0,
     "inapp_confirm": "ctrl+c",
     "inapp_pin": "ctrl+d",
     "inapp_undo": "ctrl+z",
@@ -152,6 +157,10 @@ class MockConfig:
             }
         if provider_id == "google":
             return {"api_key": ""}
+        if provider_id == "azure":
+            return {"api_key": "", "region": "", "endpoint": ""}
+        if provider_id == "baidu":
+            return {"app_id": "", "secret_key": ""}
         return {}
     def get_amazon_translate_region(self): return "us-west-2"
     def set_amazon_translate_region(self, v): pass
@@ -169,6 +178,10 @@ class MockConfig:
     def set_azure_translate_region(self, v): pass
     def get_azure_translate_endpoint(self): return ""
     def set_azure_translate_endpoint(self, v): pass
+    def get_baidu_translate_app_id(self): return ""
+    def set_baidu_translate_app_id(self, v): pass
+    def get_baidu_translate_secret_key(self): return ""
+    def set_baidu_translate_secret_key(self, v): pass
     def get_app_setting(self, key, default=None):
         if default is None:
             default = self.APP_DEFAULT_SETTINGS.get(key)
@@ -191,6 +204,10 @@ class MockConfig:
     def set_translation_hotkey(self, v): pass
     def get_translation_hotkey_2(self): return ""
     def set_translation_hotkey_2(self, v): pass
+    def get_pin_hotkey(self): return "ctrl+2"
+    def set_pin_hotkey(self, v): pass
+    def get_pin_hotkey_2(self): return ""
+    def set_pin_hotkey_2(self, v): pass
     def get_clipboard_enabled(self): return True
     def set_clipboard_enabled(self, v): pass
     def get_clipboard_auto_paste(self): return False

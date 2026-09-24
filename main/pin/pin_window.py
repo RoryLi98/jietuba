@@ -255,16 +255,12 @@ class PinWindow(QWidget):
         return self.config_manager.get_pin_auto_toolbar() if self.config_manager else True
 
     def _ensure_hover_controls_visible(self):
-        if not self.close_button.isVisible():
-            self.close_button.show()
-        self.close_button.raise_()
-
         if self._thumbnail_mode:
+            self._control_buttons.show_hover_controls(False)
             return
 
-        if not self._auto_toolbar_enabled() and not self.toolbar_toggle_button.isVisible():
-            self.toolbar_toggle_button.show()
-        self.toolbar_toggle_button.raise_()
+        show_toggle = not self._auto_toolbar_enabled()
+        self._control_buttons.show_hover_controls(show_toggle)
 
         if self._auto_toolbar_enabled():
             toolbar_hidden = not self.toolbar or not self.toolbar.isVisible()
@@ -289,14 +285,11 @@ class PinWindow(QWidget):
         if self._last_hover_state:
             return
         if not self.underMouse():
-            self.close_button.hide()
-            self.toolbar_toggle_button.hide()
+            self._control_buttons.hide_all()
 
     def _set_control_buttons_visible(self, visible: bool):
-        if hasattr(self, 'close_button') and self.close_button:
-            self.close_button.setVisible(visible)
-        if hasattr(self, 'toolbar_toggle_button') and self.toolbar_toggle_button:
-            self.toolbar_toggle_button.setVisible(visible)
+        if hasattr(self, '_control_buttons') and self._control_buttons:
+            self._control_buttons.set_visible(visible)
 
     # ==================================================================
     # 窗口拖动
@@ -617,15 +610,39 @@ class PinWindow(QWidget):
     def _on_translate_clicked(self):
         if not hasattr(self, '_translation_helper'):
             return
+        # 已有 OCR 结果时优先原位翻译（本地保留功能），否则走统一翻译窗口；
+        # 没有结果时走上游的按需 OCR 流程。
         if self._ocr_has_result:
             if self.ocr_text_layer:
-                self._translation_helper.translate(self.ocr_text_layer)
-        else:
-            if not self._translation_helper.begin_ocr_translation():
+                layer = self.ocr_text_layer
+                if hasattr(layer, 'toggle_in_place_translation'):
+                    try:
+                        if hasattr(layer, 'has_text') and not layer.has_text():
+                            log_warning(T("没有可翻译的文字"), "Translate")
+                            return
+                        if (not hasattr(layer, 'is_translation_running')
+                                or not layer.is_translation_running()):
+                            layer.toggle_in_place_translation()
+                            return
+                    except Exception:
+                        pass
+                self._translation_helper.translate(layer)
                 return
-            # 先把控制权交还事件循环，让翻译窗口真正绘制出来，再做可能需要
-            # 初始化模型的 OCR；这与截图翻译“先出面板、后识别”的体感一致。
-            QTimer.singleShot(0, self._start_ocr_for_translation)
+        else:
+            if hasattr(self._translation_helper, 'begin_ocr_translation'):
+                if not self._translation_helper.begin_ocr_translation():
+                    return
+                # 先把控制权交还事件循环，让翻译窗口真正绘制出来，再做可能需要
+                # 初始化模型的 OCR；这与截图翻译“先出面板、后识别”的体感一致。
+                QTimer.singleShot(0, self._start_ocr_for_translation)
+                return
+            # 旧兜底：OCR 正在跑时排队
+            if getattr(self._ocr_mgr, 'is_running', False):
+                self._ocr_mgr.translate_pending = True
+                log_info(T("OCR 识别中，翻译将在识别完成后自动执行"), "Translate")
+                return
+            log_warning(T("没有 OCR 结果也没有正在进行的 OCR"), "Translate")
+            return
 
     def _start_ocr_for_translation(self):
         if self._is_closed:
@@ -642,6 +659,13 @@ class PinWindow(QWidget):
         """接收钉图文字层 OCR 结果，交给统一翻译界面。"""
         if hasattr(self, '_translation_helper'):
             self._translation_helper.complete_ocr_translation(success, result)
+
+    def _on_translate_open_window_clicked(self):
+        """在独立翻译窗口中打开 OCR 文字（保留原有用法）"""
+        if not hasattr(self, '_translation_helper'):
+            return
+        if self._ocr_has_result and self.ocr_text_layer:
+            self._translation_helper.translate(self.ocr_text_layer)
 
     # ==================================================================
     # 右键菜单
