@@ -185,6 +185,8 @@ class OCRTextLayer(QWidget):
 
     def __init__(self, parent=None, original_width: int = 100, original_height: int = 100):
         super().__init__(parent)
+        if parent is not None and hasattr(parent, '_handle_mouse_gesture'):
+            self.installEventFilter(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -1202,4 +1204,3 @@ class OCRTextLayer(QWidget):
                 super().closeEvent(event)
             except Exception as e:
                 log_exception(e, T("OCR文字层super closeEvent"))
- 
