@@ -205,3 +205,94 @@ def test_system_clipboard_with_text_is_not_treated_as_image(monkeypatch):
     )
 
     assert module._read_system_clipboard_image() is None
+
+
+def test_system_clipboard_with_file_reference_and_bitmap_is_pinned(monkeypatch):
+    """截图「确定」写入的是位图 + CF_HDROP 文件引用。
+
+    之前 hasUrls() 会直接放弃位图，兜底到历史后钉出旧图。
+    位图 + 文件引用是截图确认的签名，必须钉位图。
+    """
+    from clipboard.ui.windows import pin_window as module
+
+    class FakeMime:
+        def hasUrls(self):
+            return True
+
+        def hasText(self):
+            return False
+
+        def text(self):
+            return ""
+
+    class FakeImage:
+        def isNull(self):
+            return False
+
+    fake_clipboard = SimpleNamespace(
+        mimeData=lambda: FakeMime(),
+        image=lambda: FakeImage(),
+    )
+    monkeypatch.setattr(
+        module, "QGuiApplication",
+        SimpleNamespace(clipboard=lambda: fake_clipboard),
+    )
+
+    result = module._read_system_clipboard_image()
+    assert result is not None and result.isNull() is False
+
+
+def test_system_clipboard_urls_without_bitmap_falls_back(monkeypatch):
+    """只有文件引用、没有位图时不算图片，落回历史路径。"""
+    from clipboard.ui.windows import pin_window as module
+
+    class FakeMime:
+        def hasUrls(self):
+            return True
+
+        def hasText(self):
+            return False
+
+        def text(self):
+            return ""
+
+    fake_clipboard = SimpleNamespace(
+        mimeData=lambda: FakeMime(),
+        image=lambda: None,
+    )
+    monkeypatch.setattr(
+        module, "QGuiApplication",
+        SimpleNamespace(clipboard=lambda: fake_clipboard),
+    )
+
+    assert module._read_system_clipboard_image() is None
+
+
+def test_system_clipboard_text_wins_over_bitmap_and_urls(monkeypatch):
+    """文本 + 位图 + 文件引用并存（如 Excel 单元格带路径）仍按文本处理。"""
+    from clipboard.ui.windows import pin_window as module
+
+    class FakeMime:
+        def hasUrls(self):
+            return True
+
+        def hasText(self):
+            return True
+
+        def text(self):
+            return "A1	B1"
+
+    class FakeImage:
+        def isNull(self):
+            return False
+
+    fake_clipboard = SimpleNamespace(
+        mimeData=lambda: FakeMime(),
+        image=lambda: FakeImage(),
+    )
+    monkeypatch.setattr(
+        module, "QGuiApplication",
+        SimpleNamespace(clipboard=lambda: fake_clipboard),
+    )
+
+    assert module._read_system_clipboard_image() is None

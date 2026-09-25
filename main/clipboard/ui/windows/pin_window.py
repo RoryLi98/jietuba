@@ -150,19 +150,23 @@ def pin_latest_clipboard_image(center: Optional[QPoint] = None) -> bool:
 def _read_system_clipboard_image() -> Optional[QImage]:
     """读系统剪贴板里的图片，没有或读不出来都返回 None。
 
-    有文本或文件列表时一律不算图片——这条优先级和 Rust 监听端写历史时用的
+    文本 + 位图的组合不算图片——这条优先级和 Rust 监听端写历史时用的
     完全一致（见 rust_libs/pyclipboard/src/lib.rs 的 text/file/image 分支）。
     不对齐的话，复制一片 Excel 单元格（同时带文本和位图）按下热键会钉出一张
     单元格截图，而历史里那条记录是文本，用户看到的和想要的对不上。
+
+    但文件引用（CF_HDROP，hasUrls）+ 位图的组合必须算图片：截图「确定」
+    会把位图和保存路径一起写进剪贴板，之前因为 hasUrls() 直接放弃位图，
+    落到历史兜底后钉出来的就是更早的旧图，而不是刚截的那张。
     """
     clipboard = QGuiApplication.clipboard()
     if clipboard is None:
         return None
-    
+
     mime = clipboard.mimeData()
-    if mime is not None and (mime.hasUrls() or (mime.hasText() and mime.text())):
+    if mime is not None and mime.hasText() and mime.text():
         return None
-    
+
     image = clipboard.image()
     if image is None or image.isNull():
         return None
