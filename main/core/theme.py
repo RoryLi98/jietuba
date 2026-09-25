@@ -158,6 +158,12 @@ class ThemeManager:
         self._theme_color = QColor(color)
         if self._config_manager:
             self._config_manager.set_app_setting("theme_color", color.name())
+        # 剪贴板若开着「跟随截图主题色」，强调色需要实时跟着变
+        try:
+            from clipboard.ui.theme.themes import get_theme_manager
+            get_theme_manager().refresh_follow_theme()
+        except Exception:
+            pass
 
     def set_mask_color(self, color: QColor):
         """设置遮罩色并持久化（只存 RGB，Alpha 固定 120）"""

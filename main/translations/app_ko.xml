@@ -4314,4 +4314,52 @@ SOFTWARE.</translation></message>
         <translation>저장하면 일반 텍스트로 바뀝니다</translation>
     </message>
 </context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Startup Speed</source>
+        <translation>시작 속도</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Fast skips all preloading for quickest launch; Custom keeps the developer-page toggles.</source>
+        <translation>「빠름」은 모든 프리로드를 건너뛰어 가장 빠르게 시작합니다. 「사용자 지정」은 개발자 페이지의 개별 설정을 유지합니다.</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Standard</source>
+        <translation>표준</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Fast launch</source>
+        <translation>빠른 시작</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Custom</source>
+        <translation>사용자 지정</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Follow screenshot accent</source>
+        <translation>스크린샷 테마 색상 따르기</translation>
+    </message>
+</context>
+
+
+
+
+
+
 </TS>

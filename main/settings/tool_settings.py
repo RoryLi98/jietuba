@@ -292,7 +292,6 @@ class ToolSettingsManager(QObject):
         "screenshot_save_enabled": True,       # 自动保存截图
         "screenshot_save_path": os.path.join(os.path.expanduser("~"), "Pictures", "jietuba_photos"),  # 默认保存路径
         "screenshot_format": "PNG",            # 保存格式: PNG / JPG / BMP / WEBP / PDF
-        "screenshot_quality": 85,              # 有损格式质量 (1-100, PNG/BMP忽略)
         "clipboard_file_reference_enabled": True,  # 复制时同时写入文件路径（CF_HDROP），需自动保存截图开启才生效
 
         # 截图圆角
@@ -322,7 +321,6 @@ class ToolSettingsManager(QObject):
         "clipboard_auto_paste": True,          # 选择后自动粘贴（发送 Ctrl+V）
         "clipboard_close_after_paste": True,   # 粘贴后关闭窗口（关掉则窗口常驻，可连续粘贴）
         "clipboard_history_limit": 1000,        # 历史记录数量限制（0 为不限制）
-        "clipboard_auto_cleanup": True,        # 自动清理超出限制的记录
         "clipboard_foreground_scan_interval_ms": 200,  # 前台窗口取样频率（毫秒），仅面板打开时生效
         "clipboard_foreground_scan_interval_options": [100, 200, 300, 400, 500, 600],  # 频率可选项
         "clipboard_window_width": 450,         # 剪贴板窗口默认宽度
@@ -335,7 +333,6 @@ class ToolSettingsManager(QObject):
         "clipboard_font_size_options": [15, 16, 17, 18, 19, 20],  # 字体大小可选项
         "clipboard_image_size": "small",       # 图片条目高度档位（small/medium/large）
         "clipboard_line_height_padding": 8,   # 多行显示时的额外行高边距（像素，用于确保完整显示）
-        "clipboard_display_lines": 1,          # 剪贴板项最大显示行数
         "clipboard_theme": "light",            # 剪贴板窗口主题（light/dark/blue/green/pink/purple/orange）
         "clipboard_group_bar_position": "top", # 分组栏位置（right/left/top）
         "clipboard_preserve_search": False,    # 关闭时保留搜索栏内容
@@ -413,12 +410,10 @@ class ToolSettingsManager(QObject):
         "magnifier_zoom_min": 2.0,             # 放大镜最小倍率
         "magnifier_zoom_max": 10.0,            # 放大镜最大倍率
         "pin_auto_toolbar": False,             # 钉图自动显示工具栏
-        "pin_default_opacity": 1.0,            # 钉图默认透明度（0.1-1.0）
 
         # ==================== 8. 开发者 ====================
         # 长截图
         "long_stitch_engine": "hash_rust",     # 长截图引擎（hash_rust）
-        "long_stitch_debug": False,            # 长截图调试模式
         "scroll_cooldown": 0.15,               # 滚动后等待时间（秒，0.05-1.0）
         "long_stitch_ignore_top_pixels": 0,    # 后续截图顶部忽略像素（0-300）
 
@@ -1048,13 +1043,6 @@ class ToolSettingsManager(QObject):
         """设置复制时是否同时写入文件路径（CF_HDROP）"""
         self.qsettings.setValue("app/clipboard_file_reference_enabled", value)
 
-    def get_screenshot_quality(self) -> int:
-        """获取截图保存质量 (1-100, PNG/BMP时忽略)"""
-        return self.qsettings.value("app/screenshot_quality", self.APP_DEFAULT_SETTINGS["screenshot_quality"], type=int)
-
-    def set_screenshot_quality(self, value: int):
-        """设置截图保存质量 (1-100)"""
-        self.qsettings.setValue("app/screenshot_quality", max(1, min(100, int(value))))
 
     def get_show_main_window(self) -> bool:
         """获取主窗口显示设置"""
@@ -1094,14 +1082,7 @@ class ToolSettingsManager(QObject):
         """设置钉图自动显示工具栏"""
         self.qsettings.setValue("pin/auto_toolbar", enabled)
     
-    def get_pin_default_opacity(self) -> float:
-        """获取钉图默认透明度 (0.0-1.0)"""
-        return self.qsettings.value("pin/default_opacity", self.APP_DEFAULT_SETTINGS["pin_default_opacity"], type=float)
-    
-    def set_pin_default_opacity(self, opacity: float):
-        """设置钉图默认透明度"""
-        self.qsettings.setValue("pin/default_opacity", max(0.1, min(1.0, opacity)))
-    
+
     def set_ocr_grayscale_enabled(self, value: bool):
         """设置 OCR 灰度化"""
         self.qsettings.setValue("app/ocr_grayscale", value)
@@ -1188,21 +1169,47 @@ class ToolSettingsManager(QObject):
             return config
         return {}
     
+    # DeepL 的存储前缀历史上是 app/，与其他 provider 的
+    # translation/providers/<id>/ 不一致；读取时做一次性迁移。
+    _DEEPL_KEY_PATH = "translation/providers/deepl/api_key"
+    _DEEPL_PRO_PATH = "translation/providers/deepl/use_pro"
+    _DEEPL_LEGACY_PREFIX = "app/deepl_"
+
+    def _migrate_deepl_legacy_value(self, new_path: str, field: str):
+        """旧前缀下有值而新前缀为空时，把旧值搬过来并清掉旧键。"""
+        legacy = self.qsettings.value(
+            self._DEEPL_LEGACY_PREFIX + field, "", type=str
+        )
+        if legacy:
+            self.qsettings.setValue(new_path, legacy)
+            self.qsettings.remove(self._DEEPL_LEGACY_PREFIX + field)
+            return legacy
+        return ""
+
     def get_deepl_api_key(self) -> str:
         """获取 DeepL API 密钥"""
-        return self.qsettings.value("app/deepl_api_key", self.APP_DEFAULT_SETTINGS["deepl_api_key"], type=str)
-    
+        value = self.qsettings.value(self._DEEPL_KEY_PATH, "", type=str)
+        if not value:
+            value = self._migrate_deepl_legacy_value(self._DEEPL_KEY_PATH, "api_key")
+        return value or self.APP_DEFAULT_SETTINGS["deepl_api_key"]
+
     def set_deepl_api_key(self, value: str):
         """设置 DeepL API 密钥"""
-        self.qsettings.setValue("app/deepl_api_key", value)
-    
+        self.qsettings.setValue(self._DEEPL_KEY_PATH, value)
+        self.qsettings.remove(self._DEEPL_LEGACY_PREFIX + "api_key")
+
     def get_deepl_use_pro(self) -> bool:
         """获取是否使用 DeepL Pro API"""
-        return self.qsettings.value("app/deepl_use_pro", self.APP_DEFAULT_SETTINGS["deepl_use_pro"], type=bool)
-    
+        value = self.qsettings.value(self._DEEPL_PRO_PATH, "", type=str)
+        if value == "":
+            legacy = self._migrate_deepl_legacy_value(self._DEEPL_PRO_PATH, "use_pro")
+            return legacy.lower() in ("true", "1")
+        return value.lower() in ("true", "1")
+
     def set_deepl_use_pro(self, value: bool):
         """设置是否使用 DeepL Pro API"""
-        self.qsettings.setValue("app/deepl_use_pro", value)
+        self.qsettings.setValue(self._DEEPL_PRO_PATH, bool(value))
+        self.qsettings.remove(self._DEEPL_LEGACY_PREFIX + "use_pro")
 
     def get_amazon_translate_region(self) -> str:
         return self.qsettings.value(
@@ -1553,23 +1560,8 @@ class ToolSettingsManager(QObject):
         """设置剪贴板数据库自定义路径"""
         self.qsettings.setValue("clipboard/db_path", value or "")
     
-    def get_clipboard_auto_cleanup(self) -> bool:
-        """获取是否自动清理超出限制的记录"""
-        return self.qsettings.value("clipboard/auto_cleanup", self.APP_DEFAULT_SETTINGS["clipboard_auto_cleanup"], type=bool)
-    
-    def set_clipboard_auto_cleanup(self, value: bool):
-        """设置是否自动清理超出限制的记录"""
-        self.qsettings.setValue("clipboard/auto_cleanup", value)
-    
-    def get_clipboard_display_lines(self) -> int:
-        """
-        [已废弃 2026-01-17] 获取剪贴板项显示行数（1/2）
-        
-        此方法已废弃，请使用 get_clipboard_font_size() 代替
-        为了向后兼容，此方法返回默认值 1
-        """
-        return 1  # 向后兼容：返回默认值
-    
+
+
     def set_clipboard_display_lines(self, value: int):
         """
         [已废弃 2026-01-17] 设置剪贴板项显示行数（1/2）

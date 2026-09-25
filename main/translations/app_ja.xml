@@ -4355,4 +4355,52 @@ SOFTWARE.</translation></message>
         <translation>保存するとプレーンテキストになります</translation>
     </message>
 </context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Startup Speed</source>
+        <translation>起動速度</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Fast skips all preloading for quickest launch; Custom keeps the developer-page toggles.</source>
+        <translation>「高速」はすべてのプリロードをスキップして最速起動。「カスタム」は開発者ページの個別設定を優先します。</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Standard</source>
+        <translation>標準</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Fast launch</source>
+        <translation>高速起動</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Custom</source>
+        <translation>カスタム</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Follow screenshot accent</source>
+        <translation>スクリーンショットのテーマカラーに従う</translation>
+    </message>
+</context>
+
+
+
+
+
+
 </TS>

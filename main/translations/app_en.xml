@@ -4104,4 +4104,52 @@ SOFTWARE.</translation></message>
         <translation>Formatting will be removed</translation>
     </message>
 </context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Startup Speed</source>
+        <translation>Startup Speed</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Fast skips all preloading for quickest launch; Custom keeps the developer-page toggles.</source>
+        <translation>Fast skips all preloading for quickest launch; Custom keeps the developer-page toggles.</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Standard</source>
+        <translation>Standard</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Fast launch</source>
+        <translation>Fast launch</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Custom</source>
+        <translation>Custom</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Follow screenshot accent</source>
+        <translation>Follow screenshot accent</translation>
+    </message>
+</context>
+
+
+
+
+
+
 </TS>

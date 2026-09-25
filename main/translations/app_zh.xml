@@ -4384,4 +4384,52 @@ SOFTWARE.</translation></message>
         <translation>保存后将变为纯文本</translation>
     </message>
 </context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Startup Speed</source>
+        <translation>启动速度</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Fast skips all preloading for quickest launch; Custom keeps the developer-page toggles.</source>
+        <translation>「极速」跳过全部预加载以最快启动；「自定义」沿用开发者页的单独开关。</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Standard</source>
+        <translation>标准</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Fast launch</source>
+        <translation>极速启动</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Custom</source>
+        <translation>自定义</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Follow screenshot accent</source>
+        <translation>跟随截图主题色</translation>
+    </message>
+</context>
+
+
+
+
+
+
 </TS>

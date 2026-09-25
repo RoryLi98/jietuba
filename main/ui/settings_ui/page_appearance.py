@@ -26,6 +26,12 @@ def _update_color_btn(btn, color: QColor):
 def _apply_clip_theme_btn_style(btn, name: str):
     """把主题按钮填成该主题的双色块。建页与 refresh_settings 共用，不再各抄一份。"""
     from clipboard.ui.theme.themes import PRESET_THEME_SWATCHES
+    if name == "follow":
+        from core.theme import get_theme
+        accent = get_theme().theme_color_hex
+        btn.setFill(f"qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+                    f" stop:0 {accent}, stop:1 {accent})")
+        return
     swatch = PRESET_THEME_SWATCHES.get(name)
     if swatch is None:
         return
@@ -311,7 +317,18 @@ def _build_clipboard_section(dialog, grp: SettingCardGroup):
             _apply_clip_theme_btn_style(dialog._clip_theme_btn, name)
             theme_mgr.set_theme(name)
             _update_btns(name)
+            follow_action.setChecked(name == "follow")
             menu.close()
+
+        # 跟随截图主题色：剪贴板强调色与截图主题色保持同一来源
+        from clipboard.ui.theme.themes import FOLLOW_THEME_NAME
+        follow_action = menu.addAction(
+            dialog.tr("Follow screenshot accent")
+        )
+        follow_action.setCheckable(True)
+        follow_action.setChecked(dialog._clip_theme_name == FOLLOW_THEME_NAME)
+        follow_action.triggered.connect(lambda: _on_click(FOLLOW_THEME_NAME))
+        menu.addSeparator()
 
         for tname, (accent, bg) in PRESET_THEME_SWATCHES.items():
             wa = QWidgetAction(menu)
@@ -327,6 +344,7 @@ def _build_clipboard_section(dialog, grp: SettingCardGroup):
         # 扫描范围内，弹出前单独扫一遍。
         configure_dialog_controls(menu)
         _update_btns(dialog._clip_theme_name)
+        follow_action.setChecked(dialog._clip_theme_name == "follow")
         pos = dialog._clip_theme_btn.mapToGlobal(
             dialog._clip_theme_btn.rect().bottomLeft()
         )

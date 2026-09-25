@@ -815,6 +815,10 @@ class SettingsDialog(FrostedFramelessDialog):
             self.autostart_toggle.setChecked(defaults["autostart_enabled"])
         if hasattr(self, 'show_main_window_toggle'):
             self.show_main_window_toggle.setChecked(defaults["show_main_window"])
+        if hasattr(self, 'preload_preset_combo'):
+            idx = self.preload_preset_combo.findData("standard")
+            if idx >= 0:
+                self.preload_preset_combo.setCurrentIndex(idx)
 
     def _reset_translation_page(self):
         defaults = self.config_manager.APP_DEFAULT_SETTINGS
@@ -1115,7 +1119,8 @@ class SettingsDialog(FrostedFramelessDialog):
         if hasattr(self, 'ignore_top_pixels_spinbox'):
             self.config_manager.set_long_stitch_ignore_top_pixels(self.ignore_top_pixels_spinbox.value())
 
-        # 9. 预加载开关（重启生效）
+        # 9. 预加载开关（重启生效）。开发者页开关先落盘，
+        # 随后非「自定义」的预设档位整体覆盖它们。
         if hasattr(self, 'preload_screenshot_toggle'):
             self.config_manager.set_app_setting("preload_screenshot", self.preload_screenshot_toggle.isChecked())
         if hasattr(self, 'preload_toolbar_toggle'):
@@ -1126,6 +1131,14 @@ class SettingsDialog(FrostedFramelessDialog):
             self.config_manager.set_app_setting("preload_settings", self.preload_settings_toggle.isChecked())
         if hasattr(self, 'preload_clipboard_toggle'):
             self.config_manager.set_app_setting("preload_clipboard", self.preload_clipboard_toggle.isChecked())
+
+        # 预设档位最后落盘：「自定义」不动开关，尊重开发者页的单独调整。
+        if hasattr(self, 'preload_preset_combo'):
+            preset_id = self.preload_preset_combo.currentData()
+            preset_values = getattr(self, '_preload_presets', {}).get(preset_id)
+            if preset_values is not None:
+                for key, value in preset_values.items():
+                    self.config_manager.set_app_setting(key, value)
 
         # 10. 截图信息面板行为
         if hasattr(self, 'info_hide_on_drag_toggle'):
@@ -1323,7 +1336,7 @@ class SettingsDialog(FrostedFramelessDialog):
                       '_ui_theme_combo', '_ui_scale_combo', '_dialog_scale_combo',
                       '_selection_border_combo', '_selection_handle_combo',
                       '_selection_handle_size_combo', 'smart_mode_combo',
-                      'clipboard_scan_interval_combo'):
+                      'clipboard_scan_interval_combo', 'preload_preset_combo'):
             w = getattr(self, attr, None)
             if w is not None:
                 snap[attr] = w.currentIndex()
@@ -1641,6 +1654,21 @@ class SettingsDialog(FrostedFramelessDialog):
             self.preload_settings_toggle.setChecked(self.config_manager.get_app_setting("preload_settings"))
         if hasattr(self, 'preload_clipboard_toggle'):
             self.preload_clipboard_toggle.setChecked(self.config_manager.get_app_setting("preload_clipboard"))
+
+        # 启动速度预设：按五个开关的实际组合回推档位
+        if hasattr(self, 'preload_preset_combo'):
+            values = {
+                key: bool(self.config_manager.get_app_setting(key, True))
+                for key in getattr(self, '_preload_preset_keys', ())
+            }
+            preset_id = "custom"
+            for pid, preset_values in getattr(self, '_preload_presets', {}).items():
+                if preset_values is not None and preset_values == values:
+                    preset_id = pid
+                    break
+            idx = self.preload_preset_combo.findData(preset_id)
+            if idx >= 0:
+                self.preload_preset_combo.setCurrentIndex(idx)
 
         # 截图信息面板行为
         if hasattr(self, 'info_hide_on_drag_toggle'):

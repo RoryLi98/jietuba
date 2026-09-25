@@ -47,6 +47,64 @@ def create_misc_page(dialog) -> QWidget:
     dialog.show_main_window_toggle = show_card
     grp_startup.addSettingCard(show_card)
 
+    # 启动速度预设：一键切换五个 preload_* 开关
+    preload_card = FSettingCard(
+        FluentIcon.STOP_WATCH,
+        dialog.tr("Startup Speed"),
+        dialog.tr("Fast skips all preloading for quickest launch; Custom keeps the developer-page toggles."),
+        parent=grp_startup,
+    )
+    dialog.preload_preset_combo = ComboBox(preload_card)
+    _PRELOAD_KEYS = (
+        "preload_screenshot", "preload_toolbar", "preload_ocr",
+        "preload_settings", "preload_clipboard",
+    )
+    _PRESETS = (
+        ("standard", dialog.tr("Standard"), {key: True for key in _PRELOAD_KEYS}),
+        ("fast", dialog.tr("Fast launch"), {key: False for key in _PRELOAD_KEYS}),
+        ("custom", dialog.tr("Custom"), None),
+    )
+    for preset_id, label, _values in _PRESETS:
+        dialog.preload_preset_combo.addItem(label, userData=preset_id)
+    dialog._preload_preset_keys = _PRELOAD_KEYS
+    dialog._preload_presets = {pid: values for pid, _l, values in _PRESETS}
+
+    def _derive_preset_from_toggles():
+        """根据开发者页五个开关的实际状态回推预设档位。"""
+        values = {
+            key: bool(dialog.config_manager.get_app_setting(key, True))
+            for key in _PRELOAD_KEYS
+        }
+        for preset_id, _label, preset_values in _PRESETS:
+            if preset_values is not None and preset_values == values:
+                dialog.preload_preset_combo.setCurrentIndex(
+                    dialog.preload_preset_combo.findData(preset_id)
+                )
+                return
+        dialog.preload_preset_combo.setCurrentIndex(
+            dialog.preload_preset_combo.findData("custom")
+        )
+
+    _derive_preset_from_toggles()
+    preload_card.addControl(dialog.preload_preset_combo)
+    grp_startup.addSettingCard(preload_card)
+
+    def _sync_toggles_from_preset(index):
+        """选预设时把开发者页五个开关的勾选态一并同步，保持两处显示一致。"""
+        preset_values = dialog._preload_presets.get(
+            dialog.preload_preset_combo.itemData(index)
+        )
+        if preset_values is None:
+            return
+        for key, value in preset_values.items():
+            toggle = getattr(dialog, f"{key}_toggle", None)
+            if toggle is not None:
+                toggle.setChecked(value)
+
+    dialog.preload_preset_combo.currentIndexChanged.connect(
+        _sync_toggles_from_preset
+    )
+
     layout.addWidget(grp_startup)
 
     # ════ 操作 ════

@@ -344,6 +344,12 @@ class ScrollCaptureWindow(QWidget):
         # 去重相关
         self.last_screenshot_hash = None  # 上一张截图的哈希值（用于去重）
         self.duplicate_threshold = 0.95  # 相似度阈值（95%以上认为重复）
+
+        # 到底自动完成：滚动后连续多次截到与上一帧几乎相同的画面，
+        # 说明页面已到边缘无法继续滚动。连续 2 次即自动收尾。
+        self._prev_capture_hash = None
+        self._duplicate_capture_count = 0
+        self._auto_finish_scheduled = False
         
         # 定时器
         self.capture_timer = QTimer(self)  # 截图定时器
@@ -1210,6 +1216,15 @@ class ScrollCaptureWindow(QWidget):
             
             self._last_screenshot = pil_image
             self._screenshot_count = getattr(self, '_screenshot_count', 0) + 1
+
+            # 到底检测：与上一帧的相似度在本帧截取后立即计算（与拼接成功与否无关）
+            current_hash = self._calculate_image_hash(pil_image)
+            prev_hash = self._prev_capture_hash
+            self._prev_capture_hash = current_hash
+            frame_is_duplicate = (
+                prev_hash is not None
+                and self._images_are_similar(prev_hash, current_hash)
+            )
             
             # screenshots 列表只保留计数，不存储实际图像
             if not hasattr(self, '_screenshots_count_only'):
@@ -1309,6 +1324,23 @@ class ScrollCaptureWindow(QWidget):
             else:
                 self.current_scroll_distance = 0
 
+            # 到底自动完成判定：必须已有有效拼接（≥3 帧）且连续 2 帧画面
+            # 不再变化。只差 1 次时不收尾，避免用户一次误滚就直接出图。
+            if self._auto_finish_scheduled:
+                pass
+            elif frame_is_duplicate and len(self.screenshots) >= 3:
+                self._duplicate_capture_count += 1
+                if self._duplicate_capture_count >= 2:
+                    self._auto_finish_scheduled = True
+                    _log_stitch(T("检测到页面已到边缘（连续 2 帧无变化），自动完成拼接"), force=True)
+                    if hasattr(self, 'preview_panel') and self.preview_panel:
+                        self.preview_panel.show_warning(
+                            T("已到达页面边缘，即将自动完成拼接…")
+                        )
+                    QTimer.singleShot(900, self._auto_finish_if_alive)
+            else:
+                self._duplicate_capture_count = 0
+
             self._refresh_preview_panel()
 
         except Exception as e:
@@ -1318,6 +1350,11 @@ class ScrollCaptureWindow(QWidget):
         finally:
             # 截图完成：恢复 UI 窗口可被截图
             self._exclude_overlapping_ui(False)
+
+    def _auto_finish_if_alive(self):
+        """定时器到点后收尾；用户若已手动点过完成则窗口已不在，直接跳过。"""
+        if self._auto_finish_scheduled and self.isVisible():
+            self._on_finish()
     
     @safe_event
     def paintEvent(self, event):

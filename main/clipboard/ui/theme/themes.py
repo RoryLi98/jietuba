@@ -325,6 +325,65 @@ PRESET_THEMES = {
     "orange": THEME_ORANGE,
 }
 
+# ==================== 跟随截图主题色 ====================
+#
+# 强调色此前有三个来源：截图主题色（core/theme）、剪贴板预设主题的
+# accent_primary、界面明暗 tokens（core/ui_theme）。"follow" 主题把前两者
+# 合一：剪贴板的强调色实时派生自截图主题色，背景/文字/边框取自界面明暗
+# tokens。它是动态主题——每次取用都重新构建，主题色或明暗切换后自动刷新。
+
+FOLLOW_THEME_NAME = "follow"
+
+
+def _darken_hex(hex_color: str, factor: float = 0.85) -> str:
+    from PySide6.QtGui import QColor
+    c = QColor(hex_color)
+    return QColor(
+        int(c.red() * factor),
+        int(c.green() * factor),
+        int(c.blue() * factor),
+    ).name()
+
+
+def build_follow_theme() -> Theme:
+    """从截图主题色 + 界面明暗 tokens 派生剪贴板主题（每次调用现算）。"""
+    from PySide6.QtGui import QColor
+
+    from core.theme import get_theme
+    from core.ui_theme import get_ui_theme
+
+    accent = get_theme().theme_color_hex
+    ac = QColor(accent)
+    t = get_ui_theme().tokens
+
+    return Theme(
+        name=FOLLOW_THEME_NAME,
+        display_name="跟随截图主题色",
+        description="强调色与截图主题色保持一致，明暗跟随界面设置",
+        colors=ThemeColors(
+            bg_primary=t.popup_background,
+            bg_secondary=t.surface_hover,
+            bg_tertiary=t.surface_hover,
+            bg_hover=t.surface_hover,
+            bg_selected=accent,
+            bg_selected_highlight=f"rgba({ac.red()}, {ac.green()}, {ac.blue()}, 0.5)",
+            text_primary=t.text,
+            text_secondary=t.text_muted,
+            text_tertiary=t.text_muted,
+            text_disabled=t.text_disabled,
+            text_accent=accent,
+            border_primary=t.border,
+            border_secondary=t.separator,
+            border_accent=accent,
+            border_selected=accent,
+            accent_primary=accent,
+            accent_hover=_darken_hex(accent),
+            drag_drop_border=accent,
+            separator=t.separator,
+            shortcut_key_color=t.text_muted,
+        ),
+    )
+
 # 主题选择器上那枚双色小方块的取色。
 #
 # 它不是从 ThemeColors 里算出来的：blue/green/pink/purple/orange 五个确实等于
@@ -358,6 +417,14 @@ class ThemeManager(QObject):
         self._custom_themes: Dict[str, Theme] = {}
         # 从设置中加载保存的主题
         self._current_theme = self._load_saved_theme()
+        # 界面明暗切换时刷新跟随主题（跟随关闭时是空操作）
+        try:
+            from core.ui_theme import get_ui_theme
+            get_ui_theme().theme_changed.connect(
+                lambda _tokens: self.refresh_follow_theme()
+            )
+        except Exception:
+            pass
     
     def _load_saved_theme(self) -> Theme:
         """从设置中加载保存的主题"""
@@ -365,6 +432,8 @@ class ThemeManager(QObject):
             from settings import get_tool_settings_manager
             config = get_tool_settings_manager()
             saved_theme_name = config.get_clipboard_theme()
+            if saved_theme_name == FOLLOW_THEME_NAME:
+                return build_follow_theme()
             if saved_theme_name in PRESET_THEMES:
                 return PRESET_THEMES[saved_theme_name]
         except Exception as e:
@@ -394,6 +463,13 @@ class ThemeManager(QObject):
         Returns:
             bool: 是否成功
         """
+        # 跟随主题：动态构建
+        if theme_name == FOLLOW_THEME_NAME:
+            self._current_theme = build_follow_theme()
+            self._save_theme(theme_name)
+            self.theme_changed.emit(self._current_theme)
+            return True
+
         # 先从预设主题中查找
         if theme_name in PRESET_THEMES:
             self._current_theme = PRESET_THEMES[theme_name]
@@ -419,14 +495,23 @@ class ThemeManager(QObject):
         self.opacity_changed.emit(percent)
 
     def get_all_themes(self) -> Dict[str, Theme]:
-        """获取所有可用主题"""
+        """获取所有可用主题（follow 每次现算，保证取到最新主题色）"""
         all_themes = PRESET_THEMES.copy()
+        all_themes[FOLLOW_THEME_NAME] = build_follow_theme()
         all_themes.update(self._custom_themes)
         return all_themes
-    
+
     def get_preset_themes(self) -> Dict[str, Theme]:
         """获取预设主题"""
-        return PRESET_THEMES.copy()
+        presets = PRESET_THEMES.copy()
+        presets[FOLLOW_THEME_NAME] = build_follow_theme()
+        return presets
+
+    def refresh_follow_theme(self):
+        """截图主题色 / 界面明暗变化后，若正在跟随则重建并广播。"""
+        if self._current_theme.name == FOLLOW_THEME_NAME:
+            self._current_theme = build_follow_theme()
+            self.theme_changed.emit(self._current_theme)
     
     def add_custom_theme(self, theme: Theme) -> bool:
         """
