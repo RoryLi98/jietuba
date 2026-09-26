@@ -54,6 +54,7 @@ APP_DEFAULT_SETTINGS = {
     "ocr_upscale_enabled": False,
     "ocr_upscale_factor": 2.0,
     "pin_auto_toolbar": True,
+    "pin_thumbnail_height": 100,
     "translation_provider": "google",
     "deepl_api_key": "",
     "deepl_use_pro": False,
@@ -243,6 +244,8 @@ class MockConfig:
                 return lambda: APP_DEFAULT_SETTINGS.get(key, fallback)
         raise AttributeError(name)
 
+    def get_pin_thumbnail_height(self): return 100
+    def set_pin_thumbnail_height(self, v): pass
     def get_app_setting(self, key, default=None):
         if default is None:
             default = self.APP_DEFAULT_SETTINGS.get(key)

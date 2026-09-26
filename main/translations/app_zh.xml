@@ -4426,6 +4426,22 @@ SOFTWARE.</translation></message>
         <translation>跟随截图主题色</translation>
     </message>
 </context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Thumbnail Height</source>
+        <translation>缩略图高度</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Height of pinned thumbnails; width follows the image aspect ratio.</source>
+        <translation>钉图缩略图按整张图等比缩放，宽度随图片宽高比自动得出。</translation>
+    </message>
+</context>
+
+
 
 
 

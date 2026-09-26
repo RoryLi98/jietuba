@@ -787,6 +787,12 @@ class SettingsDialog(FrostedFramelessDialog):
             self.magnifier_color_formats = color_formats.default_formats()
         if hasattr(self, 'pin_auto_toolbar_toggle'):
             self.pin_auto_toolbar_toggle.setChecked(defaults["pin_auto_toolbar"])
+        if hasattr(self, 'pin_thumbnail_height_combo'):
+            idx = self.pin_thumbnail_height_combo.findData(
+                int(defaults.get("pin_thumbnail_height", 100))
+            )
+            if idx >= 0:
+                self.pin_thumbnail_height_combo.setCurrentIndex(idx)
         if hasattr(self, 'ocr_enable_toggle'):
             self.ocr_enable_toggle.setChecked(defaults["ocr_enabled"])
         if hasattr(self, 'ocr_engine_combo'):
@@ -1060,6 +1066,10 @@ class SettingsDialog(FrostedFramelessDialog):
             self.config_manager.set_show_main_window(self.show_main_window_toggle.isChecked())
         if hasattr(self, 'pin_auto_toolbar_toggle'):
             self.config_manager.set_pin_auto_toolbar(self.pin_auto_toolbar_toggle.isChecked())
+        if hasattr(self, 'pin_thumbnail_height_combo'):
+            self.config_manager.set_pin_thumbnail_height(
+                int(self.pin_thumbnail_height_combo.currentData())
+            )
         self._save_magnifier_color_formats()
 
         # 界面语言
@@ -1336,7 +1346,8 @@ class SettingsDialog(FrostedFramelessDialog):
                       '_ui_theme_combo', '_ui_scale_combo', '_dialog_scale_combo',
                       '_selection_border_combo', '_selection_handle_combo',
                       '_selection_handle_size_combo', 'smart_mode_combo',
-                      'clipboard_scan_interval_combo', 'preload_preset_combo'):
+                      'clipboard_scan_interval_combo', 'preload_preset_combo',
+                      'pin_thumbnail_height_combo'):
             w = getattr(self, attr, None)
             if w is not None:
                 snap[attr] = w.currentIndex()
@@ -1638,6 +1649,17 @@ class SettingsDialog(FrostedFramelessDialog):
             self.show_main_window_toggle.setChecked(self.config_manager.get_show_main_window())
         if hasattr(self, 'pin_auto_toolbar_toggle'):
             self.pin_auto_toolbar_toggle.setChecked(self.config_manager.get_pin_auto_toolbar())
+
+        if hasattr(self, 'pin_thumbnail_height_combo'):
+            _thumb_idx = self.pin_thumbnail_height_combo.findData(
+                int(self.config_manager.get_pin_thumbnail_height())
+            )
+            if _thumb_idx < 0 and self.pin_thumbnail_height_combo.count() > 0:
+                _cur = int(self.config_manager.get_pin_thumbnail_height())
+                self.pin_thumbnail_height_combo.addItem(f"{_cur} px", userData=_cur)
+                _thumb_idx = self.pin_thumbnail_height_combo.count() - 1
+            if _thumb_idx >= 0:
+                self.pin_thumbnail_height_combo.setCurrentIndex(_thumb_idx)
         if hasattr(self, 'language_combo'):
             index = self.language_combo.findData(self.config_manager.get_app_setting("language", "ja"))
             if index >= 0:

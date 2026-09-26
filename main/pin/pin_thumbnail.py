@@ -18,13 +18,33 @@ class PinThumbnailMode:
     PinWindow 只需调用 toggle() 并在 resizeEvent 中调用 update_view()。
     """
 
+    DEFAULT_THUMBNAIL_HEIGHT = 100
+
     def __init__(self, pin_window):
         self._win = pin_window
         self._active = False
-        self._size = 100               # 缩略图尺寸（像素）
+        self._size = self._load_height()   # 缩略图高度（像素），宽度按图片宽高比等比得出
         self._prev_geometry = None      # 进入前的窗口几何
         self._scene_center = None       # 缩略图显示的场景中心点
         self._region_rect = None
+
+    def _load_height(self) -> int:
+        """从设置读取缩略图高度；读不到就用默认值。"""
+        try:
+            config = getattr(self._win, "config_manager", None)
+            if config is None:
+                from settings import get_tool_settings_manager
+                config = get_tool_settings_manager()
+            return int(config.get_pin_thumbnail_height())
+        except Exception:
+            return self.DEFAULT_THUMBNAIL_HEIGHT
+
+    def compute_thumbnail_size(self, orig_width: int, orig_height: int) -> tuple:
+        """整张图等比缩放到高度 _size，返回 (宽, 高)。"""
+        if orig_height <= 0 or orig_width <= 0:
+            return (self._size, self._size)
+        width = max(3, round(orig_width / orig_height * self._size))
+        return (width, self._size)
 
     # ------------------------------------------------------------------
     # 公开属性
@@ -66,24 +86,23 @@ class PinThumbnailMode:
         # 保存当前窗口几何
         self._prev_geometry = win.geometry()
 
-        # 获取鼠标全局位置
+        # 获取鼠标全局位置；缩略图以它为中心摆放
         cursor_pos = QCursor.pos()
         window_rect = win.geometry()
-
-        if window_rect.contains(cursor_pos):
-            local_pos = win.mapFromGlobal(cursor_pos)
-            scene_x = local_pos.x() / window_rect.width() * win._orig_size.width()
-            scene_y = local_pos.y() / window_rect.height() * win._orig_size.height()
-        else:
-            scene_x = win._orig_size.width() / 2
-            scene_y = win._orig_size.height() / 2
+        if not window_rect.contains(cursor_pos):
             cursor_pos = window_rect.center()
 
-        self._scene_center = QPointF(scene_x, scene_y)
+        # 整张图等比缩放：缩略图中心显示的就是图片中心。
+        # 还原时以「缩略图当前位置」为锚放大，场景中心取图片中心才能对得上。
+        self._scene_center = QPointF(
+            win._orig_size.width() / 2, win._orig_size.height() / 2
+        )
 
-        size = self._size
-        new_x = cursor_pos.x() - size // 2
-        new_y = cursor_pos.y() - size // 2
+        thumb_w, thumb_h = self.compute_thumbnail_size(
+            win._orig_size.width(), win._orig_size.height()
+        )
+        new_x = cursor_pos.x() - thumb_w // 2
+        new_y = cursor_pos.y() - thumb_h // 2
 
         self._region_rect = QRectF(region) if region is not None else None
         if self._region_rect is not None:
@@ -92,7 +111,7 @@ class PinThumbnailMode:
             self._scene_center = self._region_rect.center()
             win.setGeometry(origin.x(), origin.y(), max(3, local_rect.width()), max(3, local_rect.height()))
         else:
-            win.setGeometry(new_x, new_y, size, size)
+            win.setGeometry(new_x, new_y, thumb_w, thumb_h)
 
         # 更新视图
         self.update_view()
@@ -119,7 +138,11 @@ class PinThumbnailMode:
             win.toolbar.hide()
 
         self._active = True
-        log_debug(T("进入缩略图模式，场景中心: ({scene_x:.1f}, {scene_y:.1f})", scene_x=scene_x, scene_y=scene_y), "PinWindow")
+        log_debug(
+            T("进入缩略图模式: {w}x{h}, 高度 {size}",
+              w=thumb_w, h=thumb_h, size=self._size),
+            "PinWindow",
+        )
 
     # ------------------------------------------------------------------
     # 退出缩略图模式
@@ -176,18 +199,10 @@ class PinThumbnailMode:
             win.view.fitInView(self._region_rect, Qt.AspectRatioMode.KeepAspectRatio)
             return
 
-        half = self._size / 2
-        scene_left = self._scene_center.x() - half
-        scene_top = self._scene_center.y() - half
-
-        max_left = max(0, win._orig_size.width() - self._size)
-        max_top = max(0, win._orig_size.height() - self._size)
-        scene_left = max(0, min(scene_left, max_left))
-        scene_top = max(0, min(scene_top, max_top))
-
-        # 更新场景中心（可能被限制了）
-        self._scene_center = QPointF(scene_left + half, scene_top + half)
-
+        # 整张图等比缩放适配缩略图窗口。窗口宽高比与图片一致，
+        # fitInView 恰好铺满，不会留边也不会裁切。
         win.view.resetTransform()
-        view_rect = QRectF(scene_left, scene_top, self._size, self._size)
-        win.view.fitInView(view_rect, Qt.AspectRatioMode.KeepAspectRatio)
+        scene_rect = QRectF(
+            0, 0, win._orig_size.width(), win._orig_size.height()
+        )
+        win.view.fitInView(scene_rect, Qt.AspectRatioMode.KeepAspectRatio)

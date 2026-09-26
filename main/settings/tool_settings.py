@@ -410,6 +410,7 @@ class ToolSettingsManager(QObject):
         "magnifier_zoom_min": 2.0,             # 放大镜最小倍率
         "magnifier_zoom_max": 10.0,            # 放大镜最大倍率
         "pin_auto_toolbar": False,             # 钉图自动显示工具栏
+        "pin_thumbnail_height": 100,           # 钉图缩略图高度（像素，40-400，宽度等比）
 
         # ==================== 8. 开发者 ====================
         # 长截图
@@ -1081,6 +1082,20 @@ class ToolSettingsManager(QObject):
     def set_pin_auto_toolbar(self, enabled: bool):
         """设置钉图自动显示工具栏"""
         self.qsettings.setValue("pin/auto_toolbar", enabled)
+
+    def get_pin_thumbnail_height(self) -> int:
+        """钉图缩略图高度（像素）"""
+        return self.qsettings.value(
+            "pin/thumbnail_height",
+            self.APP_DEFAULT_SETTINGS["pin_thumbnail_height"],
+            type=int,
+        )
+
+    def set_pin_thumbnail_height(self, height: int):
+        """设置钉图缩略图高度（40-400）"""
+        self.qsettings.setValue(
+            "pin/thumbnail_height", max(40, min(400, int(height)))
+        )
     
 
     def set_ocr_grayscale_enabled(self, value: bool):

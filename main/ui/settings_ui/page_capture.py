@@ -201,6 +201,27 @@ def create_capture_page(dialog) -> QWidget:
     dialog.pin_auto_toolbar_toggle = pin_toolbar_card
     grp_pin.addSettingCard(pin_toolbar_card)
 
+    # 缩略图高度：钉图缩略图按整张图等比缩放，此处只调目标高度
+    thumb_card = FSettingCard(
+        FluentIcon.LAYOUT,
+        dialog.tr("Thumbnail Height"),
+        dialog.tr("Height of pinned thumbnails; width follows the image aspect ratio."),
+        parent=grp_pin,
+    )
+    dialog.pin_thumbnail_height_combo = ComboBox(thumb_card)
+    _THUMB_HEIGHT_OPTIONS = (60, 80, 100, 120, 150, 200, 300)
+    for option in _THUMB_HEIGHT_OPTIONS:
+        dialog.pin_thumbnail_height_combo.addItem(f"{option} px", userData=option)
+    _current_height = dialog.config_manager.get_pin_thumbnail_height()
+    _thumb_idx = dialog.pin_thumbnail_height_combo.findData(_current_height)
+    if _thumb_idx < 0:
+        # 存的是非预设值（如手改注册表），插一个准选项保证回显准确
+        dialog.pin_thumbnail_height_combo.addItem(f"{_current_height} px", userData=int(_current_height))
+        _thumb_idx = dialog.pin_thumbnail_height_combo.count() - 1
+    dialog.pin_thumbnail_height_combo.setCurrentIndex(_thumb_idx)
+    thumb_card.addControl(dialog.pin_thumbnail_height_combo)
+    grp_pin.addSettingCard(thumb_card)
+
     # OCR 可用性检测：走 ocr 模块的官方多引擎检测（含 ppocr_rust / windows_media_ocr），
     # 而不是只看 windows_media_ocr —— 否则装了 ppocr_rust 也会误报“无 OCR 版本”。
     try:

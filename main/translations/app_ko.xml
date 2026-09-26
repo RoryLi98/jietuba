@@ -4356,6 +4356,22 @@ SOFTWARE.</translation></message>
         <translation>스크린샷 테마 색상 따르기</translation>
     </message>
 </context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Thumbnail Height</source>
+        <translation>썸네일 높이</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Height of pinned thumbnails; width follows the image aspect ratio.</source>
+        <translation>고정된 썸네일의 높이입니다. 너비는 이미지 비율을 따릅니다.</translation>
+    </message>
+</context>
+
+
 
 
 

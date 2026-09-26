@@ -4397,6 +4397,22 @@ SOFTWARE.</translation></message>
         <translation>スクリーンショットのテーマカラーに従う</translation>
     </message>
 </context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Thumbnail Height</source>
+        <translation>サムネイルの高さ</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Height of pinned thumbnails; width follows the image aspect ratio.</source>
+        <translation>ピン留めサムネイルの高さ。幅は画像のアスペクト比に従います。</translation>
+    </message>
+</context>
+
+
 
 
 

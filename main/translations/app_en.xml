@@ -4146,6 +4146,22 @@ SOFTWARE.</translation></message>
         <translation>Follow screenshot accent</translation>
     </message>
 </context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Thumbnail Height</source>
+        <translation>Thumbnail Height</translation>
+    </message>
+</context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Height of pinned thumbnails; width follows the image aspect ratio.</source>
+        <translation>Height of pinned thumbnails; width follows the image aspect ratio.</translation>
+    </message>
+</context>
+
+
 
 
 
