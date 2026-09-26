@@ -13,6 +13,7 @@ import pytest
 from PySide6.QtWidgets import QApplication, QGraphicsScene
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QColor
+from canvas.items.drawing_items import NumberItem
 
 
 @pytest.fixture(scope="module")
@@ -222,3 +223,41 @@ class TestEdgeCases:
         scene.addItem(item)
         result = _nt().get_next_after_number_edit(scene, item, 0, 0, current_next=1)
         assert result == 2
+
+
+class TestNumberFontDpi:
+    """数字字号用像素而非点尺寸：点尺寸会被系统 DPI 再放大一次，
+    150% 显示缩放下数字会撑出圆圈、圆环横穿数字。"""
+
+    def _font(self, number=30, radius=68):
+        from PySide6.QtGui import QColor
+        from PySide6.QtCore import QPointF
+        item = NumberItem(number, QPointF(0, 0), radius, QColor("#111111"), "hollow_bg")
+        return item, item._number_font()
+
+    def test_font_uses_pixel_size(self, qapp):
+        _item, font = self._font()
+        assert font.pixelSize() > 0
+        assert font.pointSize() == -1  # 未使用点尺寸
+
+    def test_font_scales_with_radius(self, qapp):
+        small_item, small_font = self._font(radius=30)
+        large_item, large_font = self._font(radius=100)
+        assert large_font.pixelSize() > small_font.pixelSize()
+
+    def test_two_digit_number_fits_inside_the_circle(self, qapp):
+        from PySide6.QtGui import QFontMetricsF
+        item, font = self._font(number=30, radius=68)
+        advance = QFontMetricsF(font).horizontalAdvance("30")
+        assert advance <= item.radius * 2
+
+    def test_four_digit_number_shrinks_to_fit(self, qapp):
+        from PySide6.QtGui import QFontMetricsF
+        item, font = self._font(number=1234, radius=68)
+        advance = QFontMetricsF(font).horizontalAdvance("1234")
+        assert advance <= item.radius * 2
+        assert font.pixelSize() >= NumberItem.MIN_FONT_SIZE
+
+    def test_single_digit_uses_full_scale(self, qapp):
+        item, font = self._font(number=7, radius=68)
+        assert font.pixelSize() == int(68 * NumberItem.FONT_SCALE)
