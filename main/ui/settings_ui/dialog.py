@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 from ui.dialogs import show_info_dialog, show_warning_dialog
-from PySide6.QtGui import QColor, QFont, QIcon
+from PySide6.QtGui import QColor, QFont, QIcon, QGuiApplication
 
 from ui.fluent_lite import (
     NavigationInterface, NavigationItemPosition,
@@ -99,7 +99,17 @@ class SettingsDialog(FrostedFramelessDialog):
         self._setup_titlebar()
 
         self.setWindowTitle("jietuba")
-        self.resize(dialog_scaled(1050), dialog_scaled(750))
+        # 缩放后不得超出屏幕可用区域：窗口缩放 150% 时基准 750 高会变成
+        # 1125，超过 1080p 屏幕的可用高度，底部按钮（应用/取消）在屏幕外
+        # 够不着，整个设置窗口等于废掉。钳到可用区域的 92%。
+        _screen = QGuiApplication.primaryScreen()
+        _avail = _screen.availableGeometry() if _screen else None
+        _w = dialog_scaled(1050)
+        _h = dialog_scaled(750)
+        if _avail is not None:
+            _w = min(_w, int(_avail.width() * 0.92))
+            _h = min(_h, int(_avail.height() * 0.92))
+        self.resize(_w, _h)
         self.setFont(QFont(DEFAULT_FONT_FAMILY, dialog_scaled(11)))
         self.setObjectName("SettingsDialog")
 

@@ -427,8 +427,19 @@ class TranslationDialog(FramelessWindow):
 
         self.setObjectName("dashboardWindow")
         self.setWindowTitle("jietuba")
-        self.setMinimumSize(dialog_scaled(self.MINIMUM_WIDTH), dialog_scaled(self.MINIMUM_HEIGHT))
-        self.resize(dialog_scaled(self.DEFAULT_WIDTH), dialog_scaled(self.DEFAULT_HEIGHT))
+        # 与设置窗口同款保护：缩放后的尺寸（含最小尺寸）不得超出屏幕可用区域。
+        # 最小尺寸也要钳：150% 时 600 基准高会变成 900，小屏上比屏幕还高。
+        from PySide6.QtGui import QGuiApplication
+        _screen = QGuiApplication.primaryScreen()
+        _avail = _screen.availableGeometry() if _screen else None
+        _min_w, _min_h = dialog_scaled(self.MINIMUM_WIDTH), dialog_scaled(self.MINIMUM_HEIGHT)
+        _w, _h = dialog_scaled(self.DEFAULT_WIDTH), dialog_scaled(self.DEFAULT_HEIGHT)
+        if _avail is not None:
+            _limit_w, _limit_h = int(_avail.width() * 0.92), int(_avail.height() * 0.92)
+            _min_w, _min_h = min(_min_w, _limit_w), min(_min_h, _limit_h)
+            _w, _h = min(_w, _limit_w), min(_h, _limit_h)
+        self.setMinimumSize(_min_w, _min_h)
+        self.resize(_w, _h)
         self.setFont(QFont("Microsoft YaHei UI", dialog_scaled(10)))
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -461,11 +472,17 @@ class TranslationDialog(FramelessWindow):
 
     @classmethod
     def initial_size_for_available_geometry(cls, available_geometry) -> tuple[int, int]:
-        """Return the initial size, reduced to the screen when possible."""
-        minimum_width = dialog_scaled(cls.MINIMUM_WIDTH)
-        minimum_height = dialog_scaled(cls.MINIMUM_HEIGHT)
-        default_width = dialog_scaled(cls.DEFAULT_WIDTH)
-        default_height = dialog_scaled(cls.DEFAULT_HEIGHT)
+        """Return the initial size, reduced to the screen when possible.
+
+        缩放后的最小尺寸也要钳到屏幕内：150% 时 600 基准高的最小值是 900，
+        小屏上比屏幕还高，floor 会让窗口永远超出屏幕。
+        """
+        limit_width = int(available_geometry.width() * 0.92)
+        limit_height = int(available_geometry.height() * 0.92)
+        minimum_width = min(dialog_scaled(cls.MINIMUM_WIDTH), limit_width)
+        minimum_height = min(dialog_scaled(cls.MINIMUM_HEIGHT), limit_height)
+        default_width = min(dialog_scaled(cls.DEFAULT_WIDTH), limit_width)
+        default_height = min(dialog_scaled(cls.DEFAULT_HEIGHT), limit_height)
         width = max(minimum_width, min(default_width, available_geometry.width()))
         height = max(minimum_height, min(default_height, available_geometry.height()))
         return width, height

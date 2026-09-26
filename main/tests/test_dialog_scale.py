@@ -6,6 +6,7 @@ from PySide6.QtCore import QModelIndex
 from PySide6.QtWidgets import QStyleOptionViewItem
 
 from core.ui_scale import dialog_scaled, get_dialog_scale
+from ui.settings_ui.dialog import SettingsDialog
 
 
 @pytest.fixture(autouse=True)
@@ -62,7 +63,11 @@ def test_translation_dashboard_scales_controls_from_their_base_values(qapp):
     dialog = TranslationDialog()
     try:
         margins = dialog.layout().contentsMargins()
-        assert dialog.minimumWidth() == dialog_scaled(TranslationDialog.MINIMUM_WIDTH)
+        from PySide6.QtGui import QGuiApplication as _QGui
+        _limit = int(_QGui.primaryScreen().availableGeometry().width() * 0.92)
+        assert dialog.minimumWidth() == min(
+            dialog_scaled(TranslationDialog.MINIMUM_WIDTH), _limit
+        )
         assert isinstance(dialog.dashboard_title_bar, FluentTitleBar)
         assert dialog.dashboard_title_bar.height() == dialog_scaled(32)
         assert dialog.dashboard_title_bar.minBtn.size().width() == dialog_scaled(46)
@@ -367,8 +372,14 @@ def test_settings_dialog_scales_its_own_window_and_shared_cards(qapp):
     get_dialog_scale().set_percent(80)
     small = SettingsDialog()
     try:
-        assert small.width() == dialog_scaled(1050)
-        assert small.height() == dialog_scaled(750)
+        from PySide6.QtGui import QGuiApplication as _QGui
+        _avail = _QGui.primaryScreen().availableGeometry()
+        assert small.width() == min(
+            dialog_scaled(1050), int(_avail.width() * 0.92)
+        )
+        assert small.height() == min(
+            dialog_scaled(750), int(_avail.height() * 0.92)
+        )
         small_card = SettingCard(FluentIcon.INFO, "t")
         try:
             assert small_card.minimumHeight() == dialog_scaled(62)
@@ -381,8 +392,13 @@ def test_settings_dialog_scales_its_own_window_and_shared_cards(qapp):
     get_dialog_scale().set_percent(150)
     large = SettingsDialog()
     try:
-        assert large.width() == dialog_scaled(1050)
-        assert large.width() > small.width()
+        from PySide6.QtGui import QGuiApplication
+        avail = QGuiApplication.primaryScreen().availableGeometry()
+        assert large.width() == min(
+            dialog_scaled(1050), int(avail.width() * 0.92)
+        )
+        # 小屏上两者都可能顶到钳制值，只能保证不小于
+        assert large.width() >= small.width()
         large_card = SettingCard(FluentIcon.INFO, "t")
         try:
             assert large_card.minimumHeight() == dialog_scaled(62)
@@ -734,3 +750,48 @@ def test_manage_dialog_default_size_fits_small_screens():
     assert width == 1160
     assert height == int(728 * 0.92)
     assert fit_manage_dialog_size(800, 500) == (manage_dialog_min_width(), manage_dialog_min_height())
+
+
+class TestScreenBounds:
+    """缩放后的独立窗口不得超出屏幕可用区域。
+
+    回归点：设置窗口基准 1050x750，窗口缩放 150% 时高 1125，
+    超过 1080p 屏幕可用高度，底部 应用/取消 按钮在屏幕外够不着。
+    """
+
+    def test_settings_dialog_fits_screen_at_max_scale(self, qapp):
+        from PySide6.QtGui import QGuiApplication
+        from core.ui_scale import get_dialog_scale
+
+        previous = get_dialog_scale().percent
+        try:
+            get_dialog_scale().set_percent(150)
+            dlg = SettingsDialog()
+            try:
+                avail = QGuiApplication.primaryScreen().availableGeometry()
+                assert dlg.height() <= avail.height(), (
+                    dlg.height(), avail.height())
+                assert dlg.width() <= avail.width(), (
+                    dlg.width(), avail.width())
+            finally:
+                dlg.deleteLater()
+        finally:
+            get_dialog_scale().set_percent(previous)
+
+    def test_translation_dialog_fits_screen_at_max_scale(self, qapp):
+        from PySide6.QtGui import QGuiApplication
+        from core.ui_scale import get_dialog_scale
+        from translation.translation_dialog import TranslationDialog
+
+        previous = get_dialog_scale().percent
+        try:
+            get_dialog_scale().set_percent(150)
+            dlg = TranslationDialog()
+            try:
+                avail = QGuiApplication.primaryScreen().availableGeometry()
+                assert dlg.height() <= avail.height()
+                assert dlg.width() <= avail.width()
+            finally:
+                dlg.deleteLater()
+        finally:
+            get_dialog_scale().set_percent(previous)
