@@ -160,14 +160,15 @@ class TestEnter:
         m.toggle()
         assert m.active is True
 
-    def test_window_shrinks_to_the_thumbnail_size(self, mode, cursor_at):
+    def test_window_shrinks_to_the_proportional_thumbnail_size(self, mode, cursor_at):
+        """整张图等比缩放：800x600 的原图在高度 100 时宽 133。"""
         cursor_at(400, 250)
         win = FakePinWindow()
         m = mode(win)
 
         m.toggle()
 
-        assert win.geometry().size() == QSize(100, 100)
+        assert win.geometry().size() == QSize(133, 100)
 
     def test_thumbnail_is_centred_on_the_cursor(self, mode, cursor_at):
         cursor_at(400, 250)
@@ -176,13 +177,13 @@ class TestEnter:
 
         m.toggle()
 
-        assert win.geometry().center() in (QPoint(400, 250), QPoint(399, 249))
+        # 等比宽度 133 → x = 400 - 66；高度 100 → y = 250 - 50
+        assert win.geometry().center() in (
+            QPoint(400, 250), QPoint(400, 249), QPoint(400, 251),
+        )
 
-    def test_cursor_inside_the_window_picks_that_part_of_the_image(self, mode, cursor_at):
-        """
-        窗口 400x300 显示的是 800x600 的原图，鼠标停在窗口正中，
-        取景中心就应落在原图正中。
-        """
+    def test_scene_center_is_always_the_image_centre(self, mode, cursor_at):
+        """整图视图下缩略图中心显示的就是图片中心，还原锚点据此计算。"""
         win = FakePinWindow(geometry=QRect(200, 100, 400, 300),
                             orig_size=QSize(800, 600))
         cursor_at(200 + 200, 100 + 150)
@@ -193,113 +194,85 @@ class TestEnter:
         assert m._scene_center.x() == pytest.approx(400, abs=1)
         assert m._scene_center.y() == pytest.approx(300, abs=1)
 
-    def test_cursor_outside_the_window_falls_back_to_the_image_centre(self, mode, cursor_at):
+    def test_cursor_position_only_affects_placement_not_the_view(self, mode, cursor_at):
         win = FakePinWindow(geometry=QRect(200, 100, 400, 300),
                             orig_size=QSize(800, 600))
         cursor_at(5000, 5000)
         m = mode(win)
-
         m.toggle()
-
-        assert m._scene_center.x() == pytest.approx(400, abs=1)
-        assert m._scene_center.y() == pytest.approx(300, abs=1)
+        rect = win.view.fitted_rects[-1]
+        # 视图始终覆盖整张图
+        assert rect.left() == pytest.approx(0)
+        assert rect.top() == pytest.approx(0)
+        assert rect.width() == pytest.approx(800)
+        assert rect.height() == pytest.approx(600)
 
     def test_entering_disables_the_ocr_layer(self, mode, cursor_at):
-        """缩到 100px 时 OCR 文字层没有意义，还会挡住鼠标事件"""
-        cursor_at(400, 250)
         win = FakePinWindow()
-        mode(win).toggle()
-
+        cursor_at(400, 250)
+        m = mode(win)
+        m.toggle()
         assert win._ocr_mgr.enabled_calls == [False]
 
     def test_entering_leaves_edit_mode(self, mode, cursor_at):
-        cursor_at(400, 250)
         win = FakePinWindow(editing=True)
-        win.toolbar.current_tool = "pen"
-        mode(win).toggle()
-
+        cursor_at(400, 250)
+        m = mode(win)
+        m.toggle()
         assert win.canvas.deactivated == 1
-        assert win.toolbar.current_tool is None
 
     def test_entering_hides_the_toolbar_and_its_panels(self, mode, cursor_at):
-        cursor_at(400, 250)
         win = FakePinWindow()
-        mode(win).toggle()
-
+        cursor_at(400, 250)
+        m = mode(win)
+        m.toggle()
         assert win.toolbar.hidden == 1
         assert win.toolbar.panels_hidden == 1
 
     def test_entering_hides_the_control_buttons(self, mode, cursor_at):
-        cursor_at(400, 250)
         win = FakePinWindow()
-        mode(win).toggle()
-
+        cursor_at(400, 250)
+        m = mode(win)
+        m.toggle()
         assert win.control_visibility == [False]
 
     def test_entering_works_without_a_toolbar(self, mode, cursor_at):
-        cursor_at(400, 250)
         win = FakePinWindow(toolbar=False)
-        mode(win).toggle()          # 不应抛异常
+        cursor_at(400, 250)
+        m = mode(win)
+        m.toggle()
+        assert m.active is True
 
 
-# ============================================================================
-# 取景范围
-# ============================================================================
-
-class TestViewportClamping:
-    """
-    缩略图显示的是原图上的一个 100x100 方块。
-    这个方块必须完整落在图像内，否则会露出图像外的空白。
-    """
+class TestWholeImageView:
+    """缩略图显示整张图（等比缩放），不再有取景裁剪与夹取。"""
 
     def _enter_at(self, mode, cursor_at, cursor, orig=QSize(800, 600)):
-        win = FakePinWindow(geometry=QRect(200, 100, 400, 300), orig_size=orig)
+        win = FakePinWindow(orig_size=orig)
         cursor_at(*cursor)
         m = mode(win)
         m.toggle()
         return win, m
 
-    def test_viewport_is_inside_the_image_for_a_centre_cursor(self, mode, cursor_at):
+    def test_the_whole_image_is_fitted(self, mode, cursor_at):
         win, _m = self._enter_at(mode, cursor_at, (400, 250))
         rect = win.view.fitted_rects[-1]
-        assert rect.left() >= 0 and rect.top() >= 0
-        assert rect.right() <= 800 and rect.bottom() <= 600
+        assert rect.width() == pytest.approx(800)
+        assert rect.height() == pytest.approx(600)
 
-    def test_cursor_at_the_top_left_clamps_the_viewport_to_the_corner(self, mode, cursor_at):
-        win, _m = self._enter_at(mode, cursor_at, (201, 101))
-        rect = win.view.fitted_rects[-1]
-        assert rect.left() == pytest.approx(0)
-        assert rect.top() == pytest.approx(0)
-
-    def test_cursor_at_the_bottom_right_clamps_the_viewport(self, mode, cursor_at):
-        win, _m = self._enter_at(mode, cursor_at, (599, 399))
-        rect = win.view.fitted_rects[-1]
-        assert rect.right() == pytest.approx(800)
-        assert rect.bottom() == pytest.approx(600)
-
-    def test_viewport_is_square_and_thumbnail_sized(self, mode, cursor_at):
-        win, m = self._enter_at(mode, cursor_at, (400, 250))
-        rect = win.view.fitted_rects[-1]
-        assert rect.width() == m.size
-        assert rect.height() == m.size
-
-    def test_image_smaller_than_the_thumbnail_still_starts_at_the_origin(self, mode, cursor_at):
-        """原图比缩略图还小时，取景框只能从 (0,0) 开始"""
+    def test_small_images_are_fitted_the_same_way(self, mode, cursor_at):
+        """原图比缩略图还小时同样整图显示"""
         win, _m = self._enter_at(mode, cursor_at, (400, 250), orig=QSize(50, 40))
         rect = win.view.fitted_rects[-1]
-        assert rect.left() == pytest.approx(0)
-        assert rect.top() == pytest.approx(0)
+        assert rect.width() == pytest.approx(50)
+        assert rect.height() == pytest.approx(40)
 
-    def test_scene_centre_is_updated_to_the_clamped_position(self, mode, cursor_at):
-        """取景框被夹住后，记录的中心点也要跟着修正，否则退出时会跳位"""
-        _win, m = self._enter_at(mode, cursor_at, (201, 101))
-        assert m._scene_center.x() == pytest.approx(50)
-        assert m._scene_center.y() == pytest.approx(50)
+    def test_scene_centre_is_the_image_centre(self, mode, cursor_at):
+        _win, m = self._enter_at(mode, cursor_at, (201, 101),
+                                 orig=QSize(50, 40))
+        assert m._scene_center.x() == pytest.approx(25)
+        assert m._scene_center.y() == pytest.approx(20)
 
-
-# ============================================================================
-# 退出缩略图模式
-# ============================================================================
 
 class TestExit:
     def test_toggle_twice_returns_to_normal(self, mode, cursor_at):
@@ -356,14 +329,14 @@ class TestExit:
         m._exit()
         assert m.active is False
 
-    def test_the_viewed_point_stays_put_across_a_round_trip(self, mode, cursor_at):
+    def test_round_trip_restores_size_and_anchors_the_image_centre(self, mode, cursor_at):
         """
-        缩起来再放开，原先鼠标指着的画面位置应仍在窗口的同一相对处，
-        否则每次切换缩略图画面都会漂移。
+        缩起来再放开：恢复原始大小，且图片中心落回缩略图中心的位置——
+        整图视图下缩略图中心显示的就是图片中心，锚点语义自洽。
         """
         win = FakePinWindow(geometry=QRect(200, 100, 400, 300),
                             orig_size=QSize(800, 600))
-        cursor_at(200 + 100, 100 + 75)      # 窗口内 1/4 处 → 原图 (200, 150)
+        cursor_at(200 + 100, 100 + 75)
         m = mode(win)
 
         m.toggle()
@@ -371,8 +344,7 @@ class TestExit:
         m.toggle()
 
         restored = win.geometry()
-        # 该点在原图上的相对位置是 (0.25, 0.25)，还原后它应仍落在缩略图中心处
-        expected_x = thumb_centre.x() - 0.25 * restored.width()
-        expected_y = thumb_centre.y() - 0.25 * restored.height()
-        assert restored.x() == pytest.approx(expected_x, abs=2)
-        assert restored.y() == pytest.approx(expected_y, abs=2)
+        assert restored.size() == QSize(400, 300)
+        # 图片中心应落在缩略图中心所在的位置
+        assert restored.center().x() == pytest.approx(thumb_centre.x(), abs=1)
+        assert restored.center().y() == pytest.approx(thumb_centre.y(), abs=1)

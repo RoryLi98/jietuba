@@ -147,6 +147,15 @@ class MainApp(QObject):
         # 初始化独立窗口缩放管理器（设置/剪贴板管理/翻译窗口）
         from core.ui_scale import get_dialog_scale
         get_dialog_scale().init(self.config_manager)
+
+        # 缩放基准重定义的一次性迁移：旧配置下的百分比语义已变
+        # （新 100% = 旧 150%），统一回落到新默认 100%，只执行一次。
+        if not self.config_manager.get_app_setting("scale_rebase_202609_done", False):
+            self.config_manager.set_app_setting("ui_scale_percent", 100)
+            self.config_manager.set_app_setting("dialog_scale_percent", 100)
+            self.config_manager.set_app_setting("scale_rebase_202609_done", True)
+            get_ui_scale().init(self.config_manager)
+            get_dialog_scale().init(self.config_manager)
         
         # 输出DPI信息用于调试
         try:

@@ -28,7 +28,8 @@ def test_dialog_scale_uses_the_same_safe_pixel_rules_as_toolbar_scale():
     assert dialog_scaled(-1) == -1
 
     manager.set_percent(150)
-    assert dialog_scaled(28) == 42
+    # 基准重定义后 150% 因子为 2.25（1.5 × 1.5）
+    assert dialog_scaled(28) == 63
 
 
 def test_no_post_layout_dialog_scaler_is_available():
@@ -197,8 +198,9 @@ def test_only_explicitly_opted_fluent_controls_receive_dialog_metrics(qapp):
     try:
         configure_dialog_control(button)
         configure_dialog_control(combo)
-        assert "font: 600 20px" in button.styleSheet()
-        assert "min-height: 39px" in combo.styleSheet()
+        # 基准重定义后 150% 因子 2.25：13px 字号→29、26px 最小高→58（int 截断）
+        assert "font: 600 29px" in button.styleSheet()
+        assert "min-height: 58px" in combo.styleSheet()
         assert combo.minimumWidth() == dialog_scaled(96)
     finally:
         button.deleteLater()
@@ -285,8 +287,13 @@ def test_manage_dialog_reads_the_window_scale_at_construction_time(qapp):
     get_dialog_scale().set_percent(80)
     small = ManageDialog(_DummyClipboardManager())
     try:
-        assert small.minimumWidth() == manage_dialog_min_width()
-        assert small.minimumHeight() == manage_dialog_min_height()
+        # 最小尺寸也按当前屏幕钳制（与构造期逻辑一致）
+        assert small.minimumWidth() == min(
+            manage_dialog_min_width(), int(screen.width() * 0.92)
+        )
+        assert small.minimumHeight() == min(
+            manage_dialog_min_height(), int(screen.height() * 0.92)
+        )
         assert small.width() == fit_manage_dialog_size(screen.width(), screen.height())[0]
     finally:
         small.hide()
@@ -296,10 +303,13 @@ def test_manage_dialog_reads_the_window_scale_at_construction_time(qapp):
     get_dialog_scale().set_percent(150)
     large = ManageDialog(_DummyClipboardManager())
     try:
-        assert large.minimumWidth() == manage_dialog_min_width()
-        assert large.minimumWidth() > small.minimumWidth()
+        _avail = QApplication.primaryScreen().availableGeometry()
+        assert large.minimumWidth() == min(
+            manage_dialog_min_width(), int(_avail.width() * 0.92)
+        )
+        assert large.minimumWidth() >= small.minimumWidth()  # 小屏上同顶钳制值
         assert large.width() == fit_manage_dialog_size(screen.width(), screen.height())[0]
-        assert large.width() > small.width()
+        assert large.width() >= small.width()  # 小屏上两者都可能顶到钳制值
     finally:
         large.hide()
         large.deleteLater()
@@ -318,25 +328,25 @@ def test_manage_dialog_scales_static_and_rebuilt_detail_controls(qapp):
         # 保存按钮的 36px 高、13px 字号按 150% 放大
         assert f"min-height: {dialog_scaled(36)}px" in dialog.styleSheet()
         assert f"font-size: {dialog_scaled(13)}px" in dialog.styleSheet()
-        assert dialog_scaled(36) == 54
-        assert dialog.search_input.property("dialog_scale_factor") == 1.5
-        assert "min-height: 39px" in dialog.search_input.styleSheet()
+        assert dialog_scaled(36) == 81
+        assert dialog.search_input.property("dialog_scale_factor") == 2.25
+        assert "min-height: 58px" in dialog.search_input.styleSheet()
         option = QStyleOptionViewItem()
         row_height = dialog.item_list.itemDelegate().sizeHint(option, QModelIndex()).height()
         assert row_height == dialog_scaled(34)
 
         dialog._show_new_group_form()
         first_name_input = dialog.group_name_input
-        assert first_name_input.property("dialog_scale_factor") == 1.5
-        assert "min-height: 39px" in first_name_input.styleSheet()
+        assert first_name_input.property("dialog_scale_factor") == 2.25
+        assert "min-height: 58px" in first_name_input.styleSheet()
         assert dialog.radio_normal.sizeHint().height() == dialog_scaled(58)
 
         # Switching/reselecting rebuilds the form from scratch; new controls
         # must receive the marker as well.
         dialog._show_new_group_form()
         assert dialog.group_name_input is not first_name_input
-        assert dialog.group_name_input.property("dialog_scale_factor") == 1.5
-        assert "min-height: 39px" in dialog.group_name_input.styleSheet()
+        assert dialog.group_name_input.property("dialog_scale_factor") == 2.25
+        assert "min-height: 58px" in dialog.group_name_input.styleSheet()
     finally:
         dialog.hide()
         dialog.deleteLater()
@@ -747,9 +757,11 @@ def test_manage_dialog_default_size_fits_small_screens():
     assert fit_manage_dialog_size(2560, 1400) == (manage_dialog_width(), manage_dialog_height())
 
     width, height = fit_manage_dialog_size(1366, 728)
-    assert width == 1160
+    # 基准重定义：默认宽 1160*1.5=1740，被屏幕 92% 钳住
+    assert width == int(1366 * 0.92)
     assert height == int(728 * 0.92)
-    assert fit_manage_dialog_size(800, 500) == (manage_dialog_min_width(), manage_dialog_min_height())
+    # 极小屏幕：最小尺寸也钳到屏幕 92% 以内，窗口永远不超出屏幕
+    assert fit_manage_dialog_size(800, 500) == (736, 460)
 
 
 class TestScreenBounds:

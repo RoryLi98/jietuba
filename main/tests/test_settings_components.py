@@ -15,6 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from core.ui_scale import dialog_scaled
 from ui.settings_ui import components
 
 
@@ -78,19 +79,19 @@ class TestThemeTextStyle:
 
     def test_default_style_uses_the_theme_text_colour(self, theme):
         assert components.theme_text_style() == (
-            "font-size: 14px; color: #111111; background: transparent;")
+            f"font-size: {dialog_scaled(14)}px; color: #111111; background: transparent;")
 
     def test_font_size_is_honoured(self, theme):
         for size in (9, 13, 20):
-            assert f"font-size: {size}px;" in components.theme_text_style(font_size=size)
+            assert f"font-size: {dialog_scaled(size)}px;" in components.theme_text_style(font_size=size)
 
     def test_bold_appends_a_font_weight(self, theme):
         assert components.theme_text_style(bold=True) == (
-            "font-size: 14px; color: #111111; background: transparent; font-weight: 600;")
+            f"font-size: {dialog_scaled(14)}px; color: #111111; background: transparent; font-weight: 600;")
 
     def test_extra_css_is_appended_after_a_single_space(self, theme):
         assert components.theme_text_style(extra="margin-left: 4px;") == (
-            "font-size: 14px; color: #111111; background: transparent; margin-left: 4px;")
+            f"font-size: {dialog_scaled(14)}px; color: #111111; background: transparent; margin-left: 4px;")
 
     def test_whitespace_only_extra_adds_nothing(self, theme):
         for extra in ("", "   ", "\t\n"):
@@ -114,7 +115,7 @@ class TestThemeCaptionStyle:
 
     def test_caption_uses_the_muted_colour_and_a_smaller_default_size(self, theme):
         assert components.theme_caption_style() == (
-            "font-size: 13px; color: #888888; background: transparent;")
+            f"font-size: {dialog_scaled(13)}px; color: #888888; background: transparent;")
 
     def test_caption_never_goes_bold(self, theme):
         """说明文字没有 bold 参数，样式串里也不该出现字重"""
@@ -123,7 +124,7 @@ class TestThemeCaptionStyle:
 
     def test_extra_css_is_appended(self, theme):
         assert components.theme_caption_style(extra="margin: 0;") == (
-            "font-size: 13px; color: #888888; background: transparent; margin: 0;")
+            f"font-size: {dialog_scaled(13)}px; color: #888888; background: transparent; margin: 0;")
 
     def test_whitespace_only_extra_adds_nothing(self, theme):
         for extra in ("", "  ", "\n"):

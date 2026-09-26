@@ -76,7 +76,7 @@ def test_hint_line_shortens_the_widget(parent):
     with_hint = _magnifier(parent, formats=_only("RGB"), magnifier_hint=True)
     without_hint = _magnifier(parent, formats=_only("RGB"), magnifier_hint=False)
     assert without_hint.combined_height == (
-        with_hint.combined_height - MagnifierOverlay.INFO_LINE_HEIGHT
+        with_hint.combined_height - with_hint.INFO_LINE_HEIGHT
     )
     assert without_hint.height() == without_hint.combined_height
 
@@ -192,7 +192,7 @@ def test_shift_hint_only_shows_when_there_is_something_to_switch_to(parent):
     two = _magnifier(parent, formats=_only("RGB", "HEX"))
     assert one._hint_texts() == ["C: Copy color value"]
     assert two._hint_texts() == ["Shift: Switch color format", "C: Copy color value"]
-    assert two.combined_height - one.combined_height == MagnifierOverlay.INFO_LINE_HEIGHT
+    assert two.combined_height - one.combined_height == one.INFO_LINE_HEIGHT
 
 
 class TestColorFormats:

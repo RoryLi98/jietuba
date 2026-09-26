@@ -3,7 +3,7 @@
 """
 
 from PySide6.QtCore import Qt, QSize, Signal, QRect, QRectF, QPoint, QPointF, QTimer
-from PySide6.QtGui import QColor, QFont, QPainter
+from PySide6.QtGui import QColor, QFont, QPainter, QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractButton, QWidget, QPushButton, QApplication
 )
@@ -464,10 +464,50 @@ class Toolbar(QWidget):
         self.resize(x, self._btn_height)
 
     def reload_layout(self):
-        """按用户配置重排：始终显示的上工具栏，收进更多的留给弹层，「…」固定在最右"""
+        """按用户配置重排：始终显示的上工具栏，收进更多的留给弹层，「…」固定在最右。
+
+        是否因屏幕宽度不足自动收纳，由 _reposition_self 在定位时按所在
+        屏幕判定（见 _reflow_overflow），构造/配置加载阶段不折叠。
+        """
         layout = load_layout()
         self._folded_keys = [key for key, mode in layout if mode == MORE]
+        self._auto_folded_keys = []
         self._arrange([key for key, mode in layout if mode == SHOW] + ["more"])
+
+    def _available_toolbar_width(self) -> int | None:
+        """工具栏所在屏幕的可用宽度；拿不到就返回 None（不做溢出折叠）。"""
+        try:
+            screen = self.screen() or QGuiApplication.primaryScreen()
+            if screen is None:
+                return None
+            return screen.availableGeometry().width()
+        except Exception:
+            return None
+
+    def _fold_overflow_into_more(self, show_keys):
+        """宽度超出屏幕时把尾部按钮自动收进「…」，返回实际摆上工具栏的按钮。
+
+        逐个累计按钮宽度（含拖动手柄与「…」自身），放不下的从尾部开始收；
+        至少保留第一个按钮，避免极端窄屏时工具栏被清空。
+        """
+        self._auto_folded_keys = []
+        available = self._available_toolbar_width()
+        if available is None:
+            return show_keys
+
+        handle_w = self.drag_handle.width()
+        more_w = self._button_widths.get("more", 0)
+        budget = available - handle_w - more_w - scaled(12)
+
+        kept, total = [], 0
+        for key in show_keys:
+            width = self._button_widths.get(key, 0)
+            if kept and total + width > budget:
+                break
+            kept.append(key)
+            total += width
+        self._auto_folded_keys = [key for key in show_keys if key not in kept]
+        return kept
 
     PANEL_ATTRS = ('paint_panel', 'shape_panel', 'arrow_panel',
                    'number_panel', 'text_panel', 'mosaic_panel')
@@ -501,6 +541,20 @@ class Toolbar(QWidget):
         host = self._host_window()
         if host is not None and hasattr(host, 'update_toolbar_position'):
             host.update_toolbar_position()
+        self._reflow_overflow()
+
+    def _reflow_overflow(self):
+        """贴位后按所在屏幕宽度复核：始终显示的按钮排不下时自动收进「…」。
+
+        每次都从保存的排布配置重建（配置是唯一事实来源）：当前屏幕放不下
+        就把尾部按钮收进「…」，可用宽度变大（缩小缩放、换宽屏）后自动还原。
+        """
+        layout = load_layout()
+        self._folded_keys = [key for key, mode in layout if mode == MORE]
+        show_keys = self._fold_overflow_into_more(
+            [key for key, mode in layout if mode == SHOW]
+        )
+        self._arrange(show_keys + ["more"])
 
     def _show_more_popup(self):
         """展开「…」弹层，把收起的按钮摆进去。
@@ -522,8 +576,9 @@ class Toolbar(QWidget):
         popup = self._more_popup
         if popup.isVisible():
             return
-        cell_width = max((self._button_widths[key] for key in self._folded_keys), default=0)
-        popup.set_buttons([self._buttons[key] for key in self._folded_keys],
+        folded_keys = self._folded_keys + getattr(self, "_auto_folded_keys", [])
+        cell_width = max((self._button_widths[key] for key in folded_keys), default=0)
+        popup.set_buttons([self._buttons[key] for key in folded_keys],
                           QSize(cell_width, self._btn_height))
         self._sync_panel_position(popup, align_right=True)
         popup.show()

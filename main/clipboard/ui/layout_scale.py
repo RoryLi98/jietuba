@@ -52,10 +52,18 @@ def manage_dialog_min_height() -> int:
 
 
 def fit_manage_dialog_size(available_width: int, available_height: int) -> tuple:
-    """默认尺寸按屏幕可用区域收缩，但不小于最小尺寸。"""
-    width = min(manage_dialog_width(), int(available_width * _SCREEN_FILL))
-    height = min(manage_dialog_height(), int(available_height * _SCREEN_FILL))
-    return max(width, manage_dialog_min_width()), max(height, manage_dialog_min_height())
+    """默认尺寸按屏幕可用区域收缩，但不小于最小尺寸。
+
+    最小尺寸同样要钳到屏幕内：缩放基准重定义后 150% 档的最小宽 1440，
+    在 1366 宽的屏上会把窗口撑得比屏幕还宽。
+    """
+    limit_width = int(available_width * _SCREEN_FILL)
+    limit_height = int(available_height * _SCREEN_FILL)
+    minimum_width = min(manage_dialog_min_width(), limit_width)
+    minimum_height = min(manage_dialog_min_height(), limit_height)
+    width = min(manage_dialog_width(), limit_width)
+    height = min(manage_dialog_height(), limit_height)
+    return max(width, minimum_width), max(height, minimum_height)
 
 
 def scale_x(value: int) -> int:

@@ -41,11 +41,13 @@ def test_percent_is_snapped_to_a_real_option(given, expected):
 @pytest.mark.parametrize(("dpi", "expected"), [
     (72, 100),
     (96, 100),
-    (97, 125),
-    (120, 125),
-    (144, 125),  # 正好 150% 仍使用较保守的 125% 档位
-    (145, 150),
-    (168, 150),
+    (97, 100),
+    # 缩放基准重定义后（BASE_FACTOR 1.5），默认 100% 已是过去 150% 的观感，
+    # 首次运行统一推荐 100%。
+    (120, 100),
+    (144, 100),
+    (145, 100),
+    (168, 100),
     (0, 100),
     ("invalid", 100),
     (float("nan"), 100),
@@ -66,15 +68,15 @@ def test_first_run_scale_defaults_are_written_once(tmp_settings):
     from settings.tool_settings import ToolSettingsManager
 
     config = ToolSettingsManager(qsettings=tmp_settings)
-    assert apply_first_run_scale_defaults(config, system_dpi=120) == 125
-    assert config.get_app_setting("ui_scale_percent") == 125
-    assert config.get_app_setting("dialog_scale_percent") == 125
+    assert apply_first_run_scale_defaults(config, system_dpi=120) == 100
+    assert config.get_app_setting("ui_scale_percent") == 100
+    assert config.get_app_setting("dialog_scale_percent") == 100
 
     # 首次运行标记还没写入时也可能重进初始化；已存在的用户值必须保留。
     config.set_app_setting("ui_scale_percent", 90)
-    assert apply_first_run_scale_defaults(config, system_dpi=144) == 125
+    assert apply_first_run_scale_defaults(config, system_dpi=144) == 100
     assert config.get_app_setting("ui_scale_percent") == 90
-    assert config.get_app_setting("dialog_scale_percent") == 125
+    assert config.get_app_setting("dialog_scale_percent") == 100
 
     config.mark_as_run()
     assert apply_first_run_scale_defaults(config, system_dpi=168) is None
@@ -88,7 +90,8 @@ def test_zero_stays_zero_and_thin_things_never_vanish():
 
 
 def test_float_helper_keeps_sub_pixel_precision():
-    get_ui_scale().set_percent(150)
+    get_ui_scale().set_percent(100)
+    # 新基准：100% = 旧 150%，scaled_f = base * 1.0 * 1.5
     assert scaled_f(2.0) == pytest.approx(3.0)
     assert scaled_f(6.0) == pytest.approx(9.0)
 
@@ -127,9 +130,10 @@ def test_toolbar_keeps_its_previous_size_at_100_percent(qapp):
     get_ui_scale().set_percent(100)
     toolbar = Toolbar()
     try:
-        assert toolbar._btn_height == 40
-        assert toolbar._button_widths["pen"] == 40
-        assert toolbar._button_widths["save"] == 45
+        # 缩放基准重定义：100% = 旧 150%（×1.5）
+        assert toolbar._btn_height == 60
+        assert toolbar._button_widths["pen"] == 60
+        assert toolbar._button_widths["save"] == 68  # round(45 * 1.5)
     finally:
         toolbar.deleteLater()
 
@@ -140,8 +144,8 @@ def test_settings_panel_keeps_its_previous_size_at_100_percent(qapp):
     get_ui_scale().set_percent(100)
     panel = ShapeSettingsPanel()
     try:
-        assert panel.size_spin.width() == 54
-        assert panel.opacity_spin.width() == 65
+        assert panel.size_spin.width() == 81   # round(54 * 1.5)
+        assert panel.opacity_spin.width() == 98  # round(65 * 1.5)
     finally:
         panel.deleteLater()
 
@@ -170,6 +174,8 @@ def test_toolbar_follows_the_scale_without_drifting(qapp):
     from ui.toolbar import Toolbar
 
     toolbar = Toolbar()
+    # 本用例验证「无漂移」；禁用溢出折叠，避免离屏小屏把尺寸钳没
+    toolbar._available_toolbar_width = lambda: 5000
     try:
         base, grown, shrunk, back = _round_trip(toolbar, _size_of)
         assert grown[1] > base[1] > shrunk[1]

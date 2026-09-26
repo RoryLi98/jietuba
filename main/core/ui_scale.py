@@ -16,6 +16,11 @@ Windows 系统 DPI 为两套界面缩放选择一个最接近的初始档位。
 """
 import math
 
+# 缩放基准重定义（2026-09）：此前默认 100% 的界面偏小，多数用户实际开 150%。
+# 现在把「旧 150%」的观感定为新的 100% 默认档：所有基准尺寸统一乘 1.5，
+# 百分比档位语义不变（100% = 新默认，150% = 旧 225%）。
+BASE_FACTOR = 1.5
+
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QWidget
 
@@ -74,7 +79,7 @@ class UIScaleManager:
 
     @property
     def factor(self) -> float:
-        return self._percent / 100.0
+        return self._percent / 100.0 * BASE_FACTOR
 
     def px(self, base) -> int:
         """把基准像素换算成当前比例下的整数像素。
@@ -122,28 +127,10 @@ class UIScaleManager:
 def recommended_scale_percent(system_dpi=None) -> int:
     """按系统缩放区间选择保守的首次运行档位（96 DPI = 100%）。
 
-    系统缩放不超过 100% 时使用 100%；大于 100% 且不超过 150% 时
-    使用 125%；超过 150% 时使用 150%。这样不会让中等高 DPI 屏幕上的
-    固定尺寸窗口被等比例放得过大。
+    缩放基准重定义后（BASE_FACTOR 1.5），默认 100% 已是过去 150% 的观感，
+    足以覆盖典型高 DPI 屏幕，首次运行统一推荐 100%。
     """
-    if system_dpi is None:
-        try:
-            from core.platform_utils import get_system_dpi
-            system_dpi = get_system_dpi()
-        except Exception:
-            # 自动检测只能改善首次体验，绝不能因为系统 API 异常阻断启动。
-            system_dpi = 96.0
-    try:
-        percent = float(system_dpi) / 96.0 * 100.0
-    except (TypeError, ValueError, ZeroDivisionError):
-        percent = UIScaleManager.DEFAULT_PERCENT
-    if not math.isfinite(percent) or percent <= 0:
-        percent = UIScaleManager.DEFAULT_PERCENT
-    if percent > 150:
-        return 150
-    if percent > 100:
-        return 125
-    return 100
+    return UIScaleManager.DEFAULT_PERCENT
 
 
 def apply_first_run_scale_defaults(config_manager, system_dpi=None):
@@ -226,7 +213,7 @@ class DialogScaleManager:
 
     @property
     def factor(self) -> float:
-        return self._percent / 100.0
+        return self._percent / 100.0 * BASE_FACTOR
 
     def px(self, base) -> int:
         """把基准像素换算成当前比例下的整数像素（语义同 UIScaleManager.px）"""

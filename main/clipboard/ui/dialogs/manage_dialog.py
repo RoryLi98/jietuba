@@ -84,6 +84,7 @@ from ..forms.import_export_form import build_import_export_form
 from ..forms.text_content_form import build_edit_text_content_form, build_text_content_form
 from ..image_item_actions import load_item_image, save_image_item_as
 from ..layout_scale import (
+    _SCREEN_FILL,
     fit_manage_dialog_size,
     manage_dialog_height,
     manage_dialog_min_height,
@@ -201,8 +202,19 @@ class ManageDialog(FrostedFramelessDialog):
         self._setup_titlebar()
 
         self.setWindowTitle(self.tr("Clipboard Management"))
-        self.setMinimumSize(manage_dialog_min_width(), manage_dialog_min_height())
-        self.resize(manage_dialog_width(), manage_dialog_height())
+        # 与 _center_on_screen 的 fit 逻辑一致：缩放后的最小/默认尺寸都按
+        # 当前屏幕钳制，避免小屏上最小尺寸比屏幕还大、按钮够不着。
+        _geo = self.screen().availableGeometry()
+        _limit_w = int(_geo.width() * _SCREEN_FILL)
+        _limit_h = int(_geo.height() * _SCREEN_FILL)
+        self.setMinimumSize(
+            min(manage_dialog_min_width(), _limit_w),
+            min(manage_dialog_min_height(), _limit_h),
+        )
+        self.resize(
+            min(manage_dialog_width(), _limit_w),
+            min(manage_dialog_height(), _limit_h),
+        )
         self.setWindowFlags(
             self.windowFlags()
             | Qt.WindowType.Window

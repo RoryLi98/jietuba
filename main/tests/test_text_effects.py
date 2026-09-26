@@ -387,7 +387,11 @@ def test_effect_popups_fit_their_contents_instead_of_expanding_to_200px(qapp):
     try:
         for popup in panel._effect_popups.values():
             assert popup.maximumWidth() == popup.sizeHint().width()
-            assert popup.maximumWidth() < 200
+            # 弹层按内容收口，不再被 QWidget 的 200px 默认宽度撑开
+            # （缩放基准重定义后内容宽本身可能超过 200，因此与缩放后的
+            # 默认兜底宽比较）
+            from core.ui_scale import scaled
+            assert popup.maximumWidth() < scaled(200) + 1
     finally:
         panel.deleteLater()
 
