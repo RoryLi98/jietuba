@@ -251,11 +251,35 @@ class TestNumberFontDpi:
         advance = QFontMetricsF(font).horizontalAdvance("30")
         assert advance <= item.radius * 2
 
-    def test_four_digit_number_shrinks_to_fit(self, qapp):
+    def test_digit_count_tiers(self, qapp):
+        """每位数有明确的字号档位：位数越多字号越小。"""
+        # 2 位数的单字档位比 1 位数大（两个数字并排才填满圆圈），
+        # 3 位起逐级递减
+        assert NumberItem.DIGIT_FONT_SCALE[2] > NumberItem.DIGIT_FONT_SCALE[3]
+        assert NumberItem.DIGIT_FONT_SCALE[3] > NumberItem.DIGIT_FONT_SCALE[4]
+
+        _i4, font4 = self._font(number=1234, radius=68)
+        _i3, font3 = self._font(number=107, radius=68)
+        _i2, font2 = self._font(number=30, radius=68)
+        # 档位是目标字号；环境字体度量更宽时安全网会进一步收缩，
+        # 因此只断言「不超过档位」且实测画得进圆圈
+        assert font4.pixelSize() <= int(68 * NumberItem.DIGIT_FONT_SCALE[4])
+        assert font3.pixelSize() <= int(68 * NumberItem.DIGIT_FONT_SCALE[3])
+        assert font2.pixelSize() <= int(68 * NumberItem.DIGIT_FONT_SCALE[2])
         from PySide6.QtGui import QFontMetricsF
-        item, font = self._font(number=1234, radius=68)
-        advance = QFontMetricsF(font).horizontalAdvance("1234")
-        assert advance <= item.radius * 2
+        fm = QFontMetricsF(font4)
+        assert fm.horizontalAdvance("1234") <= 68 * 2 * 0.9 + 2
+        fm3 = QFontMetricsF(font3)
+        assert fm3.horizontalAdvance("107") <= 68 * 2 * 0.9 + 2
+        fm2 = QFontMetricsF(font2)
+        assert fm2.horizontalAdvance("30") <= 68 * 2 * 0.9 + 2
+
+    def test_extreme_digit_count_safety_net(self, qapp):
+        """表外位数（6 位以上）按实测宽度收缩，永不撑出圆圈。"""
+        from PySide6.QtGui import QFontMetricsF
+        item, font = self._font(number=12345678, radius=68)
+        advance = QFontMetricsF(font).horizontalAdvance("12345678")
+        assert advance <= item.radius * 2 * 0.9 + 2
         assert font.pixelSize() >= NumberItem.MIN_FONT_SIZE
 
     def test_single_digit_uses_full_scale(self, qapp):

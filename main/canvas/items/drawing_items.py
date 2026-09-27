@@ -597,24 +597,41 @@ class NumberItem(DrawingItemMixin, QGraphicsItem):
     def _ring_width(self) -> float:
         return max(2.0, float(self.radius) * self.RING_WIDTH_RATIO)
 
+    # 位数 → 字号占半径的比例。每一位数都有一个明确的字号档位：
+    # 一位数撑满圆圈，位数越多字号越小，数字始终画在圆圈内。
+    DIGIT_FONT_SCALE = {
+        1: 0.95,
+        2: 1.10,
+        3: 0.85,
+        4: 0.60,
+        5: 0.48,
+    }
+    DIGIT_FONT_SCALE_FALLBACK = 0.40  # 6 位及以上
+
     def _number_font(self) -> QFont:
         # 用像素尺寸而非点尺寸：点尺寸会被系统 DPI 缩放再放大一次
         # （Per-Monitor DPI 感知下 150% 显示缩放 → 点到像素 ×2），数字就会
         # 撑出圆圈、圆环横穿数字。像素尺寸与圆圈半径同一坐标系，永远匹配。
-        font_px = max(self.MIN_FONT_SIZE, int(self.radius * self.FONT_SCALE))
+        digits = len(str(abs(int(self.number))))
+        scale = self.DIGIT_FONT_SCALE.get(
+            digits, self.DIGIT_FONT_SCALE_FALLBACK
+        )
+        font_px = max(self.MIN_FONT_SIZE, int(self.radius * scale))
         font = QFont("Arial")
         font.setPixelSize(font_px)
         font.setBold(True)
-        # 多位数字按实际宽度收缩，保证任何位数的数字都画在圆圈内
+
+        # 安全网：超长数字（表外位数）按实测宽度逐步收缩，永不撑出圆圈
         try:
             from PySide6.QtGui import QFontMetricsF
-            text = str(self.number)
-            text_width = QFontMetricsF(font).horizontalAdvance(text)
-            usable = self.radius * 2 * 0.9  # 左右各留 5% 边距
-            if text_width > usable > 0:
-                font.setPixelSize(
-                    max(self.MIN_FONT_SIZE, int(font_px * usable / text_width))
+            usable = self.radius * 2 * 0.9
+            for _ in range(6):
+                text_width = QFontMetricsF(font).horizontalAdvance(
+                    str(self.number)
                 )
+                if text_width <= usable or font.pixelSize() <= self.MIN_FONT_SIZE:
+                    break
+                font.setPixelSize(max(self.MIN_FONT_SIZE, int(font.pixelSize() * 0.85)))
         except Exception:
             pass
         return font
