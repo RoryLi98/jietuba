@@ -253,10 +253,10 @@ class TestNumberFontDpi:
 
     def test_digit_count_tiers(self, qapp):
         """每位数有明确的字号档位：位数越多字号越小。"""
-        # 2 位数的单字档位比 1 位数大（两个数字并排才填满圆圈），
-        # 3 位起逐级递减
-        assert NumberItem.DIGIT_FONT_SCALE[2] > NumberItem.DIGIT_FONT_SCALE[3]
-        assert NumberItem.DIGIT_FONT_SCALE[3] > NumberItem.DIGIT_FONT_SCALE[4]
+        # 数字串宽度按位数递减（位数多时字号让位给宽度），
+        # 单位数按高度撑满
+        assert NumberItem.DIGIT_FONT_SCALE[1] > NumberItem.DIGIT_FONT_SCALE[3]
+        assert NumberItem.DIGIT_FONT_SCALE[3] > NumberItem.DIGIT_FONT_SCALE[5]
 
         _i4, font4 = self._font(number=1234, radius=68)
         _i3, font3 = self._font(number=107, radius=68)
@@ -284,4 +284,6 @@ class TestNumberFontDpi:
 
     def test_single_digit_uses_full_scale(self, qapp):
         item, font = self._font(number=7, radius=68)
-        assert font.pixelSize() == int(68 * NumberItem.FONT_SCALE)
+        assert font.pixelSize() <= int(68 * NumberItem.DIGIT_FONT_SCALE[1])
+        from PySide6.QtGui import QFontMetricsF
+        assert QFontMetricsF(font).horizontalAdvance("7") <= 68 * 2 * 0.9 + 2

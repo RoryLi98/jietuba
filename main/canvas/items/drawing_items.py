@@ -597,16 +597,17 @@ class NumberItem(DrawingItemMixin, QGraphicsItem):
     def _ring_width(self) -> float:
         return max(2.0, float(self.radius) * self.RING_WIDTH_RATIO)
 
-    # 位数 → 字号占半径的比例。每一位数都有一个明确的字号档位：
-    # 一位数撑满圆圈，位数越多字号越小，数字始终画在圆圈内。
+    # 位数 → 字号占半径的比例。每一位数都有一个明确的字号档位，
+    # 目标是数字串宽度约占圆圈直径的 84%、一位数按高度撑到约 2/3 直径，
+    # 让数字饱满地填在圆圈里，只留少量呼吸空隙。
     DIGIT_FONT_SCALE = {
-        1: 0.95,
-        2: 1.10,
-        3: 0.85,
-        4: 0.60,
-        5: 0.48,
+        1: 1.85,
+        2: 1.50,
+        3: 1.00,
+        4: 0.75,
+        5: 0.60,
     }
-    DIGIT_FONT_SCALE_FALLBACK = 0.40  # 6 位及以上
+    DIGIT_FONT_SCALE_FALLBACK = 0.50  # 6 位及以上
 
     def _number_font(self) -> QFont:
         # 用像素尺寸而非点尺寸：点尺寸会被系统 DPI 缩放再放大一次
