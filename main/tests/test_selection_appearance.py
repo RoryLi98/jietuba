@@ -321,3 +321,74 @@ def test_appearance_page_offers_both_selection_settings(qapp, item):
             page.deleteLater()
         host.close()
         host.deleteLater()
+
+
+# ================================================================
+# 圆角选区的四角手柄
+# ================================================================
+
+def test_rounded_corner_handles_sit_on_the_corner_arcs():
+    """每个四角手柄都应画在所在角 45° 的弧线上（到弧心距离 = 圆角半径）。"""
+    from PySide6.QtCore import QPointF, QRectF
+    from canvas.items.selection_item import SelectionItem
+
+    rect = QRectF(100, 100, 400, 300)
+    radius = 29.0
+    handles = SelectionItem._get_rounded_corner_handle_positions(rect, radius)
+
+    d = radius * (1 - 1 / 2 ** 0.5)
+    arcs = {
+        SelectionItem.HANDLE_TOP_LEFT: QPointF(rect.left() + radius, rect.top() + radius),
+        SelectionItem.HANDLE_TOP_RIGHT: QPointF(rect.right() - radius, rect.top() + radius),
+        SelectionItem.HANDLE_BOTTOM_LEFT: QPointF(rect.left() + radius, rect.bottom() - radius),
+        SelectionItem.HANDLE_BOTTOM_RIGHT: QPointF(rect.right() - radius, rect.bottom() - radius),
+    }
+    assert set(handles) == set(arcs)
+    for handle_id, pos in handles.items():
+        center = arcs[handle_id]
+        dist = ((pos.x() - center.x()) ** 2 + (pos.y() - center.y()) ** 2) ** 0.5
+        assert dist == pytest.approx(radius, abs=0.01), handle_id
+
+
+def test_rounded_corner_handles_are_inset_from_bounding_corners():
+    """手柄在包围盒角点内侧（弧线半径 × 0.293），不会悬空在弧线外。"""
+    from PySide6.QtCore import QRectF
+    from canvas.items.selection_item import SelectionItem
+
+    rect = QRectF(100, 100, 400, 300)
+    handles = SelectionItem._get_rounded_corner_handle_positions(rect, 29.0)
+    tl = handles[SelectionItem.HANDLE_TOP_LEFT]
+    assert tl.x() > rect.left() and tl.y() > rect.top()
+    br = handles[SelectionItem.HANDLE_BOTTOM_RIGHT]
+    assert br.x() < rect.right() and br.y() < rect.bottom()
+
+
+def test_draw_handles_draws_all_eight_on_a_rounded_selection(item):
+    """圆角模式下手柄档位为 all 时，八个手柄一个不少。"""
+    from unittest.mock import patch
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QPainter
+    from canvas.items.selection_item import SelectionItem
+    from core.theme import ThemeManager
+
+    get_theme().set_selection_handle_style(ThemeManager.HANDLES_ALL)
+    base = dict(item._get_handle_positions(QRectF(SEL)))
+    corners = dict(
+        SelectionItem._get_rounded_corner_handle_positions(QRectF(SEL), 29.0)
+    )
+    seen = {}
+    original_positions = SelectionItem._get_handle_positions
+    fake_positions = lambda rect: (
+        seen.update(original_positions(item, rect)) or dict(seen)
+    )
+
+    painter = QPainter()
+    try:
+        with patch.object(SelectionItem, "_get_handle_positions",
+                          staticmethod(fake_positions)):
+            item.draw_handles(painter, QRectF(SEL), skip_corners=True,
+                              corner_radius=29.0)
+        assert set(seen) == set(base) | set(corners)
+        assert len(seen) == 8
+    finally:
+        painter.end()

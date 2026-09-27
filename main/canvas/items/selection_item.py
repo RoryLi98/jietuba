@@ -176,10 +176,12 @@ class SelectionItem(QGraphicsItem):
         rect = self._model.rect()
         return occupied <= min(rect.width(), rect.height()) * self.HANDLE_CROWDING_RATIO
 
-    def draw_handles(self, painter: QPainter, rect: QRectF, skip_corners: bool = False):
+    def draw_handles(self, painter: QPainter, rect: QRectF,
+                     skip_corners: bool = False, corner_radius: float = 0.0):
         """绘制控制点。圆角预览也调这里，手柄档位和配色只有这一份实现。
 
-        skip_corners=True 跳过四角（圆角模式下四角手柄贴不住弧线）。
+        corner_radius > 0 表示圆角选区：四角手柄不画在包围盒角点（会悬空
+        在弧线外），而是画在四角 45° 的弧线上，贴合圆角边框。
         """
         style = get_theme().selection_handle_style
         if style == ThemeManager.HANDLES_NONE:
@@ -189,13 +191,18 @@ class SelectionItem(QGraphicsItem):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
         handles = self._get_handle_positions(rect)
+        if skip_corners and corner_radius > 0:
+            handles = dict(handles)
+            handles.update(
+                self._get_rounded_corner_handle_positions(rect, corner_radius)
+            )
         outer_r = self.handle_size // 2 + 1
         inner_r = self.handle_size // 2
         brush_handle = QBrush(get_theme().theme_color)
         pen_handle_outer = QPen(QColor(255, 255, 255), self.handle_ring_width)
         for handle_id, pos in handles.items():
             if handle_id in self.CORNER_HANDLES:
-                if skip_corners:
+                if skip_corners and corner_radius <= 0:
                     continue
             elif style == ThemeManager.HANDLES_CORNERS:
                 continue
@@ -209,6 +216,27 @@ class SelectionItem(QGraphicsItem):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawEllipse(pos, inner_r, inner_r)
     
+    @staticmethod
+    def _get_rounded_corner_handle_positions(rect: QRectF,
+                                             radius: float) -> dict:
+        """圆角选区的四角手柄位置：每角 45° 弧线上的点。
+
+        圆角弧的圆心在包围盒角点内侧 (±radius, ±radius) 处，45° 方向上的
+        弧点距包围盒角点 radius × (1 - 1/√2)，手柄画在这里正好贴住边框。
+        """
+        r = max(0.0, float(radius))
+        offset = r * (1 - 1 / 2 ** 0.5)
+        left = rect.left()
+        right = rect.right()
+        top = rect.top()
+        bottom = rect.bottom()
+        return {
+            SelectionItem.HANDLE_TOP_LEFT: QPointF(left + offset, top + offset),
+            SelectionItem.HANDLE_TOP_RIGHT: QPointF(right - offset, top + offset),
+            SelectionItem.HANDLE_BOTTOM_LEFT: QPointF(left + offset, bottom - offset),
+            SelectionItem.HANDLE_BOTTOM_RIGHT: QPointF(right - offset, bottom - offset),
+        }
+
     def _get_handle_positions(self, rect: QRectF) -> dict:
         """获取8个控制点的位置"""
         left = rect.left()

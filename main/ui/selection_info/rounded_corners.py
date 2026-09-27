@@ -362,9 +362,10 @@ class RoundedCornersLogic(QObject):
                 painter.setRenderHint(QPainter.RenderHint.Antialiasing)
                 painter.drawRoundedRect(rect, r, r)
 
-                # 控制点（圆角模式下隐藏四角手柄）
+                # 控制点（圆角模式下四角手柄画在 45° 弧线上，贴合边框）
                 if item.handles_visible():
-                    item.draw_handles(painter, rect, skip_corners=True)
+                    item.draw_handles(painter, rect, skip_corners=True,
+                                      corner_radius=r)
             else:
                 # 原始绘制
                 logic._original_render(painter)
