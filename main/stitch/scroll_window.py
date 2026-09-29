@@ -513,12 +513,12 @@ class _StitchWorker(threading.Thread):
 
 class ScrollCaptureWindow(QWidget):
     """滚动长截图窗口
-    
+
     特性：
-    - 带边框的透明窗口
-    - 不拦截鼠标滚轮事件（鼠标可以直接操作后面的网页）
-    - 监听全局滚轮事件，每次滚轮后1秒截图
-    - 底部有完成和取消按钮
+    - 带边框的透明窗口，不拦截鼠标事件（滚动直接作用于后面的页面）
+    - 内容感知抓帧：监视框内画面变化，稳定后自动采集拼接
+    - 拼接管线在串行工作线程完成，主线程只抓屏
+    - 底部有完成和取消按钮；页面静止数秒自动收尾
     """
     
     finished = Signal()  # 完成信号
@@ -575,6 +575,10 @@ class ScrollCaptureWindow(QWidget):
 
         # 自动收尾
         self._auto_finish_scheduled = False
+        # 会话收尾重入守卫：完成/钉图执行期间，挂着的自动收尾定时器
+        # （经 flush 的 processEvents 落地）不得再次触发收尾——二次
+        # _on_finish 会把结果图翻转还原两次、双重保存
+        self._finishing = False
 
         # ── 内容感知监视状态 ──
         self._last_captured_sig = None   # 上一张已采集帧的内容签名
@@ -1250,7 +1254,7 @@ class ScrollCaptureWindow(QWidget):
                     self._change_started_at = None
                     self._set_watch_interval(self._WATCH_IDLE_MS)
                     _log_stitch(T("🎞️ 检测到画面变化并已稳定，自动采集"), force=False)
-                    self._do_capture()
+                    self._do_capture(pixmap)
                     return
 
                 # 尚未达到稳定次数：保持高频轮询
@@ -1273,7 +1277,7 @@ class ScrollCaptureWindow(QWidget):
                 self._change_started_at = None
                 self._set_watch_interval(self._WATCH_IDLE_MS)
                 _log_stitch(T("🎞️ 画面持续变化，强制采集当前帧"), force=False)
-                self._do_capture()
+                self._do_capture(pixmap)
         finally:
             self._exclude_overlapping_ui(False)
 
@@ -1290,19 +1294,27 @@ class ScrollCaptureWindow(QWidget):
         self._show_preview_warning(T("页面已无变化，即将自动完成拼接…"))
         QTimer.singleShot(600, self, self._auto_finish_if_alive)
 
-    def _do_capture(self):
+    def _do_capture(self, pixmap=None):
         """立即抓取一帧并提交给拼接工作线程（手动抓帧/监视器稳定点共用）。
 
-        像素管线见 _StitchWorker。提交后更新内容签名基线，监视器据此判断
-        后续变化。
+        Args:
+            pixmap: 监视器在稳定判定时已经抓到的帧。传入则直接使用——
+                稳定点和提交之间不再有二次抓帧的间隙，避免基线签名与
+                实际提交的帧错位；None 则现抓一帧（手动路径）。
+
+        像素管线见 _StitchWorker。提交后更新内容签名基线，监视器据此
+        判断后续变化。
         """
         # 截图前：排除与截图区域重叠的 UI 窗口
         self._exclude_overlapping_ui(True)
         try:
-            pixmap, sig = self._grab_region()
             if pixmap is None:
-                _log_stitch(T("[ERROR] 截图失败"), force=True)
-                return
+                pixmap, sig = self._grab_region()
+                if pixmap is None:
+                    _log_stitch(T("[ERROR] 截图失败"), force=True)
+                    return
+            else:
+                sig = self._signature(pixmap)
 
             self._last_captured_sig = sig
             self._idle_started_at = None
@@ -1317,6 +1329,24 @@ class ScrollCaptureWindow(QWidget):
         finally:
             # 帧已到手，恢复 UI 窗口可被截图（像素处理不再需要排除）
             self._exclude_overlapping_ui(False)
+
+    def _flush_pending_stitch(self):
+        """等在途帧处理完并把回包落地（快速点完成/钉图时不丢最后一帧）。
+
+        worker 的结果经排队信号回主线程：join 之后泵一轮事件循环，
+        排队中的回包就会执行 _apply_stitch_result 更新 stitched_result。
+        阻塞上限 3 秒（正常时队列为空，立即返回）。
+        """
+        # 先停监视器：join 期间 tick 会排队，processEvents 落地回包时
+        # 可能把迟到的 tick 也执行掉，向已停止的 worker 再提交一帧
+        if hasattr(self, "_watch_timer"):
+            self._watch_timer.stop()
+        worker = getattr(self, "_stitch_worker", None)
+        if worker is None or not worker.is_alive():
+            return
+        _log_stitch(T("等待最后一帧拼接完成…"), force=False)
+        worker.join(timeout=3.0)
+        QApplication.processEvents()
 
     def _on_stitch_result(self, payload):
         """拼接工作线程的结果回包（QueuedConnection，主线程执行）。
@@ -1396,6 +1426,8 @@ class ScrollCaptureWindow(QWidget):
         收尾前再做一次内容确认：如果画面又变了（用户恰好在超时点继续
         滚动），撤销收尾回到监视状态——误收尾会保存半成品，宁可晚一步。
         """
+        if getattr(self, "_finishing", False):
+            return
         if not (self._auto_finish_scheduled and self.isVisible()):
             return
         try:
@@ -1446,6 +1478,11 @@ class ScrollCaptureWindow(QWidget):
     
     def _on_finish(self):
         """完成按钮点击"""
+        if getattr(self, "_finishing", False):
+            return
+        self._finishing = True
+        # 在途帧先落地：worker 是异步的，快速点完成时最后一帧可能还没拼完
+        self._flush_pending_stitch()
         _log_stitch(T("[OK] 完成长截图，共 {count} 张图片", count=len(self.screenshots)), force=True)
         
         # 横向模式：将拼接结果逆时针旋转90度还原
@@ -1544,6 +1581,11 @@ class ScrollCaptureWindow(QWidget):
     
     def _on_pin(self):
         """钉图按钮点击 - 将当前拼接结果钉到桌面，然后结束长截图"""
+        if getattr(self, "_finishing", False):
+            return
+        self._finishing = True
+        # 同 _on_finish：在途帧先落地再取结果
+        self._flush_pending_stitch()
         _log_stitch(T("钉图长截图结果..."))
 
         # 检查 config_manager
@@ -1615,6 +1657,9 @@ class ScrollCaptureWindow(QWidget):
     
     def _on_cancel(self):
         """取消按钮点击"""
+        if getattr(self, "_finishing", False):
+            return
+        self._finishing = True
         _log_stitch(T("[ERROR] 取消长截图"), force=True)
         self.screenshots.clear()
         self._cleanup()
