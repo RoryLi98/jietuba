@@ -190,6 +190,11 @@ class OCRManager:
             self._windows_ocr_language = None  # windows_media_ocr 语言设置
             self._pp_engine = None  # ppocr_rust.Engine 实例，None 即未初始化
             self._init_lock = threading.Lock()  # 线程锁，防止重复初始化
+            # 串行化 recognize 与 release_engine：截图文字识别、钉图 OCR、
+            # 翻译各起自己的线程并发调用 recognize，而 release_engine（钉图
+            # 关闭等场景）会 close() 引擎——撞上进行中的 FFI 调用是
+            # use-after-free。RLock 是因为 recognize 内部可能触发初始化路径。
+            self._recognize_lock = threading.RLock()
     
     @property
     def is_available(self) -> bool:
@@ -433,11 +438,13 @@ class OCRManager:
                 return self._format_empty_result(return_format)
             raw, w, h, stride = conv
 
-            # 取到局部变量：release() 可能在别的线程把 self._pp_engine 置空
-            engine = self._pp_engine
-            if engine is None:
-                return self._format_error(return_format, "ppocr_rust 引擎已释放")
-            lines = engine.recognize(raw, w, h, stride)
+            # 取引擎与调用都必须在锁内：release_engine 可能并发把引擎 close()，
+            # FFI 调用撞上已释放的引擎是 use-after-free
+            with self._recognize_lock:
+                engine = self._pp_engine
+                if engine is None:
+                    return self._format_error(return_format, "ppocr_rust 引擎已释放")
+                lines = engine.recognize(raw, w, h, stride)
             elapse = time.time() - start_time
 
             if not lines:
@@ -499,8 +506,9 @@ class OCRManager:
             # PySide6: bits() 返回 memoryview，需要通过 ctypes 获取裸内存地址传给 Rust
             import ctypes
             total_bytes = stride * h
-            # 将像素数据拷贝到 ctypes buffer（阻塞调用期间保挂存活）
-            raw_data = (ctypes.c_char * total_bytes).from_buffer_copy(bytes(ptr[:total_bytes]))
+            # from_buffer_copy 直接吃 memoryview：只发生一次拷贝（先 bytes() 再
+            # from_buffer_copy 会把 4K 帧整帧多拷一遍，约 33MB × 2）
+            raw_data = (ctypes.c_char * total_bytes).from_buffer_copy(ptr[:total_bytes])
             result = windows_media_ocr.oneocr_recognize_raw(ctypes.addressof(raw_data), w, h, stride)
             
             elapse = time.time() - start_time
@@ -724,10 +732,12 @@ class OCRManager:
             # 此处仅做 Python 侧状态清理
             self._windows_ocr_language = None
             # 引擎实例持有 det/rec 两个 ONNX 模型（约 30 MB），close() 后立即
-            # 释放，不必再等进程退出
-            if self._pp_engine is not None:
-                self._pp_engine.close()
-                self._pp_engine = None
+            # 释放，不必再等进程退出。close 必须与进行中的 recognize 互斥，
+            # 否则 FFI 调用会踩到已释放的引擎。
+            with self._recognize_lock:
+                if self._pp_engine is not None:
+                    self._pp_engine.close()
+                    self._pp_engine = None
             self._current_engine = None
             
             _ocr_log(T("OCR 管理器状态已重置"))

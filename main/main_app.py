@@ -266,13 +266,16 @@ class MainApp(QObject):
             self.settings_window.update()
 
     def _setup_pin_tray_updates(self):
-        """刷新托盘菜单中的钉图数量。"""
+        """刷新托盘菜单中的钉图数量（幂等：重复调用只连接一次信号）。"""
+        if getattr(self, "_pin_tray_updates_connected", False):
+            return
         try:
             from pin.pin_manager import PinManager
             pin_manager = PinManager.instance()
             pin_manager.pin_created.connect(lambda _pin: self._update_tray_menu())
             pin_manager.pin_closed.connect(lambda _pin: self._update_tray_menu())
             pin_manager.all_pins_closed.connect(self._update_tray_menu)
+            self._pin_tray_updates_connected = True
         except Exception as e:
             log_exception(e, T("连接钉图托盘菜单刷新信号"))
 

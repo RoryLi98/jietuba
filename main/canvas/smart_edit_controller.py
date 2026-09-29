@@ -629,7 +629,9 @@ class SmartEditController(QObject):
             if handled:
                 self._active_click_handle = hit
                 self.mode = SelectionMode.CLICKING_HANDLE
-                self.scene.update()
+                # 只失效序号图元自身（scene 即整个虚拟桌面，全量 update 太贵）
+                if self.selected_item is not None:
+                    self.selected_item.update()
                 self._repaint_handles()
                 return True
 
@@ -638,7 +640,7 @@ class SmartEditController(QObject):
             # 只有删掉序号才需要把后续序号往前补；删文字不该动编号。
             is_number = hit.handle_type == HandleType.NUMBER_DELETE
             self.delete_selected(suppress_block=True, renumber_numbers=is_number)
-            self.scene.update()
+            # 图元增删与重编号各自触发定向失效，这里不再全场景 update
             self._repaint_handles()
             return True
 
@@ -690,7 +692,8 @@ class SmartEditController(QObject):
         self.layer_editor.end_drag(getattr(self.scene, "undo_stack", None))
         self.mode = SelectionMode.SELECTED
         self.keep_ratio = False
-        self.scene.update()
+        # 拖拽路径（handle_edit_move）已按旧∪新包围盒定向失效，松手无需
+        # 再全场景重绘；手柄浮层仍要刷一次。
         self._repaint_handles()
 
         # 拖拽缩放手柄（如文字右下角字号手柄）后，选中图元不变、不会

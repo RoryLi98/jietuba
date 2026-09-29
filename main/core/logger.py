@@ -123,11 +123,15 @@ class LogLevel:
 
 class TeeStream(io.TextIOBase):
     """将输出同时写入多个流（终端 + 文件）"""
-    
-    def __init__(self, *targets):
+
+    def __init__(self, *targets, flush_targets=None):
         super().__init__()
         self._targets = [t for t in targets if t]
-    
+        # 逐行 flush 只需要落在日志文件上：文件句柄没有行缓冲，必须显式
+        # flush 才有"print 也能及时落盘"的语义。终端流自身就是行缓冲
+        # （重定向到管道时分批可见也无妨），逐行 flush 是白付的系统调用。
+        self._flush_targets = [t for t in (flush_targets or self._targets) if t]
+
     def write(self, data):
         for target in self._targets:
             try:
@@ -136,7 +140,8 @@ class TeeStream(io.TextIOBase):
                 # 因此需要在检测到换行时手动 flush，模拟行缓冲行为
                 # 这样 print() 等走 stdout 的输出也能及时写入日志文件
                 if '\n' in data:
-                    target.flush()
+                    for flush_target in self._flush_targets:
+                        flush_target.flush()
             except Exception:
                 pass
         return len(data)
@@ -238,8 +243,14 @@ class Logger:
             self._write_header()
             
             # 重定向 stdout 和 stderr（同时输出到终端和文件）
-            sys.stdout = TeeStream(self._original_stdout, self.log_file)
-            sys.stderr = TeeStream(self._original_stderr, self.log_file)
+            sys.stdout = TeeStream(
+                self._original_stdout, self.log_file,
+                flush_targets=[self.log_file],
+            )
+            sys.stderr = TeeStream(
+                self._original_stderr, self.log_file,
+                flush_targets=[self.log_file],
+            )
             
             self._ready = True
             self.info(T("[OK] [Logger] 日志系统启动成功，日志文件：{log_path}", log_path=log_path))

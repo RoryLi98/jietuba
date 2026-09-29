@@ -104,6 +104,11 @@ class PreviewPopup(QWidget):
         self._pending_pos = None
         self._pending_prefer_side = "auto"
         self._pending_avoid_rect = None
+
+        # 预览位图缓存（image_id → QPixmap 或 None=解码失败），见
+        # _load_preview_pixmap。OrderedDict 当 LRU 用。
+        from collections import OrderedDict
+        self._preview_cache = OrderedDict()
     
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -405,24 +410,15 @@ class PreviewPopup(QWidget):
         """显示图片预览"""
         self.title_label.hide()  # 图片预览不显示标题
         self.content_widget.hide()
-        
-        # 尝试加载完整图片
-        if self._manager and item.image_id:
-            image_data = self._manager.get_image_data(item.image_id)
-            if image_data:
-                pixmap = QPixmap()
-                pixmap.loadFromData(image_data)
-                # 缩放到合适大小
-                scaled = pixmap.scaled(
-                    400, 300,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                self.image_label.setPixmap(scaled)
-                self.image_label.setFixedSize(scaled.size())
-                self.image_label.show()
-                return
-        
+
+        # 原图优先：目标尺寸解码 + 按 image_id 缓存
+        pixmap = self._load_preview_pixmap(item)
+        if pixmap is not None and not pixmap.isNull():
+            self.image_label.setPixmap(pixmap)
+            self.image_label.setFixedSize(pixmap.size())
+            self.image_label.show()
+            return
+
         # Fallback: 使用缩略图
         if item.thumbnail:
             import base64
@@ -442,6 +438,58 @@ class PreviewPopup(QWidget):
                     self.image_label.show()
             except Exception as e:
                 log_exception(e, T("加载图片预览"))
+
+    # 预览位图上限（宽×高）
+    _PREVIEW_MAX_W = 400
+    _PREVIEW_MAX_H = 300
+    # LRU 容量：预览是瞬时消费的小图，几条足够覆盖来回扫过的场景
+    _PREVIEW_CACHE_LIMIT = 8
+
+    def _load_preview_pixmap(self, item: 'ClipboardItem'):
+        """取 400x300 以内的预览位图，带小 LRU 缓存。
+
+        原图可能是数 MB 的 PNG，"整图解码 + 平滑缩放"一次要几十到上百毫秒，
+        鼠标扫过列表时反复触发会明显卡顿。这里用 QImageReader 以目标尺寸
+        解码（JPEG 等格式可在解码期降采样，内存/CPU 都降一个量级），解码
+        结果按 image_id 缓存；失败结果也缓存，避免坏数据反复重试。
+        """
+        if not (self._manager and item.image_id):
+            return None
+
+        cache = self._preview_cache
+        if item.image_id in cache:
+            cached = cache[item.image_id]
+            cache.move_to_end(item.image_id)
+            return cached
+
+        pixmap = QPixmap()
+        try:
+            from PySide6.QtCore import QBuffer, QIODeviceBase
+            from PySide6.QtGui import QImageReader
+            data = self._manager.get_image_data(item.image_id)
+            if data:
+                buffer = QBuffer()
+                buffer.setData(bytes(data))
+                buffer.open(QIODeviceBase.OpenModeFlag.ReadOnly)
+                reader = QImageReader(buffer)
+                reader.setDecideFormatFromContent(True)
+                size = reader.size()
+                if size.isValid() and size.width() > 0 and size.height() > 0:
+                    reader.setScaledSize(size.scaled(
+                        self._PREVIEW_MAX_W, self._PREVIEW_MAX_H,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                    ))
+                image = reader.read()
+                if image is not None and not image.isNull():
+                    pixmap = QPixmap.fromImage(image)
+        except Exception as e:
+            log_exception(e, T("加载图片预览"))
+
+        cache[item.image_id] = pixmap if not pixmap.isNull() else None
+        while len(cache) > self._PREVIEW_CACHE_LIMIT:
+            cache.popitem(last=False)
+
+        return pixmap if not pixmap.isNull() else None
     
     def hide_preview(self):
         """隐藏预览"""

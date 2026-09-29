@@ -48,10 +48,11 @@ def test_deliver_image_async_reuses_same_qimage(monkeypatch, tmp_path):
     )
 
     assert thread is not None
-    assert seen["copy_thread"] == caller_thread
     thread.join(timeout=2)
     assert not thread.is_alive()
+    # 复制与保存都在后台线程执行：编码与重试 sleep 不再阻塞 GUI
     assert seen["copy_id"] == id(image)
+    assert seen["copy_thread"] != caller_thread
     assert seen["save_id"] == id(image)
     assert seen["save_thread"] != caller_thread
     assert seen["save_kwargs"]["directory"] == str(tmp_path)
@@ -151,7 +152,9 @@ def test_deliver_image_async_skips_reservation_without_save_service(monkeypatch)
 
     result = clipboard_utils.deliver_image_async(image, save_service=None)
 
-    assert result is None
+    # 复制同样在后台线程执行，join 后再断言
+    assert result is not None
+    result.join(timeout=2)
     assert seen["file_reference"] is None
 
 

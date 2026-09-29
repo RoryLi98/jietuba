@@ -62,12 +62,20 @@ class SpotlightCurtain(QGraphicsItem):
         # 幕布此刻就得出现，否则之后只有孔附近会被重画，孔外那一大片一直是亮的。
         if not spotlights:
             return
+        # 只在可见脏区内做路径布尔运算：拖动/缩放孔时每帧的重绘区域只有孔的
+        # 新旧包围盒大小，对着 4K 全场景矩形求差集是白付的开销。与脏区不相交
+        # 的孔不影响脏区内的像素，直接跳过。
+        clip = painter.clipBoundingRect().intersected(self.boundingRect())
+        if clip.isEmpty():
+            return
         holes = QPainterPath()
         for spotlight in spotlights:
+            if not spotlight.sceneBoundingRect().intersects(clip):
+                continue
             # 逐个求并集，不能全塞进一条路径：默认的奇偶填充会让重叠的部分重新变暗
             holes = holes.united(spotlight.hole_path())
         curtain = QPainterPath()
-        curtain.addRect(self.boundingRect())
+        curtain.addRect(clip)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillPath(curtain.subtracted(holes), QColor(0, 0, 0))
 
@@ -107,7 +115,19 @@ class SpotlightItem(RectItem):
         if change in (_Change.ItemSceneChange, _Change.ItemVisibleHasChanged):
             curtain = SpotlightCurtain.find(self.scene())
             if curtain is not None:
-                curtain.update()
+                # 显隐时若还有别的可见孔，幕布只是"少/多一个孔"，重画本孔区域
+                # 就够；只有"第一个孔出现 / 最后一个孔消失"才翻转整张幕布的
+                # 有无，需要全场景失效。
+                others = [
+                    item for item in self.scene().items()
+                    if item is not self
+                    and isinstance(item, SpotlightItem)
+                    and item.isVisible()
+                ]
+                if change == _Change.ItemVisibleHasChanged and others:
+                    curtain.update(self.sceneBoundingRect())
+                else:
+                    curtain.update()
         elif change == _Change.ItemSceneHasChanged and self.scene() is not None:
             SpotlightCurtain.of(self.scene()).update()
         return super().itemChange(change, value)

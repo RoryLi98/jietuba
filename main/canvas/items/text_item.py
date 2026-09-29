@@ -95,7 +95,12 @@ class TextItem(DrawingItemMixin, QGraphicsTextItem):
         self.shadow_color = QColor(self.DEFAULT_SHADOW_COLOR)
 
         self.has_background = False # 默认关闭背景
-        self.background_color = QColor(255, 255, 255, 255) # 白色全不透明
+        self.background_color = QColor(255, 255, 255, 255) # 白全不透明
+
+        # 字形轮廓缓存：_glyph_path() 逐字形取轮廓，一行字实测 17~50ms。
+        # 打字、光标闪烁、字号拖拽都每帧重绘，必须缓存。键 = 文档修订号 +
+        # 字体描述 + 排版宽度，三者任一变化即失效（见 _glyph_path）。
+        self._glyph_cache = None
 
         # 临时文字：创建者没有推 AddItemCommand，把"是否真的创建"推迟到第一次
         # 失焦时按内容决定（见 focusOutEvent）。只有 TextTool 这样做，所以由它
@@ -284,7 +289,19 @@ class TextItem(DrawingItemMixin, QGraphicsTextItem):
         多行、中英混排时的字体回退、粘贴进来的混合字号都由排版引擎决定，自己重排
         就得另外猜一份和它对齐的边距。历史上那版描边就是卡在这里，最后留下了一个
         空循环。
+
+        结果按（文档修订号, 字体, 排版宽度）缓存：文字编辑会推进修订号，setFont
+        改变字体描述，textWidth 变化会触发重排。
         """
+        key = (
+            self.document().revision(),
+            self.font().key(),
+            self.textWidth(),
+        )
+        cached = self._glyph_cache
+        if cached is not None and cached[0] == key:
+            return cached[1]
+
         path = QPainterPath()
         # 非零环绕：相邻字形的轮廓叠在一起时，奇偶填充会把重叠处挖成空洞
         path.setFillRule(Qt.FillRule.WindingFill)
@@ -299,6 +316,8 @@ class TextItem(DrawingItemMixin, QGraphicsTextItem):
                     path.addPath(raw_font.pathForGlyph(index).translated(origin + position))
                 self._add_decoration_lines(path, run, origin)
             block = block.next()
+
+        self._glyph_cache = (key, path)
         return path
 
     @staticmethod

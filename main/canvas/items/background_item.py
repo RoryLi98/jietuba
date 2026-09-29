@@ -21,12 +21,12 @@ class BackgroundItem(QGraphicsPixmapItem):
     截图窗口 cleanup_and_close() 销毁 scene 时，本对象及缓存会一起被清理。
     """
     
-    def __init__(self, image: QImage, scene_rect: QRectF):
+    def __init__(self, image: QImage, scene_rect: QRectF, pixmap: QPixmap = None):
         super().__init__()
         self.setZValue(0)  # 最底层
-        
+
         self._scene_rect = QRectF(scene_rect)
-        
+
         # 直接引用外部 QImage（供放大镜高频读取），不再 copy()
         # 原因：image 来自 ScreenshotWindow.original_image，生命周期覆盖本对象，
         # 且全程只读，无需防御性拷贝。省掉一次全屏内存拷贝（1080p≈8MB, 4K≈32MB）
@@ -35,7 +35,9 @@ class BackgroundItem(QGraphicsPixmapItem):
         # （马赛克粒度滑动条改了就会换新粒度重画），没必要按 block_size 攒多份。
         self._reduced_cache_key = None
         self._reduced_cache_image = None
-        self.setPixmap(QPixmap.fromImage(image))
+        # 外部已有同内容的 QPixmap（如钉图窗口的 _base_pixmap）时直接共享：
+        # QPixmap 隐式共享，重复 fromImage 只会白多一份全分辨率位图。
+        self.setPixmap(pixmap if pixmap is not None else QPixmap.fromImage(image))
         
         # 使用 setOffset 设置图像的偏移量（场景坐标）
         self.setOffset(self._scene_rect.topLeft())

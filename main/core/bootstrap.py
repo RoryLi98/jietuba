@@ -8,6 +8,7 @@
 
 import sys
 import os
+import threading
 
 # ===================== 安全补丁：避免 platform 模块启动 cmd.exe =====================
 # platform.version() → uname() → _syscmd_ver() 会调用 subprocess("ver", shell=True)
@@ -240,8 +241,23 @@ class PreloadManager:
         """根据配置构建预加载步骤链，然后启动"""
         from PySide6.QtCore import QTimer
         from core.platform_utils import request_trim_working_set
-        
+
+        # 鼠标侧键热键依赖 pynput，其首次导入（ctypes + 低级钩子基础设施）
+        # 在主线程要花几十毫秒。起一个一次性后台线程把它提前装进 import
+        # 缓存；就算链首的热键注册抢先用到，也只是在导入锁上等一下，不会
+        # 比同步导入更慢。
+        def _warm_pynput():
+            try:
+                from pynput import mouse  # noqa: F401  预热导入
+            except Exception:
+                pass  # 未安装 pynput 时鼠标侧键功能本来就不可用
+
+        threading.Thread(target=_warm_pynput, name="pynput-warmup", daemon=True).start()
+
         cfg = self.config
+        # 链首：托盘与全局热键。二者不依赖任何预加载产物，却是本应用唯一的
+        # 常驻入口和核心触发方式——越早激活，"双击后没反应"的时间窗越短。
+        self._steps.append(self._activate_tray_and_hotkeys)
         if cfg.get_app_setting("preload_screenshot", True):
             self._steps.append(self._preload_screenshot_modules)
         if cfg.get_app_setting("preload_toolbar", True):
@@ -249,12 +265,18 @@ class PreloadManager:
         if cfg.get_app_setting("preload_ocr", True):
             self._steps.append(self._preload_ocr_engine)
         if cfg.get_app_setting("preload_settings", True):
-            self._steps.append(self.preload_settings)
+            self._steps.append(self._warm_settings_modules)
         if cfg.get_app_setting("preload_clipboard", True):
             self._steps.append(self._init_clipboard_manager)
         # 最后：显示主界面 + 释放工作集（始终执行）
         self._steps.append(self._show_main_window_on_start)
         self._steps.append(lambda: request_trim_working_set(1000))
+        # 设置窗口实例的构造放在整条链的最末尾：它是预加载链里最重的主线程
+        # 同步块（10 个分页一次性建完 + 全树控件扫描 + 上千次信号连接），放在
+        # 链中会拖慢托盘之后的所有步骤。模块导入（_warm_settings_modules）仍
+        # 在原位置完成，构造时只剩纯建 UI 的成本。
+        if cfg.get_app_setting("preload_settings", True):
+            self._steps.append(self._build_settings_window)
         # 启动链式预加载（50ms 后开始，让事件循环先稳定）
         QTimer.singleShot(50, self._run_next)
     
@@ -281,7 +303,23 @@ class PreloadManager:
             QTimer.singleShot(0, self._run_next)
     
     # ---------- 具体预加载步骤 ----------
-    
+
+    def _activate_tray_and_hotkeys(self):
+        """预加载链首：显示托盘并注册全局热键（首次运行除外）。"""
+        from core.logger import log_exception, log_info, T
+        try:
+            self.app.setup_tray()
+            self.app._setup_pin_tray_updates()
+            if self.config.is_first_run():
+                # 首次运行时不注册热键：向导期间不拦截按键，向导结束后
+                # _show_main_window_on_start 会按最终配置统一注册。
+                log_info(T("首次运行：热键注册推迟到向导结束后"), "Preload")
+            else:
+                self.app.update_hotkey()
+            log_info(T("托盘与全局热键已就绪"), "Preload")
+        except Exception as e:
+            log_exception(e, T("激活托盘与热键"))
+
     def _preload_toolbar_assets(self):
         """在主线程预热截图工具栏，避免首次截图创建工具栏卡顿"""
         from core.logger import log_debug, log_warning, T
@@ -425,6 +463,16 @@ class PreloadManager:
         except Exception as e:
             log_warning(T("OCR 引擎预加载失败: {e}", e=e), "OCR")
     
+    def _warm_settings_modules(self):
+        """只导入设置界面模块（暖 import 缓存），不构造窗口实例。"""
+        from core.logger import log_debug, T
+        import ui.settings_ui  # noqa: F401  预加载导入，见 _build_settings_window
+        log_debug(T("设置界面模块已预加载"), "Preload")
+
+    def _build_settings_window(self):
+        """启动链末尾构造设置窗口实例（见 build_and_start 的顺序说明）。"""
+        self.preload_settings()
+
     def preload_settings(self):
         """预加载设置窗口（也供 MainApp 在语言切换/打开设置时调用）"""
         from core.logger import log_debug, T
@@ -448,21 +496,17 @@ class PreloadManager:
         """根据配置决定启动时是否显示主界面（设置窗口或欢迎向导）"""
         from core.logger import log_exception, T
         try:
+            # 托盘与热键已在链首 _activate_tray_and_hotkeys 激活。
+
             # 首次运行：显示欢迎向导
             if self.config.is_first_run():
                 from ui.welcome import WelcomeWizard
                 self.app.hotkey_system.unregister_all()
                 wizard = WelcomeWizard(self.config)
                 wizard.exec()
+                # 向导中可能修改了热键配置，结束后按最终配置注册
                 self.app.update_hotkey()
-                self.app.setup_tray()
-                self.app._setup_pin_tray_updates()
                 return
-
-            # 非首次运行：预加载完成后再注册热键，避免启动预加载期间触发卡顿。
-            self.app.update_hotkey()
-            self.app.setup_tray()
-            self.app._setup_pin_tray_updates()
 
             # 根据用户设置决定是否显示设置窗口
             if self.config.should_show_main_window_on_start():

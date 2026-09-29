@@ -444,7 +444,15 @@ class ManageDialog(FrostedFramelessDialog):
         self._search_action = self.search_input.addAction(
             QIcon(), QLineEdit.ActionPosition.LeadingPosition
         )
-        self.search_input.textChanged.connect(self._apply_search_filter)
+        # 搜索防抖：每键 O(N) 的全表 casefold 扫描 + 逐行 setRowHidden，
+        # 大分组里连打几个字会明显滞后。200ms 合并连击，清空立即生效。
+        self._search_debounce_timer = QTimer(self)
+        self._search_debounce_timer.setSingleShot(True)
+        self._search_debounce_timer.setInterval(200)
+        self._search_debounce_timer.timeout.connect(
+            lambda: self._apply_search_filter(self.search_input.text())
+        )
+        self.search_input.textChanged.connect(self._on_search_text_changed)
         layout.addWidget(self.search_input)
 
         self.add_item_btn = QPushButton("+  " + self.tr("Add Content"))
@@ -820,6 +828,14 @@ class ManageDialog(FrostedFramelessDialog):
         self.empty_label.setText(text)
         self.list_stack.setCurrentWidget(self.empty_label)
         self.reorder_hint.hide()
+
+    def _on_search_text_changed(self, text: str):
+        """搜索框输入入口：非空防抖合并连击，清空立即生效。"""
+        if not text.strip():
+            self._search_debounce_timer.stop()
+            self._apply_search_filter(text)
+            return
+        self._search_debounce_timer.start()
 
     def _apply_search_filter(self, text: str):
         keyword = text.strip().casefold()

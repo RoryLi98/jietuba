@@ -73,6 +73,14 @@ class CanvasView(QGraphicsView):
         
         # 使用智能视口更新模式
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.SmartViewportUpdate)
+        # 本视图 1:1 变换、图元各自管理画笔状态：跳过逐图元 save/restore
+        # 与抗锯齿增量重绘的额外边距，数十个标注图元全量重绘时可省一截。
+        self.setOptimizationFlag(
+            QGraphicsView.OptimizationFlag.DontSavePainterState, True
+        )
+        self.setOptimizationFlag(
+            QGraphicsView.OptimizationFlag.DontAdjustForAntialiasing, True
+        )
         
         # 禁用滚动条
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -985,7 +993,8 @@ class CanvasView(QGraphicsView):
             editor = getattr(controller, "layer_editor", None)
             if editor and editor.is_editing() and not isinstance(item, TextItem):
                 editor.start_edit(item)
-            self.canvas_scene.update()
+            # 各分支已对图元逐个 update()；scene 即整个虚拟桌面，
+            # 无参 update() 会全屏重绘
         return applied
 
     @safe_event
@@ -1840,7 +1849,9 @@ class CanvasView(QGraphicsView):
                     and controller.selected_item is selected_item
                 ):
                     editor.start_edit(selected_item)
-                self.canvas_scene.update()
+                # 只失效图元自身：scene 即整个虚拟桌面，无参 update() 会让
+                # 每格滚轮都全屏重绘（4K 下每帧 8MP+）
+                selected_item.update()
             else:
                 pass
 
@@ -1887,8 +1898,8 @@ class CanvasView(QGraphicsView):
         if selected_item and selected_item is not active_item:
             self._set_text_item_point_size(selected_item, point_size)
             applied = True
-        if applied:
-            self.canvas_scene.update()
+        # 字号助手内部已对每个图元 update()，无需再全场景失效
+        return applied
 
     def _apply_opacity_change_to_selection(self, opacity: float):
         controller = getattr(self, "smart_edit_controller", None)
@@ -1901,15 +1912,16 @@ class CanvasView(QGraphicsView):
         active_text = self._get_active_text_item()
         if active_text:
             if self._update_item_visual_opacity(active_text, opacity):
+                active_text.update()
                 updated = True
 
         selected_item = getattr(controller, "selected_item", None)
         if selected_item and selected_item is not active_text:
             if self._update_item_visual_opacity(selected_item, opacity):
+                selected_item.update()
                 updated = True
 
-        if updated:
-            self.canvas_scene.update()
+        # 只失效被改的图元：scene 即整个虚拟桌面，无参 update() 是全屏重绘
 
     def _apply_line_style_change_to_selection(self, style: str):
         controller = getattr(self, "smart_edit_controller", None)
@@ -1936,8 +1948,8 @@ class CanvasView(QGraphicsView):
             pen.setStyle(Qt.PenStyle.SolidLine)
             pen.setDashPattern([])
         selected_item.setPen(pen)
+        # 只失效该图元（setPen 已触发内部的样式缓存失效，这里补一次定向重绘）
         selected_item.update()
-        self.canvas_scene.update()
 
     def _update_item_visual_opacity(self, item, opacity: float) -> bool:
         opacity = max(0.0, min(1.0, float(opacity)))

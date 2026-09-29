@@ -117,8 +117,16 @@ def test_reload_still_runs_when_the_item_cannot_be_placed(controller, monkeypatc
     monkeypatch.setattr(controller, "load_history", lambda: reloads.append(1))
     controller.current_group_id = 7
 
+    starts = []
+    monkeypatch.setattr(controller._reload_coalesce_timer, "start",
+                        lambda: starts.append(1))
+
     controller.on_new_content(True, _item(4))
 
+    # 筛选态重载走 150ms 合并窗口：定时器就位，到点才重载
+    assert reloads == []
+    assert starts == [1]
+    controller._flush_coalesced_reload()
     assert reloads == [1]
 
 
@@ -126,9 +134,34 @@ def test_reload_still_runs_without_an_item(controller, monkeypatch):
     """监听回调之外的刷新入口拿不到条目，只能整表重查。"""
     reloads = []
     monkeypatch.setattr(controller, "load_history", lambda: reloads.append(1))
+    starts = []
+    monkeypatch.setattr(controller._reload_coalesce_timer, "start",
+                        lambda: starts.append(1))
 
     controller.on_new_content(True, None)
 
+    assert starts == [1]
+    controller._flush_coalesced_reload()
+    assert reloads == [1]
+
+
+def test_rapid_arrivals_share_one_coalesced_reload(controller, monkeypatch):
+    """粘贴风暴：150ms 内连续到达的多条内容只触发一次整表重载。"""
+    reloads = []
+    monkeypatch.setattr(controller, "load_history", lambda: reloads.append(1))
+    controller.current_group_id = 7
+    starts = []
+    monkeypatch.setattr(controller._reload_coalesce_timer, "start",
+                        lambda: starts.append(1))
+
+    controller.on_new_content(True, _item(4))
+    controller.on_new_content(True, _item(5))
+    controller.on_new_content(True, None)
+
+    # 到达期间从不立即重载；单次 QTimer 超时（此处手动触发一次）覆盖
+    # 全部积压内容——真正的"只触发一次"由 QTimer 单发语义保证
+    assert reloads == []
+    controller._flush_coalesced_reload()
     assert reloads == [1]
 
 

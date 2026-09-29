@@ -153,7 +153,10 @@ class PinWindow(QWidget):
 
         # ====== 画布 ======
         from .pin_canvas import PinCanvas
-        self.canvas = PinCanvas(self, self._orig_size, image)
+        # 显示位图只建一份：画布的 BackgroundItem 直接共享 _base_pixmap
+        # （QPixmap 隐式共享），否则同一张图会常驻三份全分辨率位图。
+        self.canvas = PinCanvas(self, self._orig_size, image,
+                                background_pixmap=self._base_pixmap)
         if self.drawing_items:
             self.canvas.initialize_from_items(self.drawing_items, self.selection_offset, number_next)
 

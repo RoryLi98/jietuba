@@ -12,6 +12,7 @@ ClipboardItemDelegate — 剪贴板列表项绘制代理
 """
 
 import base64
+from collections import OrderedDict
 from typing import Optional, Dict
 
 from PySide6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem, QListWidget
@@ -65,8 +66,11 @@ class ClipboardItemDelegate(QStyledItemDelegate):
     所有视觉效果通过 QPainter 直接绘制，无 QWidget 创建开销。
     """
 
-    # 缩略图缓存 (data_url -> QPixmap)
-    _thumb_cache: Dict[str, Optional[QPixmap]] = {}
+    # 缩略图缓存 ((data_url, side) -> 缩放后的 QPixmap / None=解码失败)。
+    # 缓存"缩放结果"而不是原图：paint 每帧都要按行高重新平滑缩放，缓存
+    # 命中时只剩 drawPixmap。LRU 限容量，长时间运行不再只增不减。
+    _thumb_cache: "OrderedDict" = OrderedDict()
+    _THUMB_CACHE_LIMIT = 256
 
     def __init__(
         self,
@@ -254,19 +258,18 @@ class ClipboardItemDelegate(QStyledItemDelegate):
 
         # ---- 图标 / 缩略图 ----
         if item_data.content_type == "image" and item_data.thumbnail:
-            pixmap = self._get_thumbnail(item_data.thumbnail)
-            if pixmap:
-                # 等比缩放进行高的方框（留出底部分隔线），靠左、垂直居中
-                side = rect.height() - 2
-                scaled = pixmap.size().scaled(side, side, Qt.AspectRatioMode.KeepAspectRatio)
+            side = rect.height() - 2
+            scaled_pixmap = self._get_thumbnail(item_data.thumbnail, side)
+            if scaled_pixmap:
+                # 缩放结果已按 (data_url, side) 缓存，paint 里只剩绘制本身
+                scaled = scaled_pixmap.size()
                 thumb_rect = QRect(
                     x_offset,
                     rect.top() + 1 + (side - scaled.height()) // 2,
                     scaled.width(),
                     scaled.height(),
                 )
-                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-                painter.drawPixmap(thumb_rect, pixmap)
+                painter.drawPixmap(thumb_rect, scaled_pixmap)
                 x_offset += scaled.width() + 6
         elif item_data.icon and not (self._hide_file_icon and item_data.content_type == "file"):
             painter.setFont(self._font_cache["icon"])
@@ -330,24 +333,43 @@ class ClipboardItemDelegate(QStyledItemDelegate):
 
     # ========== 辅助方法 ==========
 
-    def _get_thumbnail(self, data_url: str) -> Optional[QPixmap]:
-        """从缓存获取缩略图，未命中则解码并缓存"""
-        if data_url in self._thumb_cache:
-            return self._thumb_cache[data_url]
+    def _get_thumbnail(self, data_url: str, side: int) -> Optional[QPixmap]:
+        """从缓存获取已缩放到行高的缩略图，未命中则解码、缩放并缓存。
 
+        键含 side：行高变化（窗口缩放、列表尺寸变化）后旧尺寸的缓存自动
+        失效，各按各的键存。LRU 超限时从最旧一端淘汰。
+        """
+        key = (data_url, side)
+        cache = self._thumb_cache
+        if key in cache:
+            value = cache[key]
+            # 命中即刷新 LRU 位置
+            cache.move_to_end(key)
+            return value
+
+        value = None
         try:
             if data_url.startswith("data:image"):
                 _, data = data_url.split(",", 1)
                 image_data = base64.b64decode(data)
                 pixmap = QPixmap()
                 pixmap.loadFromData(image_data)
-                self._thumb_cache[data_url] = pixmap
-                return pixmap
+                if not pixmap.isNull():
+                    target = pixmap.size().scaled(
+                        side, side, Qt.AspectRatioMode.KeepAspectRatio
+                    )
+                    value = pixmap.scaled(
+                        target.width(), target.height(),
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
         except Exception as e:
             log_error(T("加载缩略图失败: {e}", e=e), "Clipboard")
 
-        self._thumb_cache[data_url] = None
-        return None
+        cache[key] = value
+        while len(cache) > self._THUMB_CACHE_LIMIT:
+            cache.pop(next(iter(cache)))
+        return value
 
 
     __all__ = ["ClipboardItemDelegate", "ROLE_ITEM_DATA", "ROLE_ITEM_ID"]

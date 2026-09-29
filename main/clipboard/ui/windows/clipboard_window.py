@@ -902,7 +902,9 @@ class ClipboardWindow(QWidget, FramelessMixin):
         if item_data:
             popup = PreviewPopup.instance()
             pos = QCursor.pos()
-            popup.show_preview(item_data, pos, delay_ms=5)
+            # 悬停 350ms 才出预览：解码原图是重活，扫过列表时 5ms 的延迟
+            # 等于逢 hover 必解码（预览本身另有按 image_id 的缓存兜底）
+            popup.show_preview(item_data, pos, delay_ms=350)
 
     def _set_highlighted_item(self, item_id: Optional[int]):
         if self._item_delegate._highlighted_id != item_id:

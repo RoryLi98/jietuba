@@ -60,12 +60,13 @@ set "RUN_NOW="
 set /p "RUN_NOW=!MSG_RUN_NOW!"
 if /i "%RUN_NOW%"=="Y" (
     cd main
-    python main_app.py
+    rem pythonw：不创建控制台窗口；start：与安装脚本分离，应用启动后脚本立即继续
+    start "" pythonw main_app.py
     cd ..
 ) else (
     echo !MSG_RUN_LATER!
     echo   venv311\Scripts\activate
-    echo   cd main ^&^& python main_app.py
+    echo   cd main ^&^& pythonw main_app.py
 )
 
 call :pause_localized

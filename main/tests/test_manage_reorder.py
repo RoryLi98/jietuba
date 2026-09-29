@@ -214,6 +214,8 @@ class TestManageDialogLists:
         dialog = make_dialog(_manager_with_items(12))
 
         dialog.search_input.setText("第 1")
+        # 搜索有 200ms 防抖：手动触发定时器回调，保持测试同步执行
+        dialog._search_debounce_timer.timeout.emit()
 
         visible = [
             dialog.item_list.item(row).data(ID_ROLE)

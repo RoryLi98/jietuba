@@ -92,22 +92,31 @@ class ClipboardController(QObject):
         self._has_more = True
         self._last_scroll_value = 0
         self._pending_reload = False
-        
+
+        # 筛选态下新内容的整表重载合并窗口：开着搜索词/筛选时连续复制
+        # （粘贴风暴、脚本批量写剪贴板）会每条触发一次 DB 重查 + 全列表
+        # 重建，列表闪烁、滚动位置与选中态丢失。150ms 内的新内容合并成
+        # 一次重载。
+        self._reload_coalesce_timer = QTimer(self)
+        self._reload_coalesce_timer.setSingleShot(True)
+        self._reload_coalesce_timer.setInterval(150)
+        self._reload_coalesce_timer.timeout.connect(self._flush_coalesced_reload)
+
         # 搜索和筛选状态
         self._search_text: Optional[str] = None
         self._content_type: Optional[str] = None  # None, "text", "image", "file"
         self._time_range: Optional[Tuple[datetime, datetime]] = None
-        
+
         # 设置
         self.auto_paste_enabled = True
         self.paste_with_html = True
-        
+
         # 粘贴目标窗口（窗口显示期间持续跟踪）
         self._foreground_tracker = ForegroundWindowTracker()
 
         # 右键菜单数据控制逻辑已抽到独立模块
         self._context_menu_controller = ClipboardContextMenuController(self)
-        
+
         # 加载设置
         self._load_settings()
     
@@ -855,6 +864,10 @@ class ClipboardController(QObject):
         """窗口隐藏时调用"""
         self._foreground_tracker.stop()
     
+    def _flush_coalesced_reload(self):
+        """合并窗口到点，执行整表重载（经运行时解析，便于测试替换）。"""
+        self.load_history()
+
     def on_new_content(self, is_window_visible: bool, item: Optional[ClipboardItem] = None):
         """新内容到达时调用
 
@@ -867,7 +880,10 @@ class ClipboardController(QObject):
             return
         if item is not None and self.insert_item(item):
             return
-        self.load_history()
+        # 无法增量插入（筛选态/重复内容）：合并 150ms 内的连续到达再重载，
+        # 避免每条内容都整表重建。合并期间窗口隐藏的话定时器照样触发，
+        # 只是刷进了不可见的列表——数据保持新鲜，无害。
+        self._reload_coalesce_timer.start()
 
     def insert_item(self, item: ClipboardItem) -> bool:
         """把单条新内容插进当前列表，成功返回 True。

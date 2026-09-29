@@ -62,6 +62,35 @@ hidden_imports = [
     'comtypes.gen.UIAutomationClient',
     'pynput',
     'darkdetect',
+    # ── 惰性导出的 UI 模块（必须显式列出）──
+    # pin/clipboard/translation 三个包的 __init__ 改成了 PEP 562 惰性导出，
+    # 内部用 import_module(变量) 动态加载子模块，PyInstaller 的静态分析
+    # 看不到这条路径。不在这里列出的话，打包后的程序在首次打开钉图/
+    # 剪贴板/翻译窗口时会直接 ImportError。
+    'pin.pin_window',
+    'pin.pin_toolbar',
+    'pin.pin_canvas',
+    'pin.pin_canvas_view',
+    'pin.pin_ocr_manager',
+    'pin.pin_thumbnail',
+    'pin.pin_shortcut',
+    'pin.pin_controls',
+    'pin.pin_context_menu',
+    'pin.pin_translation',
+    'pin.ocr_text_layer',
+    'pin.pin_from_clipboard',
+    'clipboard.ui.dialogs.manage_dialog',
+    'clipboard.ui.windows.clipboard_window',
+    'clipboard.ui.windows.pin_window',
+    'translation.deepl_service',
+    'translation.models',
+    'translation.provider',
+    'translation.registry',
+    'translation.service',
+    'translation.translation_dialog',
+    'translation.translation_manager',
+    'translation.worker',
+    'translation.smart_translation_controller',
 ]
 
 # 排除的模块

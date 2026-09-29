@@ -101,9 +101,13 @@ class PinOCRManager:
 
         默认调用用于钉图后的自动识别，会遵守自动 OCR 设置；``force`` 用于
         翻译、文字选择等用户主动发起的操作，不受自动识别设置影响。
+
+        不在这里做引擎初始化：模型加载是重活（det/rec 两个 ONNX 约 30MB），
+        主线程做会让钉图弹出瞬间冻结几百毫秒。识别线程里的 recognize_text
+        会按需初始化引擎，初始化成本自然落在后台线程。
         """
         try:
-            from ocr import is_ocr_available, initialize_ocr
+            from ocr import is_ocr_available
             from pin.ocr_text_layer import OCRTextLayer
 
             if self.ocr_thread is not None:
@@ -118,12 +122,6 @@ class PinOCRManager:
             if not is_ocr_available():
                 log_debug(T("OCR 模块不可用（无OCR版本），静默跳过"), "OCR")
                 return False
-
-            if not initialize_ocr():
-                log_warning(T("OCR 引擎初始化失败"), "OCR")
-                return False
-
-            log_debug(T("OCR 引擎已就绪（支持中日韩英混合识别）"), "OCR")
 
             # 走到这里识别一定会发起：自动识别路径的开关本来就是开的，force 路径
             # 则是用户主动要文字，识别的代价已经付了，文字选择跟着可用。

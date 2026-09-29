@@ -64,11 +64,19 @@ def deliver_image_async(
 ) -> threading.Thread | None:
     """复制到剪贴板并可选在后台线程中保存图像。
 
+    剪贴板写入（两次全图编码 DIBV5+PNG，剪贴板被占时最长 0.72s 的重试
+    sleep）与保存都在后台线程完成，调用方立即返回——大图复制不再冻结
+    界面。QClipboard 只能在 GUI 线程使用，因此非 Windows 平台的 Qt 回退
+    仍在调用线程执行。
+
     同时请求复制与自动保存时，默认会先用 SaveService.reserve_save_path
     （只创建空文件，不编码像素，耗时可忽略）在主线程确定保存路径，
     这样复制时就能把 CF_HDROP 和位图格式一起写入剪切板，无需等待
     图像真正编码落盘。write_file_reference=False 时跳过这一步，
     剪切板上只有位图格式，不带文件路径。
+
+    Returns:
+        后台线程（调用方可 join 等待完成）；无后台任务时返回 None。
     """
     if image is None or image.isNull():
         log_warning(T("图像投递: 图像为空，跳过"), "Clipboard")
@@ -90,27 +98,31 @@ def deliver_image_async(
             # 文件引用，保存的失败仍交回后台线程。
             log_warning(T("图像投递: 预留保存路径失败，剪贴板不写入文件路径 ({exc})", exc=exc), "Clipboard")
 
-    if copy_to_clipboard:
-        if sys.platform == "win32":
-            copy_image_to_clipboard(image, file_reference=target_path)
-        else:
-            log_debug(T("图像投递: 非 Windows 平台，剪贴板仍走主线程回退"), "Clipboard")
-            copy_image_to_clipboard(image)
-        copy_to_clipboard = False
+    # Win32 写入整体移入后台线程（见 docstring）；非 Windows 的 Qt 回退
+    # 必须留在 GUI 线程，就地完成。
+    copy_in_worker = bool(copy_to_clipboard and sys.platform == "win32")
+    if copy_to_clipboard and not copy_in_worker:
+        copy_image_to_clipboard(image)
 
-    if save_service is None:
+    if not copy_in_worker and save_service is None:
         return None
 
     def worker() -> None:
-        nonlocal image
         import time as _time
 
         t0 = _time.perf_counter()
-        clipboard_ok = not copy_to_clipboard
+        t1 = t0
+        clipboard_ok = not copy_in_worker
         save_ok = save_service is None
 
         try:
-            t1 = _time.perf_counter()
+            if copy_in_worker:
+                try:
+                    copy_image_to_clipboard(image, file_reference=target_path)
+                    clipboard_ok = True
+                except Exception as exc:
+                    log_warning(T("图像投递: 后台剪贴板写入失败 ({exc})", exc=exc), "Clipboard")
+                t1 = _time.perf_counter()
 
             if save_service is not None:
                 save_ok, _ = save_service.save_qimage(image, target_path=target_path, **save_kwargs)
@@ -130,8 +142,6 @@ def deliver_image_async(
             )
         except Exception as exc:
             log_warning(T("图像投递: 后台任务失败 ({exc})", exc=exc), "Clipboard")
-        finally:
-            image = None
 
     thread = threading.Thread(target=worker, daemon=True, name="ClipboardDeliver")
     thread.start()
@@ -303,7 +313,18 @@ def _build_hdrop(path: str) -> bytes:
 # ─── Qt 回退实现 ──────────────────────────────────────────────────────
 
 def _copy_qt_fallback(image: QImage) -> None:
-    """非 Windows 平台的回退方案：用 Qt setImage。"""
+    """非 Windows 平台的回退方案：用 Qt setImage。
+
+    QClipboard 只能在 GUI 线程使用。剪贴板写入已移入后台线程后，若
+    Win32 写入失败在后台线程走到这里，不能再碰 QApplication——记日志
+    后放弃（Windows 上 Qt 回退本身就不该发生）。
+    """
     from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    if app is not None:
+        from PySide6.QtCore import QThread
+        if QThread.currentThread() is not app.thread():
+            log_warning(T("剪切板: Qt 回退不可在后台线程执行，已跳过"), "Clipboard")
+            return
     QApplication.clipboard().setImage(image)
     log_info(T("已复制到剪切板 (Qt)"), "Clipboard")

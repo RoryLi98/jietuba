@@ -13,35 +13,44 @@
 - PinControlButtons：控制按钮管理器
 - PinContextMenu：右键菜单管理器
 - PinTranslationHelper：翻译功能助手
+
+PinManager / get_pin_manager 保持包级导入：pin_manager 只依赖 Qt 与 core，
+托盘菜单、启动预热都只要它，不值得为它按需加载。其余 UI 模块走惰性导出
+（PEP 562）——否则托盘路径上 `from pin.pin_manager import PinManager` 也要
+先执行整个钉图 UI 导入链，首次创建钉图时 UI 模块才真正加载。
 """
 
-from .pin_window import PinWindow
 from .pin_manager import PinManager, get_pin_manager
-from .pin_toolbar import PinToolbar
-from .pin_canvas import PinCanvas
-from .pin_canvas_view import PinCanvasView
-from .pin_ocr_manager import PinOCRManager
-from .pin_thumbnail import PinThumbnailMode
-from .pin_shortcut import PinShortcutController
-from .pin_controls import PinControlButtons
-from .pin_context_menu import PinContextMenu
-from .pin_translation import PinTranslationHelper
-from .ocr_text_layer import OCRTextLayer, OCRTextItem
 
-__all__ = [
-    'PinWindow',
-    'PinManager',
-    'get_pin_manager',
-    'PinToolbar',
-    'PinCanvas',
-    'PinCanvasView',
-    'PinOCRManager',
-    'PinThumbnailMode',
-    'PinShortcutController',
-    'PinControlButtons',
-    'PinContextMenu',
-    'PinTranslationHelper',
-    'OCRTextLayer',
-    'OCRTextItem',
-]
- 
+# 导出名 → 所在子模块。首次访问时导入子模块、取符号、缓存进包 dict，
+# 之后同名访问直接命中模块 dict，不再触发 __getattr__。
+_LAZY_EXPORTS = {
+    "PinWindow": ".pin_window",
+    "PinToolbar": ".pin_toolbar",
+    "PinCanvas": ".pin_canvas",
+    "PinCanvasView": ".pin_canvas_view",
+    "PinOCRManager": ".pin_ocr_manager",
+    "PinThumbnailMode": ".pin_thumbnail",
+    "PinShortcutController": ".pin_shortcut",
+    "PinControlButtons": ".pin_controls",
+    "PinContextMenu": ".pin_context_menu",
+    "PinTranslationHelper": ".pin_translation",
+    "OCRTextLayer": ".ocr_text_layer",
+    "OCRTextItem": ".ocr_text_layer",
+}
+
+__all__ = ["PinManager", "get_pin_manager", *_LAZY_EXPORTS]
+
+
+def __getattr__(name):
+    path = _LAZY_EXPORTS.get(name)
+    if path is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from importlib import import_module
+    value = getattr(import_module(path, __name__), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted(__all__)

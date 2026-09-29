@@ -28,12 +28,14 @@ class PinCanvas(QObject):
     
 
     
-    def __init__(self, parent_window, base_size, background_image):
+    def __init__(self, parent_window, base_size, background_image,
+                 background_pixmap=None):
         """
         Args:
             parent_window: 父窗口（PinWindow）
             base_size: 基准坐标系尺寸（QSize，画布原始尺寸）
             background_image: QImage - 背景图像（钉图的截图图像）
+            background_pixmap: QPixmap - 可选，同内容的显示位图（与窗口共享）
         """
         super().__init__(parent=parent_window)
         
@@ -47,7 +49,8 @@ class PinCanvas(QObject):
         # 马赛克在钉图里同样可用：它涂的是"当前场景的背景"，钉图的背景就是钉住
         # 的那张图，和截图场景没有区别。场景原点是 (0,0)，MosaicItem 的背景锚点
         # 因此天然对齐。
-        self.scene = CanvasScene(background_image, scene_rect, enable_mosaic=True)
+        self.scene = CanvasScene(background_image, scene_rect, enable_mosaic=True,
+                                 background_pixmap=background_pixmap)
         
         # 预置选区（钉图画布默认全图可编辑）
         self._initialize_selection()

@@ -30,22 +30,26 @@ class CanvasScene(QGraphicsScene):
     item_auto_select_requested = Signal(object)       # 参数：绘制完成的 QGraphicsItem
     editing_cleanup_requested = Signal()              # 请求清除编辑状态（控制点、画笔指示器）
     
-    def __init__(self, background_image, scene_rect, enable_mosaic=False):
+    def __init__(self, background_image, scene_rect, enable_mosaic=False,
+                 background_pixmap=None):
         """
         Args:
             background_image: QImage - 背景图像
             scene_rect: QRectF - 场景坐标范围
+            background_pixmap: QPixmap - 可选，同内容的显示位图。外部已持有
+                时直接共享（QPixmap 隐式共享），省一份全分辨率位图。
         """
         super().__init__()
-        
+
         from PySide6.QtCore import QRectF
         self.scene_rect = QRectF(scene_rect)
-        
+
         # 先创建选区模型
         self.selection_model = SelectionModel()
-        
+
         # 创建图层（传入model）
-        self.background = BackgroundItem(background_image, self.scene_rect)
+        self.background = BackgroundItem(background_image, self.scene_rect,
+                                         pixmap=background_pixmap)
         self.selection_item = SelectionItem(self.selection_model)
         
         # Z-Order:

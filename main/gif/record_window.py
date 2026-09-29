@@ -495,7 +495,11 @@ class GifRecordWindow(QObject):
         log_info(T("关闭 GIF 窗口"), "GIF")
 
         if self._recorder.state in (RecordState.RECORDING, RecordState.PAUSED):
-            self._recorder.stop()
+            # 非阻塞停止：close 是丢弃式退出，帧的回填结果无所谓，只需要
+            # Rust 采集线程安全退出。同步 stop() 会按 Rust 线程退出速度
+            # 无上限地阻塞 UI。worker 持有 recorder 引用，本对象随后被
+            # 销毁也不会让后台线程踩空。
+            self._recorder.stop_async()
 
         # 断开 recorder 信号，防止 queued signal 访问已销毁的工具栏
         from core.qt_utils import safe_disconnect
