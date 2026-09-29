@@ -923,7 +923,7 @@ class ScrollCaptureWindow(QWidget):
             self.preview_panel.clear_warning()
 
     def _setup_mouse_hook(self):
-        """设置Windows鼠标钩子以监听全局滚轮事件"""
+        """设置窗口鼠标穿透，并安装全局滚轮钩子"""
         try:
             # 使用Windows API设置窗口透明鼠标事件（需在主线程执行）
             hwnd = int(self.transparent_area.winId())
@@ -931,87 +931,223 @@ class ScrollCaptureWindow(QWidget):
             ex_style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
             user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_TRANSPARENT | WS_EX_LAYERED)
             _log_stitch(T("[OK] 窗口已设置为鼠标穿透模式"))
-
-            # 将可能较慢的模块导入与监听器启动放到后台线程，避免首次阻塞UI
-            import threading
-
-            def _init_listener_bg():
-                try:
-                    from pynput import mouse  # 首次导入较慢，放后台
-
-                    def on_scroll(x, y, dx, dy):
-                        """滚轮事件回调（在pynput线程中）
-                        dx: 横向滚动量（正值向右，负值向左）
-                        dy: 纵向滚动量（正值向上，负值向下）
-                        
-                        注意:
-                        - 横向模式: 监听 dx (横向滚轮) 和 dy (Shift+滚轮会产生横向滚动)
-                        - 竖向模式: 只监听 dy (竖向滚轮)
-                        """
-                        if self._is_mouse_in_capture_area(x, y):
-                            # 根据当前方向决定使用哪个滚动值
-                            if self.scroll_direction == "horizontal":
-                                # 横向模式：优先使用dx，也接受dy（Shift+滚轮）
-                                scroll_val = dx if dx != 0 else (-dy if dy != 0 else 0)
-                                
-                                if scroll_val != 0:
-                                    # 横向模式：方向由自动检测处理，所有方向都接受
-                                    scroll_pixels = int(abs(scroll_val) * 25)
-                                    
-                                    if self.scroll_locked_direction is None:
-                                        is_right = scroll_val > 0
-                                        self.scroll_locked_direction = "down" if is_right else "up"
-                                        arrow = "➡️" if is_right else "⬅️"
-                                        if is_right:
-                                            _log_stitch(T("{arrow} 锁定横向滚动方向: 向右", arrow=arrow), force=True)
-                                        else:
-                                            _log_stitch(T("{arrow} 锁定横向滚动方向: 向左", arrow=arrow), force=True)
-
-                                    if ("down" if scroll_val > 0 else "up") == self.scroll_locked_direction:
-                                        try:
-                                            self.scroll_detected.emit(scroll_pixels)
-                                        except Exception as e:
-                                            _log_stitch(T("[ERROR] 触发滚动信号失败: {e}", e=e), force=True)
-                            else:
-                                # 竖向模式：第一次滚动锁定方向，之后只接受同方向
-                                if dy != 0:
-                                    is_scroll_down = dy < 0  # pynput: dy<0=向下
-                                    direction = "down" if is_scroll_down else "up"
-                                    
-                                    if self.scroll_locked_direction is None:
-                                        # 第一次滚动，锁定方向
-                                        self.scroll_locked_direction = direction
-                                        arrow = "⬇️" if is_scroll_down else "⬆️"
-                                        if is_scroll_down:
-                                            _log_stitch(T("{arrow} 锁定滚动方向: 向下", arrow=arrow), force=True)
-                                        else:
-                                            _log_stitch(T("{arrow} 锁定滚动方向: 向上", arrow=arrow), force=True)
-
-                                    if direction == self.scroll_locked_direction:
-                                        scroll_pixels = int(abs(dy) * 25)
-                                        try:
-                                            self.scroll_detected.emit(scroll_pixels)
-                                        except Exception as e:
-                                            _log_stitch(T("[ERROR] 触发滚动信号失败: {e}", e=e), force=True)
-                                    else:
-                                        # 反向滚动，忽略
-                                        pass
-
-                    # 创建并启动监听器（pynput内部也会使用线程）
-                    self.mouse_listener = mouse.Listener(on_scroll=on_scroll)
-                    self.mouse_listener.start()
-                    _log_stitch(T("[OK] 全局滚轮监听器已启动（竖向仅响应向下滚动，横向响应向右滚动和Shift+滚轮）"), force=True)
-                except Exception as e:
-                    _log_stitch(T("[ERROR] 设置鼠标钩子失败: {e}", e=e), force=True)
-                    import traceback
-                    traceback.print_exc()
-
-            threading.Thread(target=_init_listener_bg, daemon=True).start()
-
         except Exception as e:
             _log_stitch(T("[ERROR] 设置窗口鼠标穿透时出错: {e}", e=e), force=True)
             import traceback
             traceback.print_exc()
+
+        # 钩子安装与消息泵放到后台线程，避免阻塞 UI
+        self._setup_wheel_hook()
+
+    def _handle_wheel_event(self, x, y, dx, dy):
+        """处理一个滚轮事件（在钩子线程中调用）。
+
+        dx: 横向滚动量（正值向右，负值向左）
+        dy: 纵向滚动量（正值向上，负值向下）
+
+        注意:
+        - 横向模式: 监听 dx (横向滚轮) 和 dy (Shift+滚轮会产生横向滚动)
+        - 竖向模式: 只监听 dy (竖向滚轮)
+        """
+        # 首个事件做一次坐标诊断（force）：如果钩子收到了事件但坐标判定
+        # 把它过滤掉了，这条日志能直接看出 (x,y) 与截图区域的偏差
+        if not getattr(self, "_wheel_diag_logged", False):
+            self._wheel_diag_logged = True
+            rect = self.capture_rect
+            _log_stitch(T(
+                "🖱️ 首个滚轮事件: ({x},{y}) dx={dx} dy={dy}；截图区域: ({rx},{ry},{rw}x{rh})",
+                x=x, y=y, dx=dx, dy=dy,
+                rx=rect.x(), ry=rect.y(), rw=rect.width(), rh=rect.height(),
+            ), force=True)
+
+        if self._is_mouse_in_capture_area(x, y):
+            # 根据当前方向决定使用哪个滚动值
+            if self.scroll_direction == "horizontal":
+                # 横向模式：优先使用dx，也接受dy（Shift+滚轮）
+                scroll_val = dx if dx != 0 else (-dy if dy != 0 else 0)
+
+                if scroll_val != 0:
+                    # 横向模式：方向由自动检测处理，所有方向都接受
+                    scroll_pixels = int(abs(scroll_val) * 25)
+
+                    if self.scroll_locked_direction is None:
+                        is_right = scroll_val > 0
+                        self.scroll_locked_direction = "down" if is_right else "up"
+                        arrow = "➡️" if is_right else "⬅️"
+                        if is_right:
+                            _log_stitch(T("{arrow} 锁定横向滚动方向: 向右", arrow=arrow), force=True)
+                        else:
+                            _log_stitch(T("{arrow} 锁定横向滚动方向: 向左", arrow=arrow), force=True)
+
+                    if ("down" if scroll_val > 0 else "up") == self.scroll_locked_direction:
+                        try:
+                            self.scroll_detected.emit(scroll_pixels)
+                        except Exception as e:
+                            _log_stitch(T("[ERROR] 触发滚动信号失败: {e}", e=e), force=True)
+            else:
+                # 竖向模式：第一次滚动锁定方向，之后只接受同方向
+                if dy != 0:
+                    is_scroll_down = dy < 0  # dy<0=向下
+                    direction = "down" if is_scroll_down else "up"
+
+                    if self.scroll_locked_direction is None:
+                        # 第一次滚动，锁定方向
+                        self.scroll_locked_direction = direction
+                        arrow = "⬇️" if is_scroll_down else "⬆️"
+                        if is_scroll_down:
+                            _log_stitch(T("{arrow} 锁定滚动方向: 向下", arrow=arrow), force=True)
+                        else:
+                            _log_stitch(T("{arrow} 锁定滚动方向: 向上", arrow=arrow), force=True)
+
+                    if direction == self.scroll_locked_direction:
+                        scroll_pixels = int(abs(dy) * 25)
+                        try:
+                            self.scroll_detected.emit(scroll_pixels)
+                        except Exception as e:
+                            _log_stitch(T("[ERROR] 触发滚动信号失败: {e}", e=e), force=True)
+                    else:
+                        # 反向滚动，忽略
+                        pass
+
+    def _setup_wheel_hook(self):
+        """安装原生 WH_MOUSE_LL 低级钩子监听全局滚轮（后台线程安装+消息泵）。
+
+        历史用 pynput.mouse.Listener 做同一件事，逻辑完全一致；换成原生
+        ctypes 实现：依赖更少、行为在打包环境完全确定（排查"冻结包里滚动
+        无反应、日志零报错"时，pynput 的钩子线程是唯一无法从日志观测的
+        环节）。事件判定逻辑见 _handle_wheel_event，两种实现共用。
+        """
+        import threading
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+
+        WH_MOUSE_LL = 14
+        WM_MOUSEWHEEL = 0x020A
+        WM_MOUSEHWHEEL = 0x020E
+        WM_QUIT = 0x0012
+
+        class MSLLHOOKSTRUCT(ctypes.Structure):
+            _fields_ = [
+                ("pt", wintypes.POINT),
+                ("mouseData", wintypes.DWORD),
+                ("flags", wintypes.DWORD),
+                ("time", wintypes.DWORD),
+                ("dwExtraInfo", ctypes.c_size_t),
+            ]
+
+        LRESULT = ctypes.c_ssize_t
+        HOOKPROC = ctypes.WINFUNCTYPE(
+            LRESULT, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM,
+            ctypes.POINTER(MSLLHOOKSTRUCT),
+        )
+
+        # ── 独立函数指针（关键！）──
+        # pynput 在导入期就给共享的 windll.user32.SetWindowsHookExW 等对象设
+        # 了自己的 argtypes（3 参数键盘钩子签名，见 pynput/_util/win32.py 的
+        # SystemHook）。windll 的函数对象按属性名进程级缓存，argtypes 谁后设
+        # 都写同一个槽位——我们的 4 参数鼠标钩子回调会被它拒收（实测：
+        # "TypeError: expected WinFunctionType instance instead of
+        # WinFunctionType"，钩子装不上，滚动全部失灵）。这里用
+        # WINFUNCTYPE(原型)(("函数名", 库)) 语法建立带自带签名的独立函数
+        # 对象，完全不读共享槽位。
+        _fn_SetWindowsHookExW = ctypes.WINFUNCTYPE(
+            LRESULT, ctypes.c_int, HOOKPROC, ctypes.c_ssize_t, wintypes.DWORD,
+        )(("SetWindowsHookExW", user32))
+        _fn_UnhookWindowsHookExW = ctypes.WINFUNCTYPE(
+            wintypes.BOOL, ctypes.c_ssize_t,
+        )(("UnhookWindowsHookEx", user32))  # 此 API 无 W 后缀变体
+        _fn_CallNextHookEx = ctypes.WINFUNCTYPE(
+            LRESULT, ctypes.c_ssize_t, ctypes.c_int,
+            wintypes.WPARAM, wintypes.LPARAM,
+        )(("CallNextHookEx", user32))  # 此 API 无 W 后缀变体
+        _fn_GetMessageW = ctypes.WINFUNCTYPE(
+            ctypes.c_int, ctypes.POINTER(wintypes.MSG),
+            wintypes.HWND, wintypes.UINT, wintypes.UINT,
+        )(("GetMessageW", user32))
+        _fn_PostThreadMessageW = ctypes.WINFUNCTYPE(
+            wintypes.BOOL, wintypes.DWORD, wintypes.UINT,
+            wintypes.WPARAM, wintypes.LPARAM,
+        )(("PostThreadMessageW", user32))
+
+        def _wheel_delta(mouse_data: int) -> int:
+            """从 WM_*WHEEL 的 mouseData 取高 16 位有符号滚轮增量。"""
+            delta = (mouse_data >> 16) & 0xFFFF
+            if delta >= 0x8000:
+                delta -= 0x10000
+            return delta
+
+        def _lowlevel_hook_proc(n_code, w_param, l_param):
+            if n_code >= 0:
+                try:
+                    info = l_param.contents
+                    if w_param == WM_MOUSEWHEEL:
+                        self._handle_wheel_event(
+                            info.pt.x, info.pt.y, 0, _wheel_delta(info.mouseData)
+                        )
+                    elif w_param == WM_MOUSEHWHEEL:
+                        self._handle_wheel_event(
+                            info.pt.x, info.pt.y, _wheel_delta(info.mouseData), 0
+                        )
+                except Exception as e:
+                    # 钩子回调里的异常绝不能外抛（会打断钩子链且静默丢事件）
+                    _log_stitch(T("[ERROR] 滚轮钩子回调异常: {e}", e=e), force=True)
+            return _fn_CallNextHookEx(0, n_code, w_param, l_param)
+
+        # 回调对象必须常驻引用，否则被 GC 后钩子触发野指针
+        self._wheel_hook_proc = HOOKPROC(_lowlevel_hook_proc)
+        # 供 _stop_wheel_hook 使用
+        self._wheel_hook_fns = (_fn_PostThreadMessageW, _fn_UnhookWindowsHookExW)
+
+        def _hook_thread():
+            try:
+                self._wheel_hook_tid = kernel32.GetCurrentThreadId()
+                hook = _fn_SetWindowsHookExW(
+                    WH_MOUSE_LL, self._wheel_hook_proc, 0, 0
+                )
+                if not hook:
+                    _log_stitch(T(
+                        "[ERROR] SetWindowsHookExW 失败，错误码 {err}",
+                        err=kernel32.GetLastError(),
+                    ), force=True)
+                    return
+                self._wheel_hook_handle = hook
+                _log_stitch(T(
+                    "[OK] 全局滚轮钩子已安装（竖向仅响应向下滚动，横向响应向右滚动和Shift+滚轮）"
+                ), force=True)
+                self._wheel_hook_installed = True
+
+                # 低级钩子的回调在安装线程上触发，必须泵消息
+                msg = wintypes.MSG()
+                while _fn_GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+                    pass
+            except Exception as e:
+                _log_stitch(T("[ERROR] 滚轮钩子线程异常: {e}", e=e), force=True)
+                import traceback
+                traceback.print_exc()
+            finally:
+                if getattr(self, "_wheel_hook_handle", None):
+                    _fn_UnhookWindowsHookExW(self._wheel_hook_handle)
+                    self._wheel_hook_handle = None
+
+        self._wheel_hook_thread = threading.Thread(
+            target=_hook_thread, name="WheelHook", daemon=True
+        )
+        self._wheel_hook_thread.start()
+
+    def _stop_wheel_hook(self):
+        """卸载滚轮钩子并结束钩子线程（幂等）。"""
+        fns = getattr(self, "_wheel_hook_fns", None)
+        tid = getattr(self, "_wheel_hook_tid", None)
+        if tid and fns:
+            post_quit, _unhook = fns
+            post_quit(tid, 0x0012, 0, 0)  # WM_QUIT
+            self._wheel_hook_tid = None
+        thread = getattr(self, "_wheel_hook_thread", None)
+        if thread is not None:
+            thread.join(timeout=1.0)
+            self._wheel_hook_thread = None
     
     def _toggle_direction(self):
         """切换截图方向（竖向/横向）"""
@@ -1786,10 +1922,9 @@ class ScrollCaptureWindow(QWidget):
             if hasattr(self, '_position_fix_timer'):
                 self._position_fix_timer.stop()
             
-            # 停止鼠标监听器
-            if hasattr(self, 'mouse_listener'):
-                self.mouse_listener.stop()
-                _log_stitch(T("[OK] 全局滚轮监听器已停止"))
+            # 停止全局滚轮钩子
+            self._stop_wheel_hook()
+            _log_stitch(T("[OK] 全局滚轮监听器已停止"))
 
             # 🆕 停止键盘监听器
             self._stop_keyboard_listener()

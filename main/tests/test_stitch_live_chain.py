@@ -72,7 +72,7 @@ class TestLiveChain:
             lambda self, win_id, x=0, y=0, w=0, h=0: next(frames),
         )
 
-        # 滚轮钩子在 pynput 线程里做的事：emit scroll_detected。
+        # 滚轮钩子线程里做的事：emit scroll_detected。
         # 这里直接在测试（主线程）里 emit，走同一条 QueuedConnection。
         window.scroll_detected.emit(500)
 
@@ -116,7 +116,7 @@ class TestLiveChain:
         assert window.stitched_result.size[1] >= 100 + 40  # 至少 2 次成功增量
 
     def test_real_os_wheel_event_through_global_hook(self, qapp, window, monkeypatch):
-        """真实 OS 滚轮事件 → 真实全局钩子（pynput 线程）→ 信号 → 抓帧。
+        """真实 OS 滚轮事件 → 真实全局 WH_MOUSE_LL 钩子线程 → 信号 → 抓帧。
 
         之前的测试直接在主线程 emit scroll_detected，绕过了钩子线程。
         这里用 pynput 注入真实滚轮事件（SendInput 走系统输入队列，全局钩子
@@ -135,9 +135,10 @@ class TestLiveChain:
         controller.position = (60, 50)
         time.sleep(0.1)
 
-        # 等钩子就绪（_init_listener_bg 在后台线程启动）
-        assert _pump_until(qapp, lambda: window.mouse_listener is not None), \
-            "全局滚轮监听器未启动"
+        # 等钩子就绪（WH_MOUSE_LL 在后台线程安装+泵消息）
+        assert _pump_until(
+            qapp, lambda: getattr(window, "_wheel_hook_installed", False)
+        ), "全局滚轮钩子未安装"
 
         controller.scroll(0, -3)  # 真实 OS 滚轮事件（向下）
 
@@ -146,3 +147,46 @@ class TestLiveChain:
             lambda: len(window.screenshots) >= 1,
             timeout_s=8.0,
         ), "真实滚轮事件未触发抓帧（钩子→信号→定时器链路断了）"
+
+    def test_hook_survives_pynput_argtypes_clobbering(self, qapp, monkeypatch):
+        """回归：pynput 导入期会污染进程共享的 windll.user32 钩子函数
+        argtypes（换成它自己的 3 参数键盘钩子签名），导致我们的 4 参数
+        鼠标钩子回调被 ctypes 拒收、钩子装不上、滚动全部失灵。钩子必须
+        用自带签名的独立函数指针，在污染存在时照样能安装。"""
+        import ctypes
+        from ctypes import wintypes
+
+        from stitch.scroll_window import ScrollCaptureWindow
+
+        user32 = ctypes.windll.user32
+        FakeProc = ctypes.WINFUNCTYPE(
+            ctypes.c_ssize_t, ctypes.c_int32, wintypes.WPARAM, wintypes.LPARAM
+        )
+        saved = user32.SetWindowsHookExW.argtypes
+        user32.SetWindowsHookExW.argtypes = (
+            ctypes.c_int, FakeProc, wintypes.HINSTANCE, wintypes.DWORD,
+        )
+        try:
+            win = ScrollCaptureWindow(QRect(0, 0, 120, 100), None)
+            try:
+                frames = iter([_make_pixmap(80)])
+                monkeypatch.setattr(
+                    QScreen, "grabWindow",
+                    lambda self_, win_id, x=0, y=0, w=0, h=0: next(frames),
+                )
+                pynput_mouse = pytest.importorskip("pynput.mouse")
+                controller = pynput_mouse.Controller()
+                controller.position = (60, 50)
+
+                assert _pump_until(
+                    qapp, lambda: getattr(win, "_wheel_hook_installed", False)
+                ), "argtypes 被污染后钩子未能安装（独立函数指针未生效）"
+
+                controller.scroll(0, -3)
+                assert _pump_until(
+                    qapp, lambda: len(win.screenshots) >= 1, timeout_s=8.0
+                ), "argtypes 污染场景下滚动未触发抓帧"
+            finally:
+                win._cleanup()
+        finally:
+            user32.SetWindowsHookExW.argtypes = saved
