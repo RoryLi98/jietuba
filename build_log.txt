@@ -1,0 +1,107 @@
+950 INFO: Imported existing <module 'comtypes.gen' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\comtypes\\gen\\__init__.py'>
+951 INFO: Using writeable comtypes cache directory: 'F:\Work\ZCode_Project\jietuba\repo\venv311\Lib\site-packages\comtypes\gen'
+3940 INFO: PyInstaller: 6.17.0, contrib hooks: 2026.7
+3940 INFO: Python: 3.11.9
+4018 INFO: Platform: Windows-10-10.0.26100-SP0
+4018 INFO: Python environment: F:\Work\ZCode_Project\jietuba\repo\venv311
+4154 INFO: Module search paths (PYTHONPATH):
+['F:\\Work\\ZCode_Project\\jietuba\\repo',
+ 'C:\\Users\\Link\\AppData\\Local\\Programs\\Python\\Python311\\python311.zip',
+ 'C:\\Users\\Link\\AppData\\Local\\Programs\\Python\\Python311\\DLLs',
+ 'C:\\Users\\Link\\AppData\\Local\\Programs\\Python\\Python311\\Lib',
+ 'C:\\Users\\Link\\AppData\\Local\\Programs\\Python\\Python311',
+ 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311',
+ 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages',
+ 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\win32',
+ 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\win32\\lib',
+ 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\Pythonwin',
+ 'F:\\Work\\ZCode_Project\\jietuba\\repo\\main']
+7057 INFO: Appending 'datas' from .spec
+7107 INFO: checking Analysis
+7199 INFO: Building because excludes changed
+7199 INFO: Looking for Python shared library...
+7199 INFO: Using Python shared library: C:\Users\Link\AppData\Local\Programs\Python\Python311\python311.dll
+7199 INFO: Running Analysis Analysis-00.toc
+7199 INFO: Target bytecode optimization level: 0
+7200 INFO: Initializing module dependency graph...
+7208 INFO: Initializing module graph hook caches...
+7365 INFO: Analyzing modules for base_library.zip ...
+12618 INFO: Processing standard module hook 'hook-heapq.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks'
+13059 INFO: Processing standard module hook 'hook-encodings.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks'
+19796 INFO: Processing standard module hook 'hook-pickle.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks'
+28389 INFO: Caching module dependency graph...
+28546 INFO: Analyzing F:\Work\ZCode_Project\jietuba\repo\main\main_app.py
+28670 INFO: Processing standard module hook 'hook-PySide6.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks'
+29573 INFO: Processing standard module hook 'hook-shiboken6.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks'
+31925 INFO: Processing standard module hook 'hook-PySide6.QtWidgets.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks'
+41891 INFO: Processing standard module hook 'hook-PySide6.QtCore.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks'
+54650 INFO: Processing standard module hook 'hook-PySide6.QtGui.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks'
+91926 INFO: Processing standard module hook 'hook-xml.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks'
+92049 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks'
+92314 INFO: Processing standard module hook 'hook-PySide6.QtSvg.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks'
+93617 INFO: Processing standard module hook 'hook-_ctypes.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks'
+93688 INFO: Processing standard module hook 'hook-platform.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks'
+93956 INFO: Processing standard module hook 'hook-PySide6.QtXml.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks'
+95624 INFO: Processing standard module hook 'hook-PIL.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks'
+95801 INFO: Processing standard module hook 'hook-PIL.Image.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks'
+96719 INFO: Processing standard module hook 'hook-PIL.ImageFilter.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks'
+99034 INFO: Processing standard module hook 'hook-comtypes.client.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+101325 INFO: Processing standard module hook 'hook-pynput.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+102188 INFO: Processing pre-safe-import-module hook 'hook-six.moves.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+113659 INFO: Analyzing hidden import 'PySide6.QtSvgWidgets'
+113687 INFO: Processing standard module hook 'hook-PySide6.QtSvgWidgets.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks'
+115294 INFO: Analyzing hidden import 'comtypes.gen.UIAutomationClient'
+115831 INFO: Analyzing hidden import 'darkdetect'
+115958 INFO: Analyzing hidden import 'clipboard.ui.dialogs.manage_dialog'
+116636 INFO: Analyzing hidden import 'clipboard.ui.windows.clipboard_window'
+117215 INFO: Processing module hooks (post-graph stage)...
+118950 INFO: Processing standard module hook 'hook-PIL.SpiderImagePlugin.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks'
+119552 INFO: Performing binary vs. data reclassification (221 entries)
+123281 INFO: Looking for ctypes DLLs
+124220 WARNING: Ignoring AppKit.framework/AppKit imported from F:\Work\ZCode_Project\jietuba\repo\venv311\Lib\site-packages\darkdetect\_mac_detect.py - only basenames are supported with ctypes imports!
+124278 INFO: Analyzing run-time hooks ...
+124282 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+124308 INFO: Including run-time hook 'pyi_rth_pyside6.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+124320 INFO: Processing pre-find-module-path hook 'hook-_pyi_rth_utils.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+124340 INFO: Processing standard module hook 'hook-_pyi_rth_utils.py' from 'F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PyInstaller\\hooks'
+124390 INFO: Creating base_library.zip...
+124423 INFO: Looking for dynamic libraries
+128545 INFO: Extra DLL search directories (AddDllDirectory): ['F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\shiboken6']
+128545 INFO: Extra DLL search directories (PATH): ['F:\\Work\\ZCode_Project\\jietuba\\repo\\venv311\\Lib\\site-packages\\PySide6']
+133559 INFO: Warnings written to F:\Work\ZCode_Project\jietuba\repo\build\jietuba_pp\warn-jietuba_pp.txt
+133731 INFO: Graph cross-reference written to F:\Work\ZCode_Project\jietuba\repo\build\jietuba_pp\xref-jietuba_pp.html
+133951 INFO: checking PYZ
+134026 INFO: Building because F:\Work\ZCode_Project\jietuba\repo\main\stitch\scroll_window.py changed
+134026 INFO: Building PYZ (ZlibArchive) F:\Work\ZCode_Project\jietuba\repo\build\jietuba_pp\PYZ-00.pyz
+135113 INFO: Building PYZ (ZlibArchive) F:\Work\ZCode_Project\jietuba\repo\build\jietuba_pp\PYZ-00.pyz completed successfully.
+135173 INFO: checking PKG
+135191 INFO: Building because toc changed
+135191 INFO: Building PKG (CArchive) jietuba_pp.pkg
+153807 INFO: Building PKG (CArchive) jietuba_pp.pkg completed successfully.
+153813 INFO: Bootloader F:\Work\ZCode_Project\jietuba\repo\venv311\Lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
+153814 INFO: checking EXE
+153832 INFO: Building because toc changed
+153832 INFO: Building EXE from EXE-00.toc
+153834 INFO: Copying bootloader EXE to F:\Work\ZCode_Project\jietuba\repo\dist\jietuba_pp.exe
+153974 INFO: Copying icon to EXE
+154053 INFO: Copying 0 resources to EXE
+154053 INFO: Embedding manifest in EXE
+154142 INFO: Appending PKG archive to EXE
+154301 INFO: Fixing EXE headers
+154902 INFO: Building EXE from EXE-00.toc completed successfully.
+154912 INFO: Build complete! The results are available in: F:\Work\ZCode_Project\jietuba\repo\dist
+============================================================
+开始打包 jietuba_pp (onefile 模式，PP-OCR 版本)
+============================================================
+源文件: main/main_app.py
+输出目录: dist
+构建目录: build
+============================================================
+已生成 spec 文件: F:\Work\ZCode_Project\jietuba\repo\jietuba_pp.spec
+已外置模型: PP-OCRv6_det_small.onnx
+已外置模型: PP-OCRv6_rec_small.onnx
+============================================================
+打包完成！
+可执行文件位置: dist/jietuba_pp.exe
+模型目录(需与 exe 同级): dist/models/
+============================================================

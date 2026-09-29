@@ -567,9 +567,13 @@ class ScrollCaptureWindow(QWidget):
         
         # 滚动检测相关
         self.last_scroll_time = 0  # 最后一次滚动的时间戳
-        # 从配置读取滚动冷却时间
-        settings = QSettings('Fandes', 'jietuba')
-        self.scroll_cooldown = settings.value('screenshot/scroll_cooldown', 0.15, type=float)
+        # 滚动冷却时间。历史遗留坑：这里曾硬编码 QSettings('Fandes','jietuba')，
+        # 而设置界面把 scroll_cooldown 写在 Jietuba\ToolSettings 下——两边永远
+        # 对不上，用户的配置从来没生效过。改走统一的设置管理器。
+        try:
+            self.scroll_cooldown = float(get_tool_settings_manager().get_scroll_cooldown())
+        except Exception:
+            self.scroll_cooldown = 0.15
         self.capture_mode = "immediate"  # 截图模式: "immediate"立即 或 "wait"等待停止
         
         # 去重相关
@@ -959,9 +963,9 @@ class ScrollCaptureWindow(QWidget):
                                         self.scroll_locked_direction = "down" if is_right else "up"
                                         arrow = "➡️" if is_right else "⬅️"
                                         if is_right:
-                                            _log_stitch(T("{arrow} 锁定横向滚动方向: 向右", arrow=arrow))
+                                            _log_stitch(T("{arrow} 锁定横向滚动方向: 向右", arrow=arrow), force=True)
                                         else:
-                                            _log_stitch(T("{arrow} 锁定横向滚动方向: 向左", arrow=arrow))
+                                            _log_stitch(T("{arrow} 锁定横向滚动方向: 向左", arrow=arrow), force=True)
 
                                     if ("down" if scroll_val > 0 else "up") == self.scroll_locked_direction:
                                         try:
@@ -979,9 +983,9 @@ class ScrollCaptureWindow(QWidget):
                                         self.scroll_locked_direction = direction
                                         arrow = "⬇️" if is_scroll_down else "⬆️"
                                         if is_scroll_down:
-                                            _log_stitch(T("{arrow} 锁定滚动方向: 向下", arrow=arrow))
+                                            _log_stitch(T("{arrow} 锁定滚动方向: 向下", arrow=arrow), force=True)
                                         else:
-                                            _log_stitch(T("{arrow} 锁定滚动方向: 向上", arrow=arrow))
+                                            _log_stitch(T("{arrow} 锁定滚动方向: 向上", arrow=arrow), force=True)
 
                                     if direction == self.scroll_locked_direction:
                                         scroll_pixels = int(abs(dy) * 25)
@@ -996,7 +1000,7 @@ class ScrollCaptureWindow(QWidget):
                     # 创建并启动监听器（pynput内部也会使用线程）
                     self.mouse_listener = mouse.Listener(on_scroll=on_scroll)
                     self.mouse_listener.start()
-                    _log_stitch(T("[OK] 全局滚轮监听器已启动（竖向仅响应向下滚动，横向响应向右滚动和Shift+滚轮）"))
+                    _log_stitch(T("[OK] 全局滚轮监听器已启动（竖向仅响应向下滚动，横向响应向右滚动和Shift+滚轮）"), force=True)
                 except Exception as e:
                     _log_stitch(T("[ERROR] 设置鼠标钩子失败: {e}", e=e), force=True)
                     import traceback
@@ -1318,10 +1322,16 @@ class ScrollCaptureWindow(QWidget):
             delay = self.scroll_cooldown
             if self.scroll_direction == "horizontal":
                 delay += 0.15
+            # 只在一连串滚动的第一下记日志（force 保证冻结包可见）：
+            # 下一行"📸 抓帧"日志出现与否，可以把链路断点定位到
+            # 钩子→信号→定时器 与 抓帧→worker 之间
+            burst_start = not self.capture_timer.isActive()
             if self.capture_timer.isActive():
                 self.capture_timer.stop()
             self.capture_timer.start(int(delay * 1000))
-            _log_stitch(T("⚡ 检测到滚动，累积距离: {distance}px，{delay}秒后截图...", distance=self.current_scroll_distance, delay=delay))
+            if burst_start:
+                _log_stitch(T("⚡ 检测到滚动，{delay}秒后截图", delay=delay), force=True)
+            _log_stitch(T("滚动累积距离: {distance}px", distance=self.current_scroll_distance))
         else:
             # 等待停止模式：启动检测定时器
             if not self.scroll_check_timer.isActive():
@@ -1470,12 +1480,12 @@ class ScrollCaptureWindow(QWidget):
             if hasattr(self, 'preview_panel') and self.preview_panel:
                 self.preview_panel.update_count(count)
 
-            # 只输出一行关键信息
+            # 只输出一行关键信息（force：冻结包里按 INFO 落盘，链路诊断依赖它）
             _log_stitch(T(
                 "📸 第 {screenshot_count} 张 → 拼接结果: {w}x{h}",
                 screenshot_count=len(self.screenshots),
                 w=payload["width"], h=payload["height"],
-            ))
+            ), force=True)
             self._clear_preview_warning()
         else:
             self.current_scroll_distance = 0
