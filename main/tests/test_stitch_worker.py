@@ -52,7 +52,7 @@ def _submit_and_wait(worker, qimage, timeout=10.0):
     done = threading.Event()
     results = []
     worker._emit = lambda payload: (results.append(payload), done.set())
-    worker.submit(qimage, 0, None, "vertical")
+    worker.submit(qimage, "vertical")
     assert done.wait(timeout), "worker 未在超时内返回结果"
     return results[0]
 
@@ -118,7 +118,6 @@ class TestAutoFinishPath:
         win.screenshots = []
         win.stitched_result = None
         win.scroll_distances = []
-        win.current_scroll_distance = 0
         win.scroll_locked_direction = None
         win._auto_finish_scheduled = False
         win.preview_warning_active = False
@@ -137,7 +136,7 @@ class TestAutoFinishPath:
         scheduled = []
         monkeypatch.setattr(
             QTimer, "singleShot",
-            lambda delay, callback: scheduled.append((delay, callback)),
+            lambda delay, receiver, callback: scheduled.append((delay, callback)),
         )
 
         payload = {
@@ -170,7 +169,6 @@ class TestAutoFinishPath:
             "locked_direction": "down",
             "screenshot_count": 2,
             "failed_frame_no": 0,
-            "scroll_distance": 120,
             "auto_finish": False,
             "error_detail": None,
             "width": 100,
@@ -180,9 +178,8 @@ class TestAutoFinishPath:
 
         assert win.stitched_result is payload["stitched"]
         assert len(win.screenshots) == 2
+        # 拼接增益（120 - 0）作为等效滚动距离记录
         assert win.scroll_distances == [120]
-        # 距离快照已从累积值中扣除
-        assert win.current_scroll_distance == -0 or win.current_scroll_distance == 0
         assert win.scroll_locked_direction == "down"
         assert win._auto_finish_scheduled is False
         panel.update_count.assert_called_once_with(2)

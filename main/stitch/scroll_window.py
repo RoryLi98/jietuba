@@ -14,15 +14,16 @@ jietuba_scroll.py - 滚动截图窗口模块
 
 特点:
 - 窗口透明,不拦截鼠标事件
-- 使用 Windows API 监听鼠标滚轮
-- 延迟截图机制避免滚动动画干扰
-- 支持取消和完成截图操作
+- 内容感知:监视定时器持续对比框内画面的降采样签名,检测到变化并
+  稳定后自动抓帧拼接——用户以任意速度滚动、随时停顿都能正确出帧,
+  不再依赖滚轮事件
+- 拼接/哈希/预览缩略图在串行工作线程完成,主线程只抓屏
+- 支持取消和完成截图操作;页面静止数秒自动收尾
 
 依赖模块:
 - PySide6: GUI框架
 - PIL: 图像处理
 - ctypes: Windows API调用
-- pynput: 鼠标事件监听
 
 使用方法:
     window = ScrollCaptureWindow(capture_rect, parent)
@@ -34,7 +35,7 @@ import time
 import ctypes
 import threading
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QApplication
-from PySide6.QtCore import Qt, QRect, QTimer, Signal, QPoint, QSettings
+from PySide6.QtCore import Qt, QRect, QTimer, Signal, QPoint
 from PySide6.QtGui import QPainter, QPen, QColor, QPixmap, QGuiApplication, QImage
 from typing import Optional
 from PIL import Image
@@ -297,10 +298,10 @@ class _StitchWorker(threading.Thread):
     拼接结果是随帧数增长的大图，PNG 编解码成本随之增长——留在主线程会让
     滚动截图越滚越卡（longstitch 与 PIL 编解码均释放 GIL，线程化有效）。
 
-    状态权威在本线程：stitched_result、帧计数、方向锁镜像、去重哈希都在
+    状态权威在本线程：stitched_result、帧计数、方向锁、去重哈希都在
     这里维护，处理完通过 emit 回调（窗口的 stitch_result_ready 信号，
-    QueuedConnection）把结果交回主线程。主线程滚轮钩子会在首滚时锁定
-    方向，该状态随任务（locked_direction_hint）带进来，未锁定时采纳。
+    QueuedConnection）把结果交回主线程。方向锁不再来自滚轮：第 2 帧由
+    Rust 自动检测判定（reverse → 翻转态拼接），此后沿用锁定的方向。
 
     方向判定必须发生在这里而不是提交前：快速连续滚动时，第 N 帧的
     自动检测结果要先于第 N+1 帧的翻转决策生效——串行队列天然保证顺序。
@@ -323,12 +324,10 @@ class _StitchWorker(threading.Thread):
         self._prev_hash = None
         self._duplicate_count = 0
 
-    def submit(self, qimage, scroll_distance, locked_direction_hint, direction_hint):
+    def submit(self, qimage, direction_hint):
         """提交一帧。qimage 的所有权移交给本线程，主线程不得再修改。"""
         self._queue.put({
             "qimage": qimage,
-            "scroll_distance": scroll_distance,
-            "locked_direction_hint": locked_direction_hint,
             "direction_hint": direction_hint,
         })
         if not self.is_alive():
@@ -355,8 +354,6 @@ class _StitchWorker(threading.Thread):
 
     def _process(self, job):
         qimage = job["qimage"]
-        if self._locked is None and job["locked_direction_hint"] is not None:
-            self._locked = job["locked_direction_hint"]
         # 方向随任务走：方向切换后，飞行中的旧帧仍按提交时的方向处理
         self.scroll_direction = job["direction_hint"]
 
@@ -480,7 +477,6 @@ class _StitchWorker(threading.Thread):
             "locked_direction": self._locked,
             "screenshot_count": self._count,
             "failed_frame_no": screenshot_count if not ok else 0,
-            "scroll_distance": job["scroll_distance"],
             "auto_finish": auto_finish,
             "error_detail": error_detail,
             "width": width,
@@ -527,80 +523,65 @@ class ScrollCaptureWindow(QWidget):
     
     finished = Signal()  # 完成信号
     cancelled = Signal()  # 取消信号
-    scroll_detected = Signal(int)  # 滚轮检测信号（用于线程安全通信），传递滚动距离
     stitch_result_ready = Signal(object)  # 拼接工作线程 → 主线程的结果载荷
-    horizontal_key_triggered = Signal()  # Shift 键触发横向滚动（pynput 线程 → 主线程）
-    
+
+    # ── 内容感知抓帧参数 ──
+    # 不再依赖滚轮事件触发：监视定时器持续对框内内容做降采样签名，
+    # 内容变化→等它稳定→自动抓帧拼接。用户以任意速度滚动、随时停顿
+    # 都能正确出帧。
+    _WATCH_IDLE_MS = 250     # 内容与上帧一致时的轮询间隔（省 CPU）
+    _WATCH_ACTIVE_MS = 90    # 检测到变化后的轮询间隔（快速捕捉稳定点）
+    _STABLE_TICKS = 2        # 连续 N 次采样一致即认为内容已稳定
+    _SIGNATURE_SIZE = 32     # 内容签名边长（32x32 ARGB32）
+    # 签名差异位比例阈值：容忍光标闪烁、抗锯齿抖动这类微变化（32x32x4
+    # 字节 = 32768 位，0.5% ≈ 163 位）
+    _SIGNATURE_MAX_DIFF_BITS = 160
+    _CHANGE_FORCE_CAPTURE_S = 0.7   # 内容持续变化超过 N 秒强拍一帧（动画页兜底）
+    _AUTO_FINISH_IDLE_S = 5.0       # 内容静止 N 秒且已拼≥2帧 → 自动收尾
+    _AUTO_FINISH_WARN_S = 3.0       # 静止到 N 秒时先给出提示
+
     def __init__(self, capture_rect, parent=None, config_manager=None):
         """初始化滚动截图窗口
-        
+
         Args:
             capture_rect: QRect，截图区域（屏幕坐标）
             parent: 父窗口
             config_manager: 配置管理器（用于钉图功能）
         """
         super().__init__(parent)
-        
+
         self.capture_rect = capture_rect
         self.config_manager = config_manager  # 保存配置管理器
-        self.screenshots = []  # 存储截图的列表
-        self.scroll_distances = []  # 存储每次滚动的距离（像素）
-        self.current_scroll_distance = 0  # 当前累积的滚动距离
-        
+        self.screenshots = []  # 存储截图的列表（只计帧数）
+        self.scroll_distances = []  # 每帧的拼接增益（等效滚动距离，像素）
+
         # 保存目录（由外部设置）
         self.save_directory = None
         self.save_service = SaveService()
-        
-        # 🆕 截图方向: "vertical"(竖向) 或 "horizontal"(横向)
+
+        # 截图方向: "vertical"(竖向) 或 "horizontal"(横向)
         self.scroll_direction = "vertical"
-        
-        # 🆕 滚动方向锁定: None=未锁定, "down"=向下, "up"=向上
+
+        # 滚动方向锁定: None=未锁定（由第 2 帧的自动检测锁定）,
+        # "down"/"up"。不再来自滚轮，纯由画面内容判定。
         self.scroll_locked_direction = None
-        
-        # 🆕 横向模式的键盘监听器
-        self.keyboard_listener = None
-        self.horizontal_scroll_key_pressed = False  # 防止重复触发
-        
+
         # 实时拼接相关
         self.stitched_result = None  # 当前拼接的结果图
         self.preview_warning_active = False
-        
-        # 滚动检测相关
-        self.last_scroll_time = 0  # 最后一次滚动的时间戳
-        # 滚动冷却时间。历史遗留坑：这里曾硬编码 QSettings('Fandes','jietuba')，
-        # 而设置界面把 scroll_cooldown 写在 Jietuba\ToolSettings 下——两边永远
-        # 对不上，用户的配置从来没生效过。改走统一的设置管理器。
-        try:
-            self.scroll_cooldown = float(get_tool_settings_manager().get_scroll_cooldown())
-        except Exception:
-            self.scroll_cooldown = 0.15
-        self.capture_mode = "immediate"  # 截图模式: "immediate"立即 或 "wait"等待停止
-        
-        # 去重相关
-        self.duplicate_threshold = 0.95  # 相似度阈值（95%以上认为重复）
 
-        # 到底自动完成：滚动后连续多次截到与上一帧几乎相同的画面，
-        # 说明页面已到边缘无法继续滚动。连续 2 次即自动收尾。
-        self._prev_capture_hash = None
-        self._duplicate_capture_count = 0
+        # 去重相关（worker 内部亦有一份，手动抓帧路径仍会用）
+        self.duplicate_threshold = 0.95
+
+        # 自动收尾
         self._auto_finish_scheduled = False
-        
-        # 定时器
-        self.capture_timer = QTimer(self)  # 截图定时器
-        self.capture_timer.setSingleShot(True)
-        self.capture_timer.timeout.connect(self._do_capture)
-        
-        self.scroll_check_timer = QTimer(self)  # 滚动检测定时器
-        self.scroll_check_timer.setInterval(100)  # 每100ms检查一次
-        self.scroll_check_timer.timeout.connect(self._check_scroll_stopped)
-        
-        # 连接滚轮检测信号到主线程处理函数
-        # 显式指定 QueuedConnection：pynput 回调运行在 threading.Thread 中
-        # PySide6 对非 QThread 线程的 AutoConnection 检测不稳定，强制入队保证线程安全
-        self.scroll_detected.connect(
-            self._handle_scroll_in_main_thread,
-            Qt.ConnectionType.QueuedConnection
-        )
+
+        # ── 内容感知监视状态 ──
+        self._last_captured_sig = None   # 上一张已采集帧的内容签名
+        self._candidate_sig = None       # 变化中内容的最近一次签名
+        self._stable_count = 0           # 候选签名连续一致的次数
+        self._change_started_at = None   # 本轮变化开始时刻（monotonic）
+        self._idle_started_at = None     # 内容静止开始时刻（monotonic）
 
         # 拼接工作线程：主线程只抓帧，像素管线在后台串行完成。
         # 结果经 QueuedConnection 回主线程，见 _on_stitch_result。
@@ -615,12 +596,10 @@ class ScrollCaptureWindow(QWidget):
             Qt.ConnectionType.QueuedConnection
         )
 
-        # Shift 键触发的横向滚动：pynput 回调线程没有 Qt 事件循环，
-        # 事件必须入队转回主线程处理（同滚轮路径的做法）。
-        self.horizontal_key_triggered.connect(
-            self._on_horizontal_key_triggered,
-            Qt.ConnectionType.QueuedConnection
-        )
+        # 内容监视定时器：初始采集完成后再启动（见 _capture_initial_screenshot）
+        self._watch_timer = QTimer(self)
+        self._watch_timer.setInterval(self._WATCH_IDLE_MS)
+        self._watch_timer.timeout.connect(self._watch_tick)
 
         self._setup_window()
         self._setup_ui()
@@ -923,7 +902,7 @@ class ScrollCaptureWindow(QWidget):
             self.preview_panel.clear_warning()
 
     def _setup_mouse_hook(self):
-        """设置窗口鼠标穿透，并安装全局滚轮钩子"""
+        """设置窗口鼠标穿透（不拦截页面滚动；抓帧由内容监视器驱动）"""
         try:
             # 使用Windows API设置窗口透明鼠标事件（需在主线程执行）
             hwnd = int(self.transparent_area.winId())
@@ -936,219 +915,7 @@ class ScrollCaptureWindow(QWidget):
             import traceback
             traceback.print_exc()
 
-        # 钩子安装与消息泵放到后台线程，避免阻塞 UI
-        self._setup_wheel_hook()
 
-    def _handle_wheel_event(self, x, y, dx, dy):
-        """处理一个滚轮事件（在钩子线程中调用）。
-
-        dx: 横向滚动量（正值向右，负值向左）
-        dy: 纵向滚动量（正值向上，负值向下）
-
-        注意:
-        - 横向模式: 监听 dx (横向滚轮) 和 dy (Shift+滚轮会产生横向滚动)
-        - 竖向模式: 只监听 dy (竖向滚轮)
-        """
-        # 首个事件做一次坐标诊断（force）：如果钩子收到了事件但坐标判定
-        # 把它过滤掉了，这条日志能直接看出 (x,y) 与截图区域的偏差
-        if not getattr(self, "_wheel_diag_logged", False):
-            self._wheel_diag_logged = True
-            rect = self.capture_rect
-            _log_stitch(T(
-                "🖱️ 首个滚轮事件: ({x},{y}) dx={dx} dy={dy}；截图区域: ({rx},{ry},{rw}x{rh})",
-                x=x, y=y, dx=dx, dy=dy,
-                rx=rect.x(), ry=rect.y(), rw=rect.width(), rh=rect.height(),
-            ), force=True)
-
-        if self._is_mouse_in_capture_area(x, y):
-            # 根据当前方向决定使用哪个滚动值
-            if self.scroll_direction == "horizontal":
-                # 横向模式：优先使用dx，也接受dy（Shift+滚轮）
-                scroll_val = dx if dx != 0 else (-dy if dy != 0 else 0)
-
-                if scroll_val != 0:
-                    # 横向模式：方向由自动检测处理，所有方向都接受
-                    scroll_pixels = int(abs(scroll_val) * 25)
-
-                    if self.scroll_locked_direction is None:
-                        is_right = scroll_val > 0
-                        self.scroll_locked_direction = "down" if is_right else "up"
-                        arrow = "➡️" if is_right else "⬅️"
-                        if is_right:
-                            _log_stitch(T("{arrow} 锁定横向滚动方向: 向右", arrow=arrow), force=True)
-                        else:
-                            _log_stitch(T("{arrow} 锁定横向滚动方向: 向左", arrow=arrow), force=True)
-
-                    if ("down" if scroll_val > 0 else "up") == self.scroll_locked_direction:
-                        try:
-                            self.scroll_detected.emit(scroll_pixels)
-                        except Exception as e:
-                            _log_stitch(T("[ERROR] 触发滚动信号失败: {e}", e=e), force=True)
-            else:
-                # 竖向模式：第一次滚动锁定方向，之后只接受同方向
-                if dy != 0:
-                    is_scroll_down = dy < 0  # dy<0=向下
-                    direction = "down" if is_scroll_down else "up"
-
-                    if self.scroll_locked_direction is None:
-                        # 第一次滚动，锁定方向
-                        self.scroll_locked_direction = direction
-                        arrow = "⬇️" if is_scroll_down else "⬆️"
-                        if is_scroll_down:
-                            _log_stitch(T("{arrow} 锁定滚动方向: 向下", arrow=arrow), force=True)
-                        else:
-                            _log_stitch(T("{arrow} 锁定滚动方向: 向上", arrow=arrow), force=True)
-
-                    if direction == self.scroll_locked_direction:
-                        scroll_pixels = int(abs(dy) * 25)
-                        try:
-                            self.scroll_detected.emit(scroll_pixels)
-                        except Exception as e:
-                            _log_stitch(T("[ERROR] 触发滚动信号失败: {e}", e=e), force=True)
-                    else:
-                        # 反向滚动，忽略
-                        pass
-
-    def _setup_wheel_hook(self):
-        """安装原生 WH_MOUSE_LL 低级钩子监听全局滚轮（后台线程安装+消息泵）。
-
-        历史用 pynput.mouse.Listener 做同一件事，逻辑完全一致；换成原生
-        ctypes 实现：依赖更少、行为在打包环境完全确定（排查"冻结包里滚动
-        无反应、日志零报错"时，pynput 的钩子线程是唯一无法从日志观测的
-        环节）。事件判定逻辑见 _handle_wheel_event，两种实现共用。
-        """
-        import threading
-        from ctypes import wintypes
-
-        user32 = ctypes.windll.user32
-        kernel32 = ctypes.windll.kernel32
-
-        WH_MOUSE_LL = 14
-        WM_MOUSEWHEEL = 0x020A
-        WM_MOUSEHWHEEL = 0x020E
-        WM_QUIT = 0x0012
-
-        class MSLLHOOKSTRUCT(ctypes.Structure):
-            _fields_ = [
-                ("pt", wintypes.POINT),
-                ("mouseData", wintypes.DWORD),
-                ("flags", wintypes.DWORD),
-                ("time", wintypes.DWORD),
-                ("dwExtraInfo", ctypes.c_size_t),
-            ]
-
-        LRESULT = ctypes.c_ssize_t
-        HOOKPROC = ctypes.WINFUNCTYPE(
-            LRESULT, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM,
-            ctypes.POINTER(MSLLHOOKSTRUCT),
-        )
-
-        # ── 独立函数指针（关键！）──
-        # pynput 在导入期就给共享的 windll.user32.SetWindowsHookExW 等对象设
-        # 了自己的 argtypes（3 参数键盘钩子签名，见 pynput/_util/win32.py 的
-        # SystemHook）。windll 的函数对象按属性名进程级缓存，argtypes 谁后设
-        # 都写同一个槽位——我们的 4 参数鼠标钩子回调会被它拒收（实测：
-        # "TypeError: expected WinFunctionType instance instead of
-        # WinFunctionType"，钩子装不上，滚动全部失灵）。这里用
-        # WINFUNCTYPE(原型)(("函数名", 库)) 语法建立带自带签名的独立函数
-        # 对象，完全不读共享槽位。
-        _fn_SetWindowsHookExW = ctypes.WINFUNCTYPE(
-            LRESULT, ctypes.c_int, HOOKPROC, ctypes.c_ssize_t, wintypes.DWORD,
-        )(("SetWindowsHookExW", user32))
-        _fn_UnhookWindowsHookExW = ctypes.WINFUNCTYPE(
-            wintypes.BOOL, ctypes.c_ssize_t,
-        )(("UnhookWindowsHookEx", user32))  # 此 API 无 W 后缀变体
-        _fn_CallNextHookEx = ctypes.WINFUNCTYPE(
-            LRESULT, ctypes.c_ssize_t, ctypes.c_int,
-            wintypes.WPARAM, wintypes.LPARAM,
-        )(("CallNextHookEx", user32))  # 此 API 无 W 后缀变体
-        _fn_GetMessageW = ctypes.WINFUNCTYPE(
-            ctypes.c_int, ctypes.POINTER(wintypes.MSG),
-            wintypes.HWND, wintypes.UINT, wintypes.UINT,
-        )(("GetMessageW", user32))
-        _fn_PostThreadMessageW = ctypes.WINFUNCTYPE(
-            wintypes.BOOL, wintypes.DWORD, wintypes.UINT,
-            wintypes.WPARAM, wintypes.LPARAM,
-        )(("PostThreadMessageW", user32))
-
-        def _wheel_delta(mouse_data: int) -> int:
-            """从 WM_*WHEEL 的 mouseData 取高 16 位有符号滚轮增量。"""
-            delta = (mouse_data >> 16) & 0xFFFF
-            if delta >= 0x8000:
-                delta -= 0x10000
-            return delta
-
-        def _lowlevel_hook_proc(n_code, w_param, l_param):
-            if n_code >= 0:
-                try:
-                    info = l_param.contents
-                    if w_param == WM_MOUSEWHEEL:
-                        self._handle_wheel_event(
-                            info.pt.x, info.pt.y, 0, _wheel_delta(info.mouseData)
-                        )
-                    elif w_param == WM_MOUSEHWHEEL:
-                        self._handle_wheel_event(
-                            info.pt.x, info.pt.y, _wheel_delta(info.mouseData), 0
-                        )
-                except Exception as e:
-                    # 钩子回调里的异常绝不能外抛（会打断钩子链且静默丢事件）
-                    _log_stitch(T("[ERROR] 滚轮钩子回调异常: {e}", e=e), force=True)
-            return _fn_CallNextHookEx(0, n_code, w_param, l_param)
-
-        # 回调对象必须常驻引用，否则被 GC 后钩子触发野指针
-        self._wheel_hook_proc = HOOKPROC(_lowlevel_hook_proc)
-        # 供 _stop_wheel_hook 使用
-        self._wheel_hook_fns = (_fn_PostThreadMessageW, _fn_UnhookWindowsHookExW)
-
-        def _hook_thread():
-            try:
-                self._wheel_hook_tid = kernel32.GetCurrentThreadId()
-                hook = _fn_SetWindowsHookExW(
-                    WH_MOUSE_LL, self._wheel_hook_proc, 0, 0
-                )
-                if not hook:
-                    _log_stitch(T(
-                        "[ERROR] SetWindowsHookExW 失败，错误码 {err}",
-                        err=kernel32.GetLastError(),
-                    ), force=True)
-                    return
-                self._wheel_hook_handle = hook
-                _log_stitch(T(
-                    "[OK] 全局滚轮钩子已安装（竖向仅响应向下滚动，横向响应向右滚动和Shift+滚轮）"
-                ), force=True)
-                self._wheel_hook_installed = True
-
-                # 低级钩子的回调在安装线程上触发，必须泵消息
-                msg = wintypes.MSG()
-                while _fn_GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
-                    pass
-            except Exception as e:
-                _log_stitch(T("[ERROR] 滚轮钩子线程异常: {e}", e=e), force=True)
-                import traceback
-                traceback.print_exc()
-            finally:
-                if getattr(self, "_wheel_hook_handle", None):
-                    _fn_UnhookWindowsHookExW(self._wheel_hook_handle)
-                    self._wheel_hook_handle = None
-
-        self._wheel_hook_thread = threading.Thread(
-            target=_hook_thread, name="WheelHook", daemon=True
-        )
-        self._wheel_hook_thread.start()
-
-    def _stop_wheel_hook(self):
-        """卸载滚轮钩子并结束钩子线程（幂等）。"""
-        fns = getattr(self, "_wheel_hook_fns", None)
-        tid = getattr(self, "_wheel_hook_tid", None)
-        if tid and fns:
-            post_quit, _unhook = fns
-            post_quit(tid, 0x0012, 0, 0)  # WM_QUIT
-            self._wheel_hook_tid = None
-        thread = getattr(self, "_wheel_hook_thread", None)
-        if thread is not None:
-            thread.join(timeout=1.0)
-            self._wheel_hook_thread = None
-    
     def _toggle_direction(self):
         """切换截图方向（竖向/横向）"""
         if self.scroll_direction == "vertical":
@@ -1164,97 +931,6 @@ class ScrollCaptureWindow(QWidget):
         self._reconfigure_stitch_engine()
         self._refresh_preview_panel()
         
-        # 🆕 切换键盘监听器状态
-        if self.scroll_direction == "horizontal":
-            self._start_keyboard_listener()
-        else:
-            self._stop_keyboard_listener()
-    
-    def _on_horizontal_key_triggered(self):
-        """Shift 触发的横向滚动（主线程执行）。
-
-        发送的 HWHEEL 事件会被自己的滚轮钩子收到，走 scroll_detected →
-        冷却后截图的同一条路径，因此这里不再单独排一次截图——同窗双帧
-        会被判为重复帧，白白消耗一次到底检测的计数。
-        """
-        self._send_horizontal_scroll()
-
-    def _send_horizontal_scroll(self):
-        """发送横向滚动指令（向右滚动）"""
-        try:
-            import win32api
-            import win32con
-            
-            # 使用Windows API发送横向滚动事件
-            # MOUSEEVENTF_HWHEEL: 横向滚动事件
-            # amount * 120: WHEEL_DELTA标准值
-            amount = 1  # 向右滚动
-            win32api.mouse_event(
-                win32con.MOUSEEVENTF_HWHEEL,
-                0, 0,
-                amount * 120,  # WHEEL_DELTA
-                0
-            )
-            _log_stitch(T("[OK] 发送横向滚动指令: 向右滚动 {amount} 格", amount=amount))
-
-        except Exception as e:
-            _log_stitch(T("[ERROR] 发送横向滚动失败: {e}", e=e), force=True)
-            import traceback
-            traceback.print_exc()
-    
-    def _start_keyboard_listener(self):
-        """启动键盘监听器（用于横向模式）"""
-        if self.keyboard_listener is not None:
-            return  # 已经启动
-        
-        try:
-            from pynput import keyboard
-            
-            def on_press(key):
-                """按键按下回调"""
-                try:
-                    # 使用Shift键触发横向滚动+截图
-                    if key == keyboard.Key.shift and not self.horizontal_scroll_key_pressed:
-                        self.horizontal_scroll_key_pressed = True
-                        _log_stitch(T("⌨️ 检测到Shift按下，触发横向滚动+截图"))
-
-                        # 本回调运行在 pynput 线程里：线程上没有 Qt 事件循环，
-                        # 直接 QTimer.singleShot 永不触发。转回主线程执行。
-                        self.horizontal_key_triggered.emit()
-
-                except Exception as e:
-                    _log_stitch(T("[ERROR] 处理按键事件失败: {e}", e=e), force=True)
-            
-            def on_release(key):
-                """按键释放回调"""
-                try:
-                    if key == keyboard.Key.shift:
-                        self.horizontal_scroll_key_pressed = False
-                except Exception as e:
-                    log_exception(e, T("释放Shift键"))
-            
-            # 创建并启动键盘监听器
-            self.keyboard_listener = keyboard.Listener(
-                on_press=on_press,
-                on_release=on_release
-            )
-            self.keyboard_listener.start()
-            _log_stitch(T("[OK] 键盘监听器已启动（横向模式，按Shift触发）"))
-
-        except Exception as e:
-            _log_stitch(T("[ERROR] 启动键盘监听器失败: {e}", e=e), force=True)
-            import traceback
-            traceback.print_exc()
-    
-    def _stop_keyboard_listener(self):
-        """停止键盘监听器"""
-        if self.keyboard_listener is not None:
-            try:
-                self.keyboard_listener.stop()
-                self.keyboard_listener = None
-                _log_stitch(T("[OK] 键盘监听器已停止"))
-            except Exception as e:
-                _log_stitch(T("[WARN] 停止键盘监听器时出错: {e}", e=e))
     
     def _reconfigure_stitch_engine(self):
         """重新配置拼接引擎（哈希匹配算法只支持竖向拼接，横向截图会先旋转90度再拼接后旋转回来）"""
@@ -1289,10 +965,10 @@ class ScrollCaptureWindow(QWidget):
 
         # 延迟一次事件循环后强制将所有浮动子窗口提到 TOPMOST 栈顶，
         # 避免初始显示时被系统任务栏（同为 HWND_TOPMOST）压在下方。
-        QTimer.singleShot(0, self._raise_all_topmost)
+        QTimer.singleShot(0, self, self._raise_all_topmost)
 
         # 使用QTimer延迟执行，确保窗口完全显示后再截图
-        QTimer.singleShot(100, self._capture_initial_screenshot)
+        QTimer.singleShot(100, self, self._capture_initial_screenshot)
 
     def _raise_all_topmost(self):
         """将主窗口及所有浮动子窗口推到 TOPMOST z-order 顶部。"""
@@ -1429,70 +1105,16 @@ class ScrollCaptureWindow(QWidget):
             _log_stitch(T("[ERROR] 强制修复窗口位置时出错: {e}", e=e), force=True)
     
     def _capture_initial_screenshot(self):
-        """截取初始截图（窗口显示时的区域内容）"""
+        """截取初始截图（窗口显示时的区域内容），随后启动内容监视"""
         _log_stitch(T("🎬 截取初始截图（第1张）..."))
         self._do_capture()
         _log_stitch(T("   初始截图已提交，当前共 {count} 张", count=len(self.screenshots)))
-    
-    def _is_mouse_in_capture_area(self, x, y):
-        """检查鼠标是否在截图区域内"""
-        return (self.capture_rect.x() <= x <= self.capture_rect.x() + self.capture_rect.width() and
-                self.capture_rect.y() <= y <= self.capture_rect.y() + self.capture_rect.height())
-    
-    def _handle_scroll_in_main_thread(self, scroll_distance):
-        """在主线程中处理滚轮事件（立即截图模式）
-        
-        Args:
-            scroll_distance: 滚动距离（像素）
-        """
-        
-        # 累积滚动距离
-        self.current_scroll_distance += scroll_distance
-        
-        # 更新最后滚动时间
-        self.last_scroll_time = time.time()
-        
-        if self.capture_mode == "immediate":
-            # 立即截图模式：延迟很短时间后截图（让滚动动画完成）
-            # 横向模式需要额外增加0.15秒延迟
-            delay = self.scroll_cooldown
-            if self.scroll_direction == "horizontal":
-                delay += 0.15
-            # 只在一连串滚动的第一下记日志（force 保证冻结包可见）：
-            # 下一行"📸 抓帧"日志出现与否，可以把链路断点定位到
-            # 钩子→信号→定时器 与 抓帧→worker 之间
-            burst_start = not self.capture_timer.isActive()
-            if self.capture_timer.isActive():
-                self.capture_timer.stop()
-            self.capture_timer.start(int(delay * 1000))
-            if burst_start:
-                _log_stitch(T("⚡ 检测到滚动，{delay}秒后截图", delay=delay), force=True)
-            _log_stitch(T("滚动累积距离: {distance}px", distance=self.current_scroll_distance))
-        else:
-            # 等待停止模式：启动检测定时器
-            if not self.scroll_check_timer.isActive():
-                self.scroll_check_timer.start()
-                _log_stitch(T("🔄 开始检测滚动停止..."))
-    
-    def _check_scroll_stopped(self):
-        """定期检查滚动是否已停止（仅在等待模式下使用）"""
-        
-        current_time = time.time()
-        time_since_last_scroll = current_time - self.last_scroll_time
-        
-        # 如果距离上次滚动已经超过冷却时间
-        if time_since_last_scroll >= self.scroll_cooldown:
-            # 滚动已停止，停止检测定时器
-            self.scroll_check_timer.stop()
-            
-            # 执行截图
-            _log_stitch(T("✋ 滚动已停止 ({time_since_last_scroll:.2f}秒)，开始截图...", time_since_last_scroll=time_since_last_scroll))
-            self._do_capture()
-        else:
-            # 还在滚动，继续等待
-            remaining = self.scroll_cooldown - time_since_last_scroll
-            _log_stitch(T("⏳ 等待滚动停止... (还需 {remaining:.1f}秒)", remaining=remaining), end='\r')
-    
+
+        # 内容监视从这里开始：之后框内画面一有变化并稳定，就自动采集拼接
+        if not self._watch_timer.isActive():
+            self._watch_timer.start()
+            _log_stitch(T("[OK] 内容监视已启动（检测到画面变化并稳定后自动采集）"), force=True)
+
     def _calculate_image_hash(self, pil_image):
         """计算图片的感知哈希值（用于相似度比较）"""
 
@@ -1529,51 +1151,164 @@ class ScrollCaptureWindow(QWidget):
             if widget_rect.intersects(self.capture_rect):
                 set_window_exclude_from_capture(int(widget.winId()), exclude)
     
+    def _grab_region(self):
+        """抓取截图区域，返回 (QPixmap, 签名)。失败时返回 (None, None)。"""
+        app = QGuiApplication.instance()
+        capture_center_x = self.capture_rect.x() + self.capture_rect.width() // 2
+        capture_center_y = self.capture_rect.y() + self.capture_rect.height() // 2
+        center_point = QPoint(capture_center_x, capture_center_y)
+
+        screen = app.screenAt(center_point)
+        if screen is None:
+            _log_stitch(T("[WARN] 截图区域不在任何显示器范围内，使用主显示器"), force=True)
+            screen = app.primaryScreen()
+
+        screen_geometry = screen.geometry()
+
+        # 将虚拟桌面坐标转换为相对于目标屏幕的坐标
+        relative_x = self.capture_rect.x() - screen_geometry.x()
+        relative_y = self.capture_rect.y() - screen_geometry.y()
+
+        pixmap = screen.grabWindow(
+            0,
+            relative_x,
+            relative_y,
+            self.capture_rect.width(),
+            self.capture_rect.height()
+        )
+        if pixmap.isNull():
+            return None, None
+        return pixmap, self._signature(pixmap)
+
+    def _signature(self, pixmap):
+        """内容的降采样签名：32x32 ARGB32 的全部字节拼成一个大整数。
+
+        只在 QPixmap 上直接缩小（Qt C++ 完成，全分辨率数据不进 Python），
+        签名比较用大整数相等 + XOR 位差（微秒级），供监视定时器每帧调用。
+        """
+        size = self._SIGNATURE_SIZE
+        small = pixmap.scaled(
+            size, size,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.FastTransformation,
+        ).toImage()
+        if small.format() != QImage.Format.Format_ARGB32:
+            small = small.convertToFormat(QImage.Format.Format_ARGB32)
+        bits = small.constBits()
+        return int.from_bytes(bytes(bits[: size * size * 4]), "little")
+
+    def _sig_similar(self, a, b) -> bool:
+        """两个签名是否代表同一画面。相等走快路径；否则按差异位比例判定，
+        容忍光标闪烁、抗锯齿抖动这类不影响拼接的微变化。"""
+        if a is None or b is None:
+            return False
+        if a == b:
+            return True
+        return (a ^ b).bit_count() <= self._SIGNATURE_MAX_DIFF_BITS
+
+    def _set_watch_interval(self, ms):
+        if self._watch_timer.interval() != ms:
+            self._watch_timer.setInterval(ms)
+
+    def _watch_tick(self):
+        """内容感知监视的一次采样：变化→等稳定→自动抓帧。
+
+        与上一张已采集帧一致 → 内容没动（阅读停顿/已到底），计入静止时长；
+        与最近一次候选签名一致 → 内容在变化后稳定了，连续稳定 N 次即抓帧；
+        否则 → 内容仍在滚动，记下候选签名并切换到高频轮询。
+        """
+        if not self.isVisible():
+            return
+
+        self._exclude_overlapping_ui(True)
+        try:
+            pixmap, sig = self._grab_region()
+            if pixmap is None:
+                return
+            now = time.monotonic()
+
+            if self._sig_similar(sig, self._last_captured_sig):
+                # 内容与上一张已采集帧一致：静止计时，作为到底自动收尾的依据
+                self._candidate_sig = None
+                self._stable_count = 0
+                self._set_watch_interval(self._WATCH_IDLE_MS)
+                if self._idle_started_at is None:
+                    self._idle_started_at = now
+                self._maybe_auto_finish(now - self._idle_started_at)
+                return
+
+            self._idle_started_at = None
+
+            if (self._candidate_sig is not None
+                    and self._sig_similar(sig, self._candidate_sig)):
+                self._stable_count += 1
+                if self._stable_count >= self._STABLE_TICKS:
+                    # 内容已稳定 → 采集这一帧
+                    self._last_captured_sig = sig
+                    self._candidate_sig = None
+                    self._stable_count = 0
+                    self._change_started_at = None
+                    self._set_watch_interval(self._WATCH_IDLE_MS)
+                    _log_stitch(T("🎞️ 检测到画面变化并已稳定，自动采集"), force=False)
+                    self._do_capture()
+                    return
+
+                # 尚未达到稳定次数：保持高频轮询
+                self._set_watch_interval(self._WATCH_ACTIVE_MS)
+                return
+
+            # 内容仍在变化（滚动中）：记候选签名。持续变化超过阈值时强拍一帧，
+            # 避免持续动画/惯性滚动页面永远等不到稳定点（拼不上的帧会被
+            # worker 的失败路径安全丢弃）。
+            if self._candidate_sig is None:
+                self._change_started_at = now
+            self._candidate_sig = sig
+            self._stable_count = 0
+            self._set_watch_interval(self._WATCH_ACTIVE_MS)
+
+            if (self._change_started_at is not None
+                    and now - self._change_started_at > self._CHANGE_FORCE_CAPTURE_S):
+                self._last_captured_sig = sig
+                self._candidate_sig = None
+                self._change_started_at = None
+                self._set_watch_interval(self._WATCH_IDLE_MS)
+                _log_stitch(T("🎞️ 画面持续变化，强制采集当前帧"), force=False)
+                self._do_capture()
+        finally:
+            self._exclude_overlapping_ui(False)
+
+    def _maybe_auto_finish(self, idle_seconds: float):
+        """内容静止足够久且已有有效拼接 → 自动收尾（用户也可随时手动完成）。"""
+        if self._auto_finish_scheduled:
+            return
+        if len(self.screenshots) < 2:
+            return
+        if idle_seconds < self._AUTO_FINISH_WARN_S:
+            return
+        self._auto_finish_scheduled = True
+        _log_stitch(T("页面内容已静止 {idle:.1f} 秒，自动完成拼接", idle=idle_seconds), force=True)
+        self._show_preview_warning(T("页面已无变化，即将自动完成拼接…"))
+        QTimer.singleShot(600, self, self._auto_finish_if_alive)
+
     def _do_capture(self):
-        """抓取一帧并提交给拼接工作线程（像素管线见 _StitchWorker）。"""
+        """立即抓取一帧并提交给拼接工作线程（手动抓帧/监视器稳定点共用）。
+
+        像素管线见 _StitchWorker。提交后更新内容签名基线，监视器据此判断
+        后续变化。
+        """
         # 截图前：排除与截图区域重叠的 UI 窗口
         self._exclude_overlapping_ui(True)
         try:
-            # 获取包含截图区域的屏幕
-            app = QGuiApplication.instance()
-            capture_center_x = self.capture_rect.x() + self.capture_rect.width() // 2
-            capture_center_y = self.capture_rect.y() + self.capture_rect.height() // 2
-            center_point = QPoint(capture_center_x, capture_center_y)
-
-            screen = app.screenAt(center_point)
-            if screen is None:
-                _log_stitch(T("[WARN] 截图区域不在任何显示器范围内，使用主显示器"), force=True)
-                screen = app.primaryScreen()
-
-            screen_geometry = screen.geometry()
-
-            # 将虚拟桌面坐标转换为相对于目标屏幕的坐标
-            relative_x = self.capture_rect.x() - screen_geometry.x()
-            relative_y = self.capture_rect.y() - screen_geometry.y()
-
-            # 使用屏幕相对坐标截图
-            pixmap = screen.grabWindow(
-                0,
-                relative_x,
-                relative_y,
-                self.capture_rect.width(),
-                self.capture_rect.height()
-            )
-
-            if pixmap.isNull():
+            pixmap, sig = self._grab_region()
+            if pixmap is None:
                 _log_stitch(T("[ERROR] 截图失败"), force=True)
                 return
 
+            self._last_captured_sig = sig
+            self._idle_started_at = None
+
             # toImage() 返回独立缓冲的 QImage，移交工作线程后主线程不再触碰。
-            # 提交时点的状态随帧走：滚动距离快照（帧完成后从累积值中扣除，
-            # 飞行期间新增的滚动量自然归入下一帧）、主线程已锁定的方向、
-            # 当前的截图方向。
-            self._stitch_worker.submit(
-                pixmap.toImage(),
-                self.current_scroll_distance,
-                self.scroll_locked_direction,
-                self.scroll_direction,
-            )
+            self._stitch_worker.submit(pixmap.toImage(), self.scroll_direction)
 
         except Exception as e:
             _log_stitch(T("[ERROR] 截图时出错: {e}", e=e), force=True)
@@ -1602,16 +1337,16 @@ class ScrollCaptureWindow(QWidget):
         self.scroll_locked_direction = payload["locked_direction"]
 
         if payload["ok"]:
+            prev_height = (
+                self.stitched_result.size[1]
+                if self.stitched_result is not None else 0
+            )
             self.stitched_result = payload["stitched"]
             while len(self.screenshots) < count:
                 self.screenshots.append(None)
 
-            scroll_distance = payload["scroll_distance"]
-            self.scroll_distances.append(scroll_distance)
-            # 只扣除提交时点的快照：拼接期间新滚动的量留给下一帧
-            self.current_scroll_distance = max(
-                0, self.current_scroll_distance - scroll_distance
-            )
+            # 记录本帧带来的拼接增益（等效滚动距离，像素）
+            self.scroll_distances.append(max(0, payload["height"] - prev_height))
 
             if hasattr(self, 'preview_panel') and self.preview_panel:
                 self.preview_panel.update_count(count)
@@ -1624,7 +1359,6 @@ class ScrollCaptureWindow(QWidget):
             ), force=True)
             self._clear_preview_warning()
         else:
-            self.current_scroll_distance = 0
             self._show_stitch_failure(payload["failed_frame_no"], payload["error_detail"])
 
         if payload["preview_qimage"] is not None and getattr(self, 'preview_panel', None):
@@ -1641,7 +1375,7 @@ class ScrollCaptureWindow(QWidget):
             _log_stitch(T("检测到页面已到边缘（连续 2 帧无变化），自动完成拼接"), force=True)
             # 先排自动收尾，再动提示 UI：收尾是功能，提示只是装饰——
             # 提示 UI 再出异常也不能拖住 900ms 后的自动完成
-            QTimer.singleShot(900, self._auto_finish_if_alive)
+            QTimer.singleShot(900, self, self._auto_finish_if_alive)
             if hasattr(self, 'preview_panel') and self.preview_panel:
                 self.preview_panel.show_warning(
                     T("已到达页面边缘，即将自动完成拼接…")
@@ -1657,9 +1391,24 @@ class ScrollCaptureWindow(QWidget):
         self._show_preview_warning(message)
 
     def _auto_finish_if_alive(self):
-        """定时器到点后收尾；用户若已手动点过完成则窗口已不在，直接跳过。"""
-        if self._auto_finish_scheduled and self.isVisible():
-            self._on_finish()
+        """定时器到点后收尾；用户若已手动点过完成则窗口已不在，直接跳过。
+
+        收尾前再做一次内容确认：如果画面又变了（用户恰好在超时点继续
+        滚动），撤销收尾回到监视状态——误收尾会保存半成品，宁可晚一步。
+        """
+        if not (self._auto_finish_scheduled and self.isVisible()):
+            return
+        try:
+            pixmap, sig = self._grab_region()
+        except Exception:
+            pixmap, sig = None, None
+        if pixmap is not None and not self._sig_similar(sig, self._last_captured_sig):
+            self._auto_finish_scheduled = False
+            self._idle_started_at = None
+            self._clear_preview_warning()
+            _log_stitch(T("自动收尾前检测到画面变化，已撤销，继续监视"), force=True)
+            return
+        self._on_finish()
     
     @safe_event
     def paintEvent(self, event):
@@ -1875,9 +1624,16 @@ class ScrollCaptureWindow(QWidget):
     def _cleanup(self):
         """清理资源"""
         try:
-            # 停止拼接工作线程：处理完当前帧后退出，不 join（避免阻塞 UI）
+            # 停止拼接工作线程。必须先断开结果信号再 join：窗口随后会被
+            # 销毁（WA_DeleteOnClose），worker 处理完手头帧后会 emit——
+            # 向已销毁的 QObject emit 是段错误。断开后迟到的回包无处可去，
+            # join（限时）保证线程干净退出，不带着 Qt 引用存活。
             if hasattr(self, '_stitch_worker') and self._stitch_worker is not None:
+                from core.qt_utils import safe_disconnect
+                safe_disconnect(self.stitch_result_ready)
                 self._stitch_worker.stop()
+                self._stitch_worker.join(timeout=3.0)
+                self._stitch_worker = None
 
             if hasattr(self, 'screenshots'):
                 self.screenshots.clear()
@@ -1912,22 +1668,12 @@ class ScrollCaptureWindow(QWidget):
                 finally:
                     self.preview_panel = None
 
-            # 停止所有定时器
-            if hasattr(self, 'capture_timer'):
-                self.capture_timer.stop()
-            
-            if hasattr(self, 'scroll_check_timer'):
-                self.scroll_check_timer.stop()
-            
+            # 停止内容监视定时器
+            if hasattr(self, '_watch_timer'):
+                self._watch_timer.stop()
+
             if hasattr(self, '_position_fix_timer'):
                 self._position_fix_timer.stop()
-            
-            # 停止全局滚轮钩子
-            self._stop_wheel_hook()
-            _log_stitch(T("[OK] 全局滚轮监听器已停止"))
-
-            # 🆕 停止键盘监听器
-            self._stop_keyboard_listener()
 
         except Exception as e:
             _log_stitch(T("[WARN] 清理资源时出错: {e}", e=e))
