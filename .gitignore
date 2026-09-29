@@ -19,3 +19,7 @@ htmlcov/
 .idea/
 .vscode/
 *.swp
+
+# 本地构建/测试输出
+build_log.txt
+full_suite.log
