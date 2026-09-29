@@ -270,6 +270,11 @@ class PreviewPanel(QWidget):
 
     def show_warning(self, message: Optional[str] = None):
         self.warning_icon.raise_()
+        # T() 返回 LogMsg（懒翻译消息），setToolTip 只接受 str——历史上
+        # 自动完成路径把 T() 直接传进来，TypeError 会把 900ms 后的自动收尾
+        # 一起炸掉，页面到底后永远不出图
+        if message is not None and not isinstance(message, str):
+            message = message.render()
         if message:
             self.warning_icon.setToolTip(message)
         else:
@@ -1433,7 +1438,18 @@ class ScrollCaptureWindow(QWidget):
             self._exclude_overlapping_ui(False)
 
     def _on_stitch_result(self, payload):
-        """拼接工作线程的结果回包（QueuedConnection，主线程执行）。"""
+        """拼接工作线程的结果回包（QueuedConnection，主线程执行）。
+
+        整体包 try/except：这是排队槽，任何未处理异常都会直接顶到
+        sys.excepthook（崩溃对话框），把后面的自动收尾、预览更新全部打断。
+        出错记日志继续，用户最多丢一帧的预览更新。
+        """
+        try:
+            self._apply_stitch_result(payload)
+        except Exception as e:
+            log_exception(e, T("处理拼接结果失败"))
+
+    def _apply_stitch_result(self, payload):
         count = payload["screenshot_count"]
 
         # 方向锁镜像：worker 的自动检测结果是权威值
@@ -1477,11 +1493,13 @@ class ScrollCaptureWindow(QWidget):
         if payload["auto_finish"] and not self._auto_finish_scheduled:
             self._auto_finish_scheduled = True
             _log_stitch(T("检测到页面已到边缘（连续 2 帧无变化），自动完成拼接"), force=True)
+            # 先排自动收尾，再动提示 UI：收尾是功能，提示只是装饰——
+            # 提示 UI 再出异常也不能拖住 900ms 后的自动完成
+            QTimer.singleShot(900, self._auto_finish_if_alive)
             if hasattr(self, 'preview_panel') and self.preview_panel:
                 self.preview_panel.show_warning(
                     T("已到达页面边缘，即将自动完成拼接…")
                 )
-            QTimer.singleShot(900, self._auto_finish_if_alive)
 
     def _show_stitch_failure(self, frame_no: int, detail: str):
         """拼接失败提示（帧计数由工作线程维护，这里不再增减列表）。"""
