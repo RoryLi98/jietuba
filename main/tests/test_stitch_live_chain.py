@@ -1,19 +1,23 @@
 # -*- coding: utf-8 -*-
-"""长截图"内容感知监视 → 稳定判定 → 抓帧 → 拼接 → 预览更新"回归测试。
+"""长截图"内容感知监视 → 抓帧 → 拼接 → 预览更新"回归测试。
 
 长截图已从"滚轮驱动"重写为"内容感知"：监视定时器持续对比框内画面的
-降采样签名，检测到变化并稳定后自动抓帧。本文件验证：
+降采样签名，**与上一张已采集帧不同就立刻抓帧**（90ms 节奏，不再等"稳定
+两拍"；worker 积压 ≥2 时跳过，靠背压控帧）。本文件验证：
 
-1. 初始帧后，内容变化并稳定 → 自动采集第二帧并拼接；
-2. 内容持续变化（滚动中/动画）→ 不抓帧，直到稳定或超时强拍；
+1. 初始帧后，内容变化 → 自动采集第二帧并拼接出更高的结果；
+2. 内容持续变化 → 按节奏持续抓帧（不漏帧，靠背压不堆积）；
 3. 内容静止足够久且已有 ≥2 帧 → 自动收尾被排上；
 4. 手动抓帧按钮照常工作；
-5. 内容签名对光标闪烁级别的微变化有容忍度（不会被搅成永远不稳定）。
+5. 内容签名对光标闪烁级别的微变化有容忍度（不会被搅成反复抓帧）。
+
+注：成图不随逐帧回包走（按节流出缩略图），"拼接出更高的结果"用
+`_last_stitch_height` 观察，成图本体在收尾时才从 worker 取。
 """
 import time
 
 import pytest
-from PySide6.QtCore import QRect, QTimer
+from PySide6.QtCore import QRect
 from PySide6.QtGui import QColor, QScreen, QPainter, QPixmap
 
 pytestmark = pytest.mark.usefixtures("qapp")
@@ -121,29 +125,30 @@ def window(qapp, monkeypatch):
 
 class TestContentAwareWatcher:
 
-    def test_change_then_stable_captures_frame(self, qapp, window, monkeypatch):
-        """内容变化 → 稳定 2 拍 → 自动采集并拼接出更高的结果。"""
+    def test_change_captures_and_stitches_frame(self, qapp, window, monkeypatch):
+        """内容变化 → 自动采集第二帧，拼接结果长高（成图不再随回包走）。"""
         window._grab_seq = _GrabSeq([_make_pixmap(60)])
         monkeypatch.setattr(QScreen, "grabWindow", window._grab_seq)
 
         assert _pump_until(
             qapp,
             lambda: len(window.screenshots) >= 2
-            and window.stitched_result is not None
-            and window.stitched_result.size[1] > 100,
-        ), "画面变化并稳定后未自动采集（内容感知链路断裂）"
+            and window._last_stitch_height > 100,
+        ), "画面变化后未自动采集并拼接（内容感知链路断裂）"
         assert window.preview_panel.count_label.text() == "2"
 
-    def test_continued_change_defers_capture(self, qapp, window, monkeypatch):
-        """内容持续变化（滚动中）：稳定点出现前不应抓帧。"""
+    def test_continued_change_keeps_capturing(self, qapp, window, monkeypatch):
+        """内容持续变化（滚动中/动画）：变化即抓帧，按节奏持续推进。
+
+        旧实现等"稳定两拍"，后改为与上一张已采集帧不同就抓；帧堆积由
+        背压（pending ≥ 2 跳过）兜底，所以这里断言的是"抓得到"而不是"不抓"。
+        """
         seq = _Alternator([_make_pixmap(70), _make_pixmap(30)])
         monkeypatch.setattr(QScreen, "grabWindow", seq)
 
-        # 泵 ~0.5s（远超多拍），期间内容一直在变
-        assert not _pump_until(
-            qapp, lambda: len(window.screenshots) >= 2, timeout_s=0.5
-        ), "内容持续变化时不该抓帧"
-        assert len(window.screenshots) == 1
+        assert _pump_until(
+            qapp, lambda: len(window.screenshots) >= 2, timeout_s=1.0
+        ), "内容持续变化时应按节奏持续抓帧"
 
     def test_idle_timeout_schedules_auto_finish(self, qapp, window, monkeypatch):
         """已有 ≥2 帧后内容长期静止 → 自动收尾被排上。"""
@@ -201,8 +206,7 @@ class TestContentAwareWatcher:
             assert _pump_until(
                 qapp,
                 lambda: len(win.screenshots) >= 2
-                and win.stitched_result is not None
-                and win.stitched_result.size[1] > 100,
+                and win._last_stitch_height > 100,
             ), "光标闪烁之后的新内容未被采集"
         finally:
             win._cleanup()
