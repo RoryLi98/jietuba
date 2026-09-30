@@ -88,6 +88,8 @@ class GifRecordWindow(QObject):
 
         # 初始穿透
         self._enter_state(AppState.IDLE)
+        # 趁用户调整选区时在后台建好录制线程，点录制时画面即刻开始
+        self._recorder.prepare()
         log_debug(T("GifRecordWindow 初始化完成"), "GIF")
 
     def _reposition_current_toolbar(self):
@@ -486,6 +488,7 @@ class GifRecordWindow(QObject):
         self._record_toolbar.show()
         self._reposition_toolbar(self._record_toolbar)
         self._enter_state(AppState.IDLE)
+        self._recorder.prepare()
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # 关闭
@@ -510,6 +513,9 @@ class GifRecordWindow(QObject):
             if w:
                 w.hide()
 
+        # 停录制线程、交还截图会话都在后台进行，关窗口不等它们
+        self._recorder.release()
+
         self._playback.hide_all()
         self._playback.disconnect_engine_signals()
 
@@ -525,10 +531,7 @@ class GifRecordWindow(QObject):
         self._compose_thread = None
         self._recorder = None   # 防止延迟回调访问
 
-        # ── 全部在主线程同步完成 ──
-        # PySide6 不允许从 threading.Thread emit Signal（与 PyQt6 不同），
-        # 而 recorder.stop() 已在上面同步完成了阻塞操作，
-        # 剩余的 engine.cleanup() 和 recorder.reset_data() 都是轻量调用。
+        # 录制线程由 recorder.release() 在后台停止；剩下的清理很轻，在主线程同步完成
         if engine:
             engine.stop_timer()
             engine.cleanup(blocking=True)

@@ -6,16 +6,18 @@ from unittest.mock import MagicMock
 
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, QSettings, Qt
-from PySide6.QtGui import QCloseEvent, QImage, QKeyEvent, QMouseEvent, QWheelEvent
+from PySide6.QtGui import QCloseEvent, QContextMenuEvent, QImage, QKeyEvent, QMouseEvent, QWheelEvent
 from PySide6.QtWidgets import QApplication, QStackedWidget, QWidget
 
 from settings.tool_settings import (
     CAPTURE_MOUSE_ACTIONS,
+    CLIPBOARD_MOUSE_ACTIONS,
     PIN_MOUSE_ACTIONS,
     ToolSettingsManager,
     get_capture_mouse_binding,
 )
 from tools.action import ActionTools
+from ui.fluent_lite import SegmentedWidget
 from ui.settings_ui.dialog import SettingsDialog
 
 
@@ -80,7 +82,7 @@ def test_apply_saves_without_closing_and_resets_dirty_state(settings, config, qa
 def test_reset_refresh_all_new_controls(settings, config):
     choose(settings, 'mouse_capture_copy', 'ctrl+doubleleft')
     choose(settings, 'mouse_pin_close', 'ctrl+right')
-    settings._reset_hotkey_page()
+    settings._reset_mouse_page()
     assert settings._behavior_controls['mouse_capture_copy'].currentData() == 'doubleleft'
     assert settings._behavior_controls['mouse_pin_close'].currentData() == ''
     assert settings._behavior_controls['mouse_pin_reset'].currentData() == ''
@@ -132,6 +134,13 @@ def test_copy_action_closes_capture(actions, config):
     config.set_screenshot_save_enabled(False)
     assert actions.handle_capture_action('copy')
     actions.parent_window.hide.assert_called_once()
+    actions.parent_window.cleanup_and_close.assert_called_once()
+
+
+def test_close_action_does_not_need_a_selection(actions):
+    actions.scene.selection_model.is_confirmed = False
+    assert actions.handle_capture_action('close') is True
+    actions.export_service.export.assert_not_called()
     actions.parent_window.cleanup_and_close.assert_called_once()
 
 
@@ -321,6 +330,73 @@ def test_screenshot_reuse_rebinds_crosshair_and_capture_actions(config, qapp, mo
     window.deleteLater()
 
 
+@pytest.fixture
+def capture(config, qapp, monkeypatch):
+    from ui.screenshot_window import ScreenshotWindow
+    from pin.pin_manager import PinManager
+    monkeypatch.setattr(PinManager, 'suppress_topmost', lambda self: None)
+    monkeypatch.setattr(PinManager, 'restore_topmost', lambda self: None)
+    image = QImage(400, 300, QImage.Format_ARGB32)
+    image.fill(Qt.blue)
+    window = ScreenshotWindow(config, prefetched_image=image, prefetched_rect=QRectF(0, 0, 400, 300))
+    qapp.processEvents()
+    close = MagicMock()
+    monkeypatch.setattr(window, 'cleanup_and_close', close)
+    yield window, close
+    ScreenshotWindow.cleanup_and_close(window)
+    window.deleteLater()
+
+
+def send_mouse(window, kind, button, point=(30, 30), modifiers=Qt.NoModifier):
+    QApplication.sendEvent(window.view.viewport(), mouse_event(window, kind, button, point, modifiers))
+
+
+def test_right_click_closes_capture_by_default(capture):
+    window, close = capture
+    send_mouse(window, QEvent.MouseButtonPress, Qt.RightButton)
+    close.assert_called_once()
+
+
+def test_right_click_runs_the_rebound_capture_action(capture, config, monkeypatch):
+    window, close = capture
+    config.set_app_setting('mouse_capture_close', 'middle')
+    config.set_app_setting('mouse_capture_copy', 'right')
+    run = MagicMock(return_value=True)
+    monkeypatch.setattr(window.action_handler, 'handle_capture_action', run)
+    send_mouse(window, QEvent.MouseButtonPress, Qt.RightButton)
+    run.assert_called_once_with('copy')
+    close.assert_not_called()
+    monkeypatch.setattr(window, '_is_text_editing', lambda: True)
+    send_mouse(window, QEvent.MouseButtonPress, Qt.RightButton)
+    assert run.call_count == 1
+
+
+def test_unbound_right_click_never_reaches_selection_or_drawing(capture, config):
+    window, close = capture
+    config.set_app_setting('mouse_capture_close', '')
+    for kind in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease, QEvent.MouseButtonDblClick):
+        send_mouse(window, kind, Qt.RightButton)
+    assert not window.view.selection_drag.active
+    close.assert_not_called()
+
+    # 左键拖动中间插进来的右键抬起不能提前结束这次拖动
+    send_mouse(window, QEvent.MouseButtonPress, Qt.LeftButton)
+    assert window.view.selection_drag.active
+    send_mouse(window, QEvent.MouseButtonPress, Qt.RightButton)
+    send_mouse(window, QEvent.MouseButtonRelease, Qt.RightButton)
+    assert window.view.selection_drag.active
+    send_mouse(window, QEvent.MouseButtonRelease, Qt.LeftButton)
+    assert not window.view.selection_drag.active
+
+
+def test_capture_view_suppresses_context_menu(capture):
+    window, _close = capture
+    event = QContextMenuEvent(QContextMenuEvent.Mouse, QPoint(30, 30), QPoint(30, 30))
+    event.ignore()
+    window.view.contextMenuEvent(event)
+    assert event.isAccepted()
+
+
 def test_crosshair_replaces_cursor_and_keeps_export_clean(qapp):
     from ui.mask_overlay import MaskOverlayWidget
     from canvas import CanvasScene, CanvasView
@@ -369,22 +445,31 @@ def test_crosshair_replaces_cursor_and_keeps_export_clean(qapp):
 
 
 def test_capture_mouse_actions_live_with_shortcuts(settings, qapp):
-    settings._on_nav_changed(0, 'shortcuts')
+    settings._on_nav_changed(10, 'mouse')
     qapp.processEvents()
     stack = settings.findChild(QStackedWidget, 'MouseShortcutStack')
     assert stack is not None
-    assert stack.count() == 2
+    assert stack.count() == 3
     assert stack.currentIndex() == 0
     for action, _label, default, _kind in CAPTURE_MOUSE_ACTIONS:
         editor = settings._behavior_controls[f'mouse_capture_{action}']
         assert editor.currentData() == default
         assert editor.isVisible()
 
-    stack.setCurrentIndex(1)
-    qapp.processEvents()
-    assert not settings._behavior_controls['mouse_capture_copy'].isVisible()
-    for action, _label, _default, _kind in PIN_MOUSE_ACTIONS:
-        assert settings._behavior_controls[f'mouse_pin_{action}'].isVisible()
+    # 点标签按钮本身：按钮的 clicked(checked) 参数不能被当成页码
+    tabs = stack.parentWidget().findChildren(SegmentedWidget)
+    assert len(tabs) == 1
+    for route, index, prefix, actions in (
+        ('pin', 1, 'mouse_pin_', PIN_MOUSE_ACTIONS),
+        ('clipboard', 2, 'mouse_clipboard_', CLIPBOARD_MOUSE_ACTIONS),
+        ('screenshot', 0, 'mouse_capture_', CAPTURE_MOUSE_ACTIONS),
+    ):
+        tabs[0]._items[route].click()
+        qapp.processEvents()
+        assert tabs[0].currentItem() == route
+        assert stack.currentIndex() == index
+        for action, _label, _default, _kind in actions:
+            assert settings._behavior_controls[f'{prefix}{action}'].isVisible()
 
 
 def test_duplicate_capture_mouse_bindings_block_apply(settings, monkeypatch):

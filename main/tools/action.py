@@ -30,7 +30,7 @@ class ActionTools:
 
     def _copy_save_and_close(self, *, close_after=True):
         """核心操作：导出选区 → 复制到剪贴板 → 自动保存 → 关闭窗口"""
-        from core.clipboard_utils import deliver_image_async
+        from core.clipboard_utils import deliver_screenshot
         self._temporarily_exit_editing()
 
         selection_rect = self.export_service.scene.selection_model.rect()
@@ -43,27 +43,8 @@ class ActionTools:
         if self.parent_window and close_after:
             self.parent_window.hide()
 
-        save_service = None
-        save_kwargs = None
-        write_file_reference = True
-
-        if self.config_manager and self.config_manager.get_screenshot_save_enabled():
-            fmt = self.config_manager.get_screenshot_format()
-            save_service = self.save_service
-            save_kwargs = dict(
-                directory=self.config_manager.get_screenshot_save_path(),
-                prefix="",
-                image_format=fmt,
-            )
-            write_file_reference = self.config_manager.get_clipboard_file_reference_enabled()
-
-        deliver_image_async(
-            image,
-            save_service=save_service,
-            save_kwargs=save_kwargs,
-            write_file_reference=write_file_reference,
-        )
-        if save_service is not None:
+        saving = deliver_screenshot(image, self.config_manager, save_service=self.save_service)
+        if saving is not None:
             log_debug(T("已完成复制到剪贴板，已提交异步保存任务"), "Action")
         else:
             log_debug(T("已完成复制到剪贴板"), "Action")
@@ -169,6 +150,10 @@ class ActionTools:
 
     def handle_capture_action(self, action):
         """Execute one screenshot action selected by a mouse binding."""
+        # 关闭和 ESC 一样不依赖选区，框选前也要能退出
+        if action == "close":
+            self._cleanup_and_close()
+            return True
         if not self.scene.selection_model.is_confirmed or self.scene.selection_model.rect().isEmpty():
             return False
         if action == "copy":

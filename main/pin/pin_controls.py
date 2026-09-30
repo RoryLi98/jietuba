@@ -1,4 +1,4 @@
-﻿"""
+"""
 钉图控制按钮管理器
 
 负责管理钉图窗口右上角的窗口控制区（工具栏切换、关闭）。
@@ -14,7 +14,7 @@
 """
 
 from PySide6.QtWidgets import QPushButton, QWidget, QGraphicsDropShadowEffect
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
 
@@ -176,13 +176,21 @@ class PinControlButtons:
         self.close_button.hide()
         self.toolbar_toggle_button.hide()
 
-    def set_visible(self, visible: bool, show_toolbar_button: bool = True):
-        """整体显隐（缩略图模式等场景使用）。"""
-        if visible:
-            self.show_hover_controls(show_toolbar_button)
-        else:
-            self.hide_all()
 
+    def raise_all(self):
+        """两个按钮回到最上层"""
+        self.close_button.raise_()
+        self.toolbar_toggle_button.raise_()
+
+    def set_visible(self, close: bool, toolbar: bool):
+        """显隐由 PinHoverControls 决定，这里只照做"""
+        for button, visible in ((self.close_button, close), (self.toolbar_toggle_button, toolbar)):
+            if visible != button.isHidden():
+                continue
+            button.setVisible(visible)
+            if visible:
+                button.raise_()
+    
     def connect_signals(self, close_handler, toggle_toolbar_handler):
         """
         连接按钮信号
@@ -193,3 +201,4 @@ class PinControlButtons:
         """
         self.close_button.clicked.connect(close_handler)
         self.toolbar_toggle_button.clicked.connect(toggle_toolbar_handler)
+
