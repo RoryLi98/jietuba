@@ -1925,12 +1925,10 @@ class CanvasView(QGraphicsView):
 
         opacity = max(0.0, min(1.0, float(opacity)))
 
-        updated = False
         active_text = self._get_active_text_item()
         if active_text:
             if self._update_item_visual_opacity(active_text, opacity):
                 active_text.update()
-                updated = True
 
         selected_item = getattr(controller, "selected_item", None)
         if selected_item and selected_item is not active_text:
