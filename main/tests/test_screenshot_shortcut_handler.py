@@ -566,3 +566,53 @@ class TestWindowForwardsGlobalPin:
         ScreenshotWindow.pin_from_global_hotkey(SimpleNamespace(_shortcut_handler=None))
 
         handler.pin_from_global_hotkey.assert_called_once_with()
+
+
+class TestClearAppRef:
+    """全局窗口引用的延迟销毁回调必须只清自己那一个。
+
+    回归：GIF 录制与长截图的 destroyed 回调曾无条件把
+    app._gif_window / app._scroll_window 置 None。QWidget 的销毁是延迟的，
+    回调触发时全局引用早已指向新窗口 → 新窗口的唯一强引用被清掉 →
+    仍在使用的活窗口被 PySide 交给 GC 析构。
+    """
+
+    def test_clears_only_when_the_widget_still_owns_the_reference(self, qapp):
+        from PySide6.QtWidgets import QWidget
+        from ui.screenshot_window import clear_app_ref
+
+        app = QApplication.instance()
+        first, second = QWidget(), QWidget()
+        try:
+            app._scroll_window = first
+            assert clear_app_ref(app, "_scroll_window", first) is True
+            assert getattr(app, "_scroll_window", "missing") is None
+
+            # 旧窗口的过期回调：引用已经是新窗口了，不许动
+            app._scroll_window = second
+            assert clear_app_ref(app, "_scroll_window", first) is False
+            assert app._scroll_window is second
+
+            assert clear_app_ref(app, "_scroll_window", second) is True
+            assert app._scroll_window is None
+        finally:
+            if hasattr(app, "_scroll_window"):
+                delattr(app, "_scroll_window")
+            first.deleteLater()
+            second.deleteLater()
+
+    def test_missing_reference_is_a_mismatch_not_an_error(self, qapp):
+        from PySide6.QtWidgets import QWidget
+        from ui.screenshot_window import clear_app_ref
+
+        app = QApplication.instance()
+        widget = QWidget()
+        try:
+            if hasattr(app, "_gif_window"):
+                delattr(app, "_gif_window")
+            assert clear_app_ref(app, "_gif_window", widget) is False
+            assert not hasattr(app, "_gif_window")
+        finally:
+            if hasattr(app, "_gif_window"):
+                delattr(app, "_gif_window")
+            widget.deleteLater()

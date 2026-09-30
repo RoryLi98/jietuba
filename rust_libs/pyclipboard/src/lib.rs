@@ -43,6 +43,22 @@ fn should_skip_callback(id: i64) -> bool {
     false
 }
 
+/// 有界 join：最多等 `timeout`，超时就把 handle 交给一个后台线程慢慢 join，
+/// 调用方立刻返回。
+///
+/// stop_monitor / start_monitor 都跑在持 GIL 的 pymethod 里，一个卡住的监听
+/// 线程会把「退出」或「启动」整条流程无限拖住（界面看着像假死）。超时后留
+/// 下的 joiner 线程由进程退出时的 OS 收尾；此时 IS_RUNNING 已经是 false、
+/// CALLBACK 已清空，被丢下的监听线程不会再进 Python。
+fn join_bounded(handle: thread::JoinHandle<()>, timeout: Duration) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let _ = handle.join();
+        let _ = tx.send(());
+    });
+    let _ = rx.recv_timeout(timeout);
+}
+
 // ============== Python 模块 ==============
 
 /// pyclipboard - Python 剪贴板管理库
@@ -553,16 +569,23 @@ impl PyClipboardManager {
     ///     ...     print(f"New: {item.content}")
     ///     >>> manager.start_monitor(callback=on_change)
     #[pyo3(signature = (callback=None))]
-    fn start_monitor(&self, callback: Option<PyObject>) -> PyResult<()> {
+    fn start_monitor(&self, py: Python<'_>, callback: Option<PyObject>) -> PyResult<()> {
         use clipboard_rs::{ClipboardHandler, ClipboardWatcher, ClipboardWatcherContext};
         
         if IS_RUNNING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
             return Err(PyRuntimeError::new_err("监听器已在运行"));
         }
         
-        // 保存回调
-        if let Some(handle) = WATCHER_THREAD.lock().take() {
-            let _ = handle.join();
+        // 保存回调。上一个监听线程可能正等在 GIL 上（它在回调里进 Python），
+        // 所以这里必须先放掉 GIL 再 join，否则自己等自己。
+        // 同时把 guard 取出来再用：Rust 2021 的 if let 临时量活到整块结束，
+        // 直接写 `if let Some(h) = WATCHER_THREAD.lock().take()` 会把这把锁
+        // 一路握到 join 完成（stop_monitor 那边也要拿它）。
+        let stale_handle = WATCHER_THREAD.lock().take();
+        if let Some(handle) = stale_handle {
+            py.allow_threads(move || {
+                join_bounded(handle, Duration::from_secs(3));
+            });
         }
 
         if let Some(cb) = callback {
@@ -932,69 +955,91 @@ impl PyClipboardManager {
                     }
 
                     // ── 第四步：写入数据库 ────────────────────────────────────
-                    let db = self.db.lock();
-                    if let Ok(id) = db.insert_item(&main_item) {
-                        main_item.id = id;
+                    // 分成「持锁写库」和「进 Python」两段，锁一放开才允许
+                    // 进 GIL：
+                    //  监听线程带着 db / CALLBACK 锁去抢 GIL，会与 Python
+                    //  线程（持 GIL 再拿同一把锁）构成 ABBA 死锁——现象是
+                    //  整个应用冻死，不是崩溃。
+                    //  更直接的一条：回调里会反过来调 manager.get_history()
+                    //  之类（要抢 db），持锁回调就是自己等自己。
+                    let inserted_id = {
+                        let db = self.db.lock();
+                        let result = db.insert_item(&main_item);
+                        match result {
+                            Ok(id) => {
+                                main_item.id = id;
 
-                        // 图片优化：
-                        // CF_DIBV5(17) 是 CF_DIB(8) 的超集（含 alpha 通道），
-                        // 有 CF_DIBV5 时跳过 CF_DIB 以避免粘贴时丢失透明通道。
-                        let has_dibv5 = raw_formats.iter().any(|(fid, _, data)| {
-                            *fid == 17 && !data.is_empty()
-                        });
-                        let filtered_formats: Vec<(u32, String, Vec<u8>)> = raw_formats
-                            .into_iter()
-                            .filter(|(fid, _, _)| !(*fid == 8 && has_dibv5))
-                            .collect();
+                                // 图片优化：
+                                // CF_DIBV5(17) 是 CF_DIB(8) 的超集（含 alpha 通道），
+                                // 有 CF_DIBV5 时跳过 CF_DIB 以避免粘贴时丢失透明通道。
+                                let has_dibv5 = raw_formats.iter().any(|(fid, _, data)| {
+                                    *fid == 17 && !data.is_empty()
+                                });
+                                let filtered_formats: Vec<(u32, String, Vec<u8>)> = raw_formats
+                                    .into_iter()
+                                    .filter(|(fid, _, _)| !(*fid == 8 && has_dibv5))
+                                    .collect();
 
-                        // 统计字节数，同时对 >100KB 的数据做一次压缩，
-                        // 压缩结果直接复用（存库时不再重复压缩）
-                        // 格式：(format_id, format_name, data, is_compressed)
-                        const THRESHOLD: usize = 100 * 1024;
-                        let mut raw_total: usize = 0;
-                        let mut compressed_total: usize = 0;
-                        let formats_to_store: Vec<(u32, String, Vec<u8>, bool)> = filtered_formats
-                            .into_iter()
-                            .map(|(fid, fname, data)| {
-                                raw_total += data.len();
-                                if data.len() > THRESHOLD {
-                                    match zstd::encode_all(data.as_slice(), 3) {
-                                        Ok(cdata) => {
-                                            compressed_total += cdata.len();
-                                            (fid, fname, cdata, true)   // 已压缩
-                                        }
-                                        Err(_) => {
+                                // 统计字节数，同时对 >100KB 的数据做一次压缩，
+                                // 压缩结果直接复用（存库时不再重复压缩）
+                                // 格式：(format_id, format_name, data, is_compressed)
+                                const THRESHOLD: usize = 100 * 1024;
+                                let mut raw_total: usize = 0;
+                                let mut compressed_total: usize = 0;
+                                let formats_to_store: Vec<(u32, String, Vec<u8>, bool)> = filtered_formats
+                                    .into_iter()
+                                    .map(|(fid, fname, data)| {
+                                        raw_total += data.len();
+                                        if data.len() > THRESHOLD {
+                                            match zstd::encode_all(data.as_slice(), 3) {
+                                                Ok(cdata) => {
+                                                    compressed_total += cdata.len();
+                                                    (fid, fname, cdata, true)   // 已压缩
+                                                }
+                                                Err(_) => {
+                                                    compressed_total += data.len();
+                                                    (fid, fname, data, false)   // 压缩失败，存原始
+                                                }
+                                            }
+                                        } else {
                                             compressed_total += data.len();
-                                            (fid, fname, data, false)   // 压缩失败，存原始
+                                            (fid, fname, data, false)           // 不需压缩
                                         }
-                                    }
-                                } else {
-                                    compressed_total += data.len();
-                                    (fid, fname, data, false)           // 不需压缩
+                                    })
+                                    .collect();
+                                main_item.char_count =
+                                    Some((raw_total as i64) * 10_000_000 + compressed_total as i64);
+
+                                if !formats_to_store.is_empty() {
+                                    let _ = db.insert_precompressed_formats(id, &formats_to_store);
                                 }
-                            })
-                            .collect();
-                        main_item.char_count = Some((raw_total as i64) * 10_000_000 + compressed_total as i64);
 
-                        if !formats_to_store.is_empty() {
-                            let _ = db.insert_precompressed_formats(id, &formats_to_store);
+                                let limit = HISTORY_LIMIT.load(Ordering::Relaxed);
+                                if limit > 0 {
+                                    let _ = db.cleanup_old_items(limit);
+                                }
+                                Some(id)
+                            }
+                            Err(_) => None,
                         }
+                    };
+                    let Some(id) = inserted_id else {
+                        return;
+                    };
 
-                        let limit = HISTORY_LIMIT.load(Ordering::Relaxed);
-                        if limit > 0 {
-                            let _ = db.cleanup_old_items(limit);
-                        }
-
-                        if should_skip_callback(main_item.id) {
-                            return;
-                        }
-
-                        if let Some(callback) = CALLBACK.lock().as_ref() {
-                            Python::with_gil(|py| {
-                                let _ = callback.call1(py, (main_item.clone(),));
-                            });
-                        }
+                    if should_skip_callback(id) {
+                        return;
                     }
+
+                    // 此处 db 已经释放。CALLBACK 只在持 GIL 期间短暂取用，
+                    // 与 start_monitor / stop_monitor 同序（GIL → CALLBACK），
+                    // 全程不存在「反向持锁等 GIL」。
+                    Python::with_gil(|py| {
+                        let cb = CALLBACK.lock().as_ref().map(|cb| cb.clone_ref(py));
+                        if let Some(cb) = cb {
+                            let _ = cb.call1(py, (main_item,));
+                        }
+                    });
                 }
             }
             
@@ -1067,7 +1112,11 @@ impl PyClipboardManager {
     /// 停止剪贴板监听
     fn stop_monitor(&self, py: Python<'_>) -> PyResult<()> {
         IS_RUNNING.store(false, Ordering::SeqCst);
-        if let Some(shutdown) = WATCHER_SHUTDOWN.lock().take() {
+        // guard 先取出来再用：Rust 2021 的 if let 临时量活到整块结束，
+        // 直接在 if let 里用会把锁一路握到 stop() 完成，而监听线程在
+        // 启动/退出两个点都要抢这把锁（*WATCHER_SHUTDOWN.lock()）。
+        let shutdown = WATCHER_SHUTDOWN.lock().take();
+        if let Some(shutdown) = shutdown {
             shutdown.stop();
         }
         #[cfg(target_os = "windows")]
@@ -1086,12 +1135,16 @@ impl PyClipboardManager {
         }
         *CALLBACK.lock() = None;
         *LAST_CALLBACK_EVENT.lock() = None;
-        if let Some(handle) = WATCHER_THREAD.lock().take() {
+        // 同样先把 guard 取出来：原写法在 2021 版语义下会带着这把锁进
+        // join（整个退出流程可能卡在这里），下面的"放回"分支更会在同一把
+        // 非重入锁上自锁。
+        let handle = WATCHER_THREAD.lock().take();
+        if let Some(handle) = handle {
             if handle.thread().id() == thread::current().id() {
                 *WATCHER_THREAD.lock() = Some(handle);
             } else {
                 py.allow_threads(move || {
-                    let _ = handle.join();
+                    join_bounded(handle, Duration::from_secs(3));
                 });
             }
         }

@@ -29,6 +29,19 @@ from core import safe_event
 from core.shortcut_manager import ShortcutManager, ShortcutHandler
 
 
+def clear_app_ref(app, attr: str, widget) -> bool:
+    """延迟销毁回调专用：只清掉仍指向 widget 自己的那个全局引用。
+
+    QWidget 的 close()/deleteLater() 是延迟销毁，destroyed 信号在下一个
+    事件循环才发；那时全局引用往往已经指向新建的窗口。无条件置 None 会把
+    新窗口的唯一强引用清掉——PySide 会把仍在使用的活窗口交给 GC 析构
+    （GIF 录制与长截图各有一条这样的回调）。
+    """
+    if getattr(app, attr, None) is not widget:
+        return False
+    setattr(app, attr, None)
+    return True
+
 
 class ScreenshotShortcutHandler(ShortcutHandler):
     """截图窗口快捷键处理器 - 优先级最高(100)"""
@@ -1199,8 +1212,13 @@ class ScreenshotWindow(QWidget):
             app = QApplication.instance()
             app._gif_window = gif_win
             
-            # 窗口关闭后自动清除全局引用，释放内存
-            gif_win.destroyed.connect(lambda: setattr(app, '_gif_window', None))
+            # 窗口关闭后自动清除全局引用，释放内存。
+            # 必须做身份校验：close_all/deleteLater 是延迟销毁，回调触发时
+            # app._gif_window 往往已经指向新窗口，无条件置 None 会清掉新窗口
+            # 的唯一强引用 → PySide 回收仍在使用的活窗口（record_window.py 同款判断）
+            def _on_gif_window_destroyed(*_args):
+                clear_app_ref(app, '_gif_window', gif_win)
+            gif_win.destroyed.connect(_on_gif_window_destroyed)
             log_info(T("GIF录制窗口已启动"), "ScreenshotWindow")
             
             # 关闭截图窗口
@@ -1240,8 +1258,17 @@ class ScreenshotWindow(QWidget):
             # 创建独立的长截图窗口（不传递 parent，让它独立运行）。按需导入：长截图模块
             # 加载时就会读设置、配置拼接引擎，放在文件顶部会被启动预加载带进工作线程。
             from stitch import ScrollCaptureWindow
-            scroll_window = ScrollCaptureWindow(capture_rect, parent=None, config_manager=self.config_manager)
-            scroll_window.set_save_directory(save_dir)  # 设置保存目录
+            try:
+                scroll_window = ScrollCaptureWindow(capture_rect, parent=None, config_manager=self.config_manager)
+                scroll_window.set_save_directory(save_dir)  # 设置保存目录
+            except Exception as e:
+                # 构造半途失败会一路抛到未处理异常钩子：用户只看到"点了没反应"，
+                # 半成品窗口随后被 GC 直接析构（日志实测 2026-09-28 连续三次
+                # AttributeError 就是这条路径）。这里兜住——记日志、明确提示，
+                # 保留当前选区，允许直接重试。
+                log_exception(e, T("创建长截图窗口失败"))
+                show_modeless_warning_dialog(self, "警告", f"长截图启动失败: {e}")
+                return
             
             # 把引用挂到 QApplication，防止截图窗口销毁后被 GC 回收
             app = QApplication.instance()
@@ -1253,9 +1280,12 @@ class ScreenshotWindow(QWidget):
                     log_exception(e, T("关闭旧滚动截图窗口"))
             app._scroll_window = scroll_window
             
-            # 窗口关闭后自动清除全局引用，释放内存
-            def _on_scroll_window_destroyed():
-                app._scroll_window = None
+            # 窗口关闭后自动清除全局引用，释放内存。
+            # 同上：延迟销毁时 app._scroll_window 可能已经是新窗口，
+            # 只清自己那一个，否则活窗口被 GC（长截图"点开第二次就崩"的隐患）
+            def _on_scroll_window_destroyed(*_args):
+                if not clear_app_ref(app, '_scroll_window', scroll_window):
+                    return
                 from core.platform_utils import request_trim_working_set
                 request_trim_working_set(1000)
             scroll_window.destroyed.connect(_on_scroll_window_destroyed)

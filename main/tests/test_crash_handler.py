@@ -71,4 +71,19 @@ class TestInstallCrashHooks:
             sys.unraisablehook = old_unraisable
             # enable() 不带 file 就回到默认的 stderr
             faulthandler.enable() if was_enabled else faulthandler.disable()
+
+
+class TestInstallExceptionProbe:
+    """Windows 继续处理探针测试"""
+
+    def test_install_is_idempotent(self):
+        """重复安装应幂等（不重复注册），Windows 上必须真正装上"""
+        import core.crash_handler as ch
+
+        ch._install_exception_probe()
+        first = ch._probe_handler
+        ch._install_exception_probe()
+        assert ch._probe_handler is first
+        if sys.platform == "win32":
+            assert first is not None
  

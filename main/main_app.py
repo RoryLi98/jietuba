@@ -6,6 +6,7 @@
 
 import sys
 import os
+import time
 
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QBrush, QFont
@@ -197,8 +198,30 @@ class MainApp(QObject):
         self._preloader = PreloadManager(self)
         self._preloader.build_and_start()
 
+    # 预加载线程干的是 import，启动几秒后就跑完了；预算只在"刚启动就退出"时用得上
+    _EXIT_THREAD_BUDGET_S = 5.0
+
     def _on_about_to_quit(self):
-        """应用退出前收尾"""
+        """应用退出前收尾 —— 唯一的清理入口。
+
+        托盘退出、Windows 注销/关机、会话结束都会触发 aboutToQuit。这些清理
+        原先只挂在托盘的 quit_app 上：从系统那条路退出时，剪贴板监听线程和
+        预加载 QThread 一个都没停，QApplication 析构子对象会撞上还在跑的
+        QThread（"QThread: Destroyed while thread is still running"），
+        进程以 abort 收场，而不是安静退出。
+        """
+        started = time.monotonic()
+
+        # 1. 先停剪贴板监听：Rust 侧要 join 监听线程，越早停越不会和后面的
+        #    翻译/OCR 清理抢时间；停完之后监听线程不会再进 Python（回调已清）
+        if self.clipboard_manager and self.clipboard_manager.is_available:
+            try:
+                self.clipboard_manager.stop_monitoring()
+            except Exception as e:
+                log_exception(e, T("停止剪贴板监听"))
+
+        # 2. 翻译与文字识别：都在等各自的工作线程。必须排在第 4 步之前——
+        #    这两处的 import 要抢在"可能被终止的线程"还攥着 import 锁之前完成
         try:
             from translation import TranslationManager
 
@@ -211,11 +234,66 @@ class MainApp(QObject):
             shutdown_recognition()
         except Exception as e:
             log_exception(e, T("等待文字识别线程"))
+
+        # 3. 关掉各自持有子线程的窗口
+        if self.screenshot_window:
+            try:
+                self.screenshot_window.full_destroy()
+            except Exception as e:
+                log_exception(e, T("销毁截图窗口"))
+            self.screenshot_window = None
+        if self.clipboard_window:
+            try:
+                self.clipboard_window.close()
+            except Exception as e:
+                log_exception(e, T("关闭剪贴板窗口"))
+            self.clipboard_window = None
+        if self.settings_window:
+            try:
+                self.settings_window.close()
+            except Exception as e:
+                log_exception(e, T("关闭设置窗口"))
+            self.settings_window = None
+
+        # 4. 注销热键：否则进程退了热键还被占着
+        try:
+            self.hotkey_system.unregister_all()
+        except Exception as e:
+            log_exception(e, T("注销全局热键"))
+
+        # 5. 等后台线程。等不到就终止——带着运行中的 QThread 让解释器收尾，
+        #    下场是 abort（0xC0000409），比中止一次还在做 import 的预加载严重
+        self._wait_exit_threads()
+
+        log_info(
+            T("退出收尾完成，耗时 {ms} ms", ms=int((time.monotonic() - started) * 1000)),
+            "MainApp",
+        )
+
         try:
             if hasattr(self, "_logger") and self._logger:
                 self._logger.close()
         except Exception as e:
             log_exception(e, T("关闭logger"))
+
+    def _wait_exit_threads(self):
+        """有界等待退出期必须停下的线程；超时则终止（原因见上）。"""
+        deadline = time.monotonic() + self._EXIT_THREAD_BUDGET_S
+        for attr in ("_screenshot_preload_thread", "_ocr_preload_thread", "_capture_thread"):
+            thread = getattr(self, attr, None)
+            if thread is None or not thread.isRunning():
+                continue
+            if thread.wait(max(0, int((deadline - time.monotonic()) * 1000))):
+                continue
+            log_warning(
+                T(
+                    "{name} 退出时未在 {budget} 秒内结束，已终止",
+                    name=attr, budget=self._EXIT_THREAD_BUDGET_S,
+                ),
+                "MainApp",
+            )
+            thread.terminate()
+            thread.wait(1000)
 
     def _on_wizard_requested(self):
         """设置窗口请求打开向导：隐藏设置窗口、注销热键，再显示向导，完成后恢复"""
@@ -793,44 +871,12 @@ class MainApp(QObject):
             log_exception(e, T("钉住剪贴板图片失败"))
         
     def quit_app(self):
-        # 完全销毁缓存的截图窗口
-        if self.screenshot_window:
-            try:
-                self.screenshot_window.full_destroy()
-            except Exception as e:
-                log_exception(e, T("销毁截图窗口"))
-            self.screenshot_window = None
+        """托盘"退出"入口。
 
-        # 关闭剪贴板窗口
-        if self.clipboard_window:
-            try:
-                self.clipboard_window.close()
-            except Exception as e:
-                log_exception(e, T("关闭剪贴板窗口"))
-            self.clipboard_window = None
-
-        # 停止剪贴板监听
-        if self.clipboard_manager and self.clipboard_manager.is_available:
-            try:
-                self.clipboard_manager.stop_monitoring()
-            except Exception as e:
-                log_exception(e, T("停止剪贴板监听"))
-
-        # 关闭设置窗口
-        if self.settings_window:
-            try:
-                self.settings_window.close()
-            except Exception as e:
-                log_exception(e, T("关闭设置窗口"))
-            self.settings_window = None
-
-        # 等待预加载线程结束（最多 2 秒，避免卡退出）
-        for attr in ('_screenshot_preload_thread', '_ocr_preload_thread', '_capture_thread'):
-            thread = getattr(self, attr, None)
-            if thread and thread.isRunning():
-                thread.wait(2000)
-
-        self.hotkey_system.unregister_all()
+        实际清理全部放在 aboutToQuit 的 _on_about_to_quit 里做一次——那里是
+        唯一能覆盖所有退出路径（托盘、系统注销/关机、会话结束）的位置，
+        这里只负责让事件循环退出。
+        """
         self.app.quit()
         
     def run(self):
