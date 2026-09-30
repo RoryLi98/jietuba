@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 """启动速度预设（其他页）与五个 preload_* 开关的联动测试。"""
-from unittest.mock import MagicMock
 
 import pytest
 

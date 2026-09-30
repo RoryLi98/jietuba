@@ -447,7 +447,7 @@ class TestInPlaceTranslation:
         clipboard = QApplication.clipboard()
         chip_rect = layer._chip_rects()[0][1]
         center = chip_rect.center()
-        from PySide6.QtCore import QEvent, QPoint, Qt
+        from PySide6.QtCore import QEvent, Qt
         from PySide6.QtGui import QMouseEvent
         event = QMouseEvent(
             QEvent.Type.MouseButtonPress, center,

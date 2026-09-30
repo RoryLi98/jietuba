@@ -1936,7 +1936,6 @@ class CanvasView(QGraphicsView):
         if selected_item and selected_item is not active_text:
             if self._update_item_visual_opacity(selected_item, opacity):
                 selected_item.update()
-                updated = True
 
         # 只失效被改的图元：scene 即整个虚拟桌面，无参 update() 是全屏重绘
 

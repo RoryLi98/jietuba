@@ -336,7 +336,6 @@ def test_rounded_corner_handles_sit_on_the_corner_arcs():
     radius = 29.0
     handles = SelectionItem._get_rounded_corner_handle_positions(rect, radius)
 
-    d = radius * (1 - 1 / 2 ** 0.5)
     arcs = {
         SelectionItem.HANDLE_TOP_LEFT: QPointF(rect.left() + radius, rect.top() + radius),
         SelectionItem.HANDLE_TOP_RIGHT: QPointF(rect.right() - radius, rect.top() + radius),

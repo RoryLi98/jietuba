@@ -68,7 +68,6 @@ class TestConfigAccessors:
         assert ToolSettingsManager.APP_DEFAULT_SETTINGS["pin_thumbnail_height"] == 100
 
     def test_setter_clamps_to_valid_range(self):
-        from settings.tool_settings import ToolSettingsManager
         assert 40 <= 100 <= 400  # 边界与默认值自洽
         # clamp 逻辑
         assert max(40, min(400, 10)) == 40
@@ -114,7 +113,6 @@ class TestEnterUsesProportionalGeometry:
         mode._scene_center = None
         mode._region_rect = None
 
-        from PySide6.QtGui import QCursor
         monkeypatch.setattr(
             "pin.pin_thumbnail.QCursor.pos",
             staticmethod(lambda: QPoint(500, 300)),

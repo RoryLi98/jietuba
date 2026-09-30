@@ -14,7 +14,6 @@ Windows 系统 DPI 为两套界面缩放选择一个最接近的初始档位。
 默认值定义在 settings/tool_settings.py 的 APP_DEFAULT_SETTINGS["ui_scale_percent"]，
 本模块通过 config_manager.get_app_setting / set_app_setting 读写。
 """
-import math
 
 # 缩放基准重定义（2026-09）：此前默认 100% 的界面偏小，多数用户实际开 150%。
 # 现在把「旧 150%」的观感定为新的 100% 默认档：所有基准尺寸统一乘 1.5，

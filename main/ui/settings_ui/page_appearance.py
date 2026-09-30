@@ -94,7 +94,6 @@ def create_appearance_page(dialog) -> QWidget:
 def _build_application_section(dialog, grp: SettingCardGroup):
     """Application appearance: follow OS, force light or force dark."""
     from core.ui_theme import get_ui_theme
-    from settings import get_tool_settings_manager
 
     card = FSettingCard(
         FluentIcon.APPLICATION,

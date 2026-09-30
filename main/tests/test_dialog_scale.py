@@ -750,8 +750,6 @@ def test_manage_dialog_default_size_fits_small_screens():
     from clipboard.ui.layout_scale import (
         fit_manage_dialog_size,
         manage_dialog_height,
-        manage_dialog_min_height,
-        manage_dialog_min_width,
         manage_dialog_width,
     )
 

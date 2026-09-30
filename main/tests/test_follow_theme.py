@@ -6,7 +6,6 @@ from PySide6.QtWidgets import QApplication
 
 from clipboard.ui.theme.themes import (
     FOLLOW_THEME_NAME,
-    ThemeColors,
     build_follow_theme,
     get_theme_manager,
 )
@@ -59,7 +58,6 @@ def test_accent_change_refreshes_following_theme(qapp):
     from core.theme import get_theme
     mgr = get_theme_manager()
     mgr.set_theme(FOLLOW_THEME_NAME)
-    before = mgr.get_current_theme().colors.accent_primary
 
     received = []
     mgr.theme_changed.connect(lambda theme: received.append(theme))
