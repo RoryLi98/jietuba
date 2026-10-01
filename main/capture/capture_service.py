@@ -4,6 +4,7 @@
 
 import ctypes
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import mss
@@ -24,6 +25,10 @@ _HDR_TIMEOUT_MS = 0
 
 # 新会话要等到一次桌面 present 才有首帧。后台建会话后按这个预算等一次首帧，等不到时首次截图回落 mss。
 _PRIME_TIMEOUT_MS = 250
+
+# HDR 状态查询缓存（见 hdr_display_active）
+_HDR_ACTIVE_TTL_S = 2.0
+_hdr_active_cache = None  # (monotonic时刻, bool) | None
 
 
 class _HdrSession:
@@ -268,14 +273,33 @@ def grab_region_mss(rect):
 
 
 def hdr_display_active():
-    """是否有显示器开着 HDR（Windows 高级颜色）。不建会话、不加载显卡驱动，每次截图前都可以调用。"""
+    """是否有显示器开着 HDR（Windows 高级颜色）。不建会话、不加载显卡驱动。
+
+    hdrcapture.displays() 每次都枚举显示器拓扑，auto 引擎下每张截图（长截图
+    监视是每帧）都要查一次——结果加短 TTL 缓存：显示器配置变化经
+    refresh_hdr_session / apply_capture_engine 失效；TTL 兜底"开关 HDR 未触发
+    DISPLAYCHANGE"的极端情形，auto 引擎本就带 HDR 失败回落 mss，短暂过期
+    最多让一帧多试一次。
+    """
+    global _hdr_active_cache
     if hdrcapture is None:
         return False
+    cached = _hdr_active_cache
+    if cached is not None and time.monotonic() - cached[0] < _HDR_ACTIVE_TTL_S:
+        return cached[1]
     try:
-        return any(display.hdr_enabled for display in hdrcapture.displays())
+        value = any(display.hdr_enabled for display in hdrcapture.displays())
     except Exception as e:
         log_warning(T("查询显示器 HDR 状态失败，按未开启处理: {error}", error=e), "CaptureService")
         return False
+    _hdr_active_cache = (time.monotonic(), value)
+    return value
+
+
+def invalidate_hdr_display_cache():
+    """显示器配置或引擎设置变化后调用，立刻丢弃 HDR 状态缓存。"""
+    global _hdr_active_cache
+    _hdr_active_cache = None
 
 
 def uses_hdr_engine(engine=None):
@@ -303,6 +327,7 @@ def refresh_hdr_session(engine):
 
     不提前重建时，下一次截图要等 hdrcapture 自己重建会话。
     """
+    invalidate_hdr_display_cache()
     if engine == "mss":
         return None
     return _HdrSession.refresh(only_if=None if engine == "hdr" else hdr_display_active)
@@ -324,6 +349,7 @@ def return_hdr_session(after=None):
 
 def shutdown_hdr_session():
     """应用退出前调用。"""
+    invalidate_hdr_display_cache()
     _HdrSession.shutdown()
 
 
@@ -333,6 +359,7 @@ def apply_capture_engine(engine):
     切到 mss 时释放 HDR 会话；切到 auto / hdr 时清掉建会话失败的记录，按新设置在后台建好
     或释放会话。
     """
+    invalidate_hdr_display_cache()
     if engine == "mss":
         _HdrSession.reset()
     else:

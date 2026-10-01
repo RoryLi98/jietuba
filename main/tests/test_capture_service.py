@@ -441,13 +441,43 @@ class TestAutoEngineFollowsHdrDisplays:
 class TestHdrDisplayActive:
     """测真实的 hdr_display_active（模块级替身挡不住导入时拿到的原函数），只替换 hdrcapture。"""
 
+    @pytest.fixture(autouse=True)
+    def _fresh_cache(self):
+        """每条用例前清掉 HDR 状态缓存，避免用例间串味。"""
+        import capture.capture_service as cap
+
+        cap.invalidate_hdr_display_cache()
+        yield
+        cap.invalidate_hdr_display_cache()
+
     def test_any_display_with_hdr_counts(self):
         displays = [MagicMock(hdr_enabled=False), MagicMock(hdr_enabled=True)]
         with patch("capture.capture_service.hdrcapture") as module:
             module.displays.return_value = displays
             assert _real_hdr_display_active() is True
             module.displays.return_value = displays[:1]
+            # TTL 缓存内直接复用上次结果，不再枚举显示器
+            assert _real_hdr_display_active() is True
+            module.displays.assert_called_once()
+
+            # 显示器配置变化 → 失效钩子后重新查询
+            from capture.capture_service import invalidate_hdr_display_cache
+            invalidate_hdr_display_cache()
             assert _real_hdr_display_active() is False
+            assert module.displays.call_count == 2
+
+    def test_ttl_expiry_requeries(self):
+        import capture.capture_service as cap
+
+        displays = [MagicMock(hdr_enabled=True)]
+        with patch("capture.capture_service.hdrcapture") as module:
+            module.displays.return_value = displays
+            assert _real_hdr_display_active() is True
+            # 人为把缓存时间戳拨到 TTL 之前 → 过期重查
+            at, value = cap._hdr_active_cache
+            cap._hdr_active_cache = (at - cap._HDR_ACTIVE_TTL_S - 0.1, value)
+            assert _real_hdr_display_active() is True
+            assert module.displays.call_count == 2
 
     def test_missing_extension_means_no_hdr(self):
         with patch("capture.capture_service.hdrcapture", None):
@@ -457,6 +487,10 @@ class TestHdrDisplayActive:
         with patch("capture.capture_service.hdrcapture") as module:
             module.displays.side_effect = OSError("DisplayConfig failed")
             assert _real_hdr_display_active() is False
+            # 失败不缓存：下一次（不再抛错）正常查询
+            module.displays.side_effect = None
+            module.displays.return_value = [MagicMock(hdr_enabled=True)]
+            assert _real_hdr_display_active() is True
 
 
 class TestExplicitEngine:
