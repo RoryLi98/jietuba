@@ -27,6 +27,7 @@ def dialog(qapp, monkeypatch):
     )
 
     dlg = SettingsDialog()  # config_manager=None → 内部使用 MockConfig
+    dlg.build_all_pages()  # 各页按需建页（见 _ensure_page），先全部建出再访问控件
     dlg.show()
     yield dlg
     dlg.close()

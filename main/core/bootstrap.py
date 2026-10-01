@@ -8,7 +8,6 @@
 
 import sys
 import os
-import threading
 
 # ===================== 安全补丁：避免 platform 模块启动 cmd.exe =====================
 # platform.version() → uname() → _syscmd_ver() 会调用 subprocess("ver", shell=True)
@@ -241,18 +240,6 @@ class PreloadManager:
         """根据配置构建预加载步骤链，然后启动"""
         from PySide6.QtCore import QTimer
         from core.platform_utils import request_trim_working_set
-
-        # 鼠标侧键热键依赖 pynput，其首次导入（ctypes + 低级钩子基础设施）
-        # 在主线程要花几十毫秒。起一个一次性后台线程把它提前装进 import
-        # 缓存；就算链首的热键注册抢先用到，也只是在导入锁上等一下，不会
-        # 比同步导入更慢。
-        def _warm_pynput():
-            try:
-                from pynput import mouse  # noqa: F401  预热导入
-            except Exception:
-                pass  # 未安装 pynput 时鼠标侧键功能本来就不可用
-
-        threading.Thread(target=_warm_pynput, name="pynput-warmup", daemon=True).start()
 
         cfg = self.config
         # 链首：托盘与全局热键。二者不依赖任何预加载产物，却是本应用唯一的

@@ -45,6 +45,7 @@ hidden_imports = [
     'gifrecorder',
     'ppocr_rust',
     'hdrcapture',
+    'inputhub',
     'zxingcpp',
     'PIL',
     'PIL.Image',
@@ -61,7 +62,6 @@ hidden_imports = [
     'win32gui',
     'comtypes.client',
     'comtypes.gen.UIAutomationClient',
-    'pynput',
     'darkdetect',
     # ── 惰性导出的 UI 模块（必须显式列出）──
     # pin/clipboard/translation 三个包的 __init__ 改成了 PEP 562 惰性导出，

@@ -83,6 +83,7 @@ class TestSettingsPageWiring:
         from ui.settings_ui.dialog import SettingsDialog
 
         dlg = SettingsDialog(MockConfig())
+        dlg.build_all_pages()  # 各页按需建页（见 _ensure_page），先全部建出再访问控件
         combo = dlg.pin_thumbnail_height_combo
         data = [combo.itemData(i) for i in range(combo.count())]
         assert 100 in data
