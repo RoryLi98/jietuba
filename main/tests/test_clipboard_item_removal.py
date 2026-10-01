@@ -43,8 +43,30 @@ class _Manager:
         self.moved.append((item_id, group_id))
         return True
 
-    def get_by_group(self, group_id, offset=0, limit=1000):
+    def get_by_group(self, group_id, offset=0, limit=1000, search=None):
         return list(self.group_items)
+
+    def get_group_move_state(self, item_id, group_id):
+        """与 Rust Database.get_group_move_state 同语义（只扫 id 定位）。"""
+        ids = [it.id for it in self.group_items]
+        if item_id not in ids:
+            return (False, False)
+        idx = ids.index(item_id)
+        return (idx > 0, idx + 1 < len(ids))
+
+    def get_group_move_target(self, item_id, group_id, direction):
+        """与 Rust Database.get_group_move_target 同语义（temp 去本项推目标位）。"""
+        ids = [it.id for it in self.group_items]
+        if item_id not in ids:
+            return None
+        idx = ids.index(item_id)
+        new_idx = idx + direction
+        if new_idx < 0 or new_idx >= len(ids):
+            return None
+        temp = [i for i in ids if i != item_id]
+        before = temp[new_idx - 1] if new_idx > 0 else None
+        after = temp[new_idx] if new_idx < len(temp) else None
+        return (before, after)
 
     def move_item_between(self, item_id, before_id=None, after_id=None):
         self.between.append((item_id, before_id, after_id))

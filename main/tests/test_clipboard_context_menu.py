@@ -20,6 +20,28 @@ class DummyClipboardManager:
         items = list(self._group_items.get(group_id, []))
         return items[offset : offset + limit]
 
+    def get_group_move_state(self, item_id, group_id):
+        """与 Rust Database.get_group_move_state 同语义。"""
+        ids = [it.id for it in self._group_items.get(group_id, [])]
+        if item_id not in ids:
+            return (False, False)
+        idx = ids.index(item_id)
+        return (idx > 0, idx + 1 < len(ids))
+
+    def get_group_move_target(self, item_id, group_id, direction):
+        """与 Rust Database.get_group_move_target 同语义。"""
+        ids = [it.id for it in self._group_items.get(group_id, [])]
+        if item_id not in ids:
+            return None
+        idx = ids.index(item_id)
+        new_idx = idx + direction
+        if new_idx < 0 or new_idx >= len(ids):
+            return None
+        temp = [i for i in ids if i != item_id]
+        before = temp[new_idx - 1] if new_idx > 0 else None
+        after = temp[new_idx] if new_idx < len(temp) else None
+        return (before, after)
+
 
 def _make_controller(monkeypatch, manager):
     monkeypatch.setattr(ClipboardController, "_load_settings", lambda self: None)

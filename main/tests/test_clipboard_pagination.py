@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """ClipboardController 分页加载的回归测试。
 
-分组内搜索走客户端过滤（先按分组分页取一批，再在 Python 里按关键词筛），这条路
-上"是否还有下一页"必须按过滤前的条数判断，不能按过滤后的条数——否则命中关键词
-的条目一旦跨页，后面的页会被误判成不存在。
+分组内搜索已下推到 Rust/SQLite（query_by_group 带 search），返回的一页
+就是过滤后的一页——页内全是命中项，len < limit 即真的没有更多，旧架构
+"整页被客户端过滤光就误判没有下一页"的坑在结构上不再存在。
 """
 
 from clipboard.controllers.clipboard_controller import ClipboardController
@@ -11,16 +11,24 @@ from clipboard.core import ClipboardItem
 
 
 class DummyClipboardManager:
-    """只实现分页测试用得到的两个方法，行为对齐真实 ClipboardManager：
-    按 offset/limit 返回一页原始数据，不做任何关键词过滤（过滤是控制器自己做的）。
+    """只实现分页测试用得到的两个方法，行为对齐新契约下的真实链路：
+    get_by_group 在取页之前先按关键词过滤（等价于 SQL WHERE），分页
+    对过滤后的全集进行。
     """
 
     def __init__(self, group_items=None):
         self._group_items = group_items or {}
 
-    def get_by_group(self, group_id, offset=0, limit=50):
-        items = list(self._group_items.get(group_id, []))
-        return items[offset: offset + limit]
+    @staticmethod
+    def _matches(item, search):
+        if not search:
+            return True
+        needle = search.lower()
+        return needle in item.content.lower() or bool(item.title and needle in item.title.lower())
+
+    def get_by_group(self, group_id, offset=0, limit=50, search=None):
+        group = [it for it in self._group_items.get(group_id, []) if self._matches(it, search)]
+        return group[offset: offset + limit]
 
 
 def _make_controller(monkeypatch, manager):
@@ -57,9 +65,9 @@ def test_group_search_finds_matches_that_fall_on_a_later_page(monkeypatch):
 
     expected_ids = {item.id for item in items if "apple" in item.content}
     assert {item.id for item in collected} == expected_ids
-    # 分组一共 20 条，翻页必须把它们全部走完（按 raw_count 累加），
-    # 而不是在过滤后的第一页就因为「不满一页」提前停住。
-    assert controller._current_offset == len(items)
+    # 搜索下推 SQL 后，分页对过滤后的全集进行：offset 按命中条数累加，
+    # 4 条命中全部收齐即停（旧架构里 raw_count 是过滤前条数，语义不同）。
+    assert controller._current_offset == len(expected_ids)
     assert controller.has_more_items() is False
 
 
