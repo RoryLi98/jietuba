@@ -218,3 +218,86 @@ class TestSampledVerification:
             assert candidates[0][0] == 100, candidates[:3]
         finally:
             worker.stop()
+
+
+class TestRustAlignerParity:
+    """j-stitch Aligner（原生投票+校验）与纯 Python 分支的语义对照。
+
+    _align_candidates 有两条实现：j-stitch ≥ Aligner 时走原生，旧版回落
+    纯 Python。两条路径必须逐候选一致（含平票的首见序），否则重复版式
+    里的惯性裁决会随打包环境漂移。
+    """
+
+    @pytest.fixture
+    def worker(self):
+        from stitch.scroll_window import _StitchWorker
+
+        w = _StitchWorker(
+            scroll_direction="vertical",
+            locked_direction=None,
+            duplicate_threshold=0.95,
+            emit_fn=lambda payload: None,
+        )
+        yield w
+        w.stop()
+
+    @staticmethod
+    def _cases():
+        import random
+
+        rng = random.Random(42)
+
+        def rand_sig(rows):
+            return bytes(rng.randrange(256) for _ in range(rows * 24))
+
+        base = rand_sig(150)
+        periodic = rand_sig(20) * 8
+        shifted = bytes(10 * 24) + base[60 * 24:]
+        return [
+            ("随机噪声-惯性兜底", rand_sig(120), rand_sig(30), 0, 90),
+            ("真实移位重叠", base, shifted, 0, 50),
+            ("重复版式平票", periodic, periodic[40 * 24:] + periodic[:40 * 24], 0, 90),
+            ("skip_top 生效", base, shifted, 20, 50),
+            ("画布比帧短", base[:40 * 24], base[20 * 24:], 0, 10),
+            ("expected 越界", base, shifted, 0, 500),
+            ("负 expected", base, shifted, 0, -30),
+        ]
+
+    def test_rust_matches_python_branch(self, worker):
+
+        assert worker._aligner is not None, "测试环境应装配原生 Aligner"
+        for name, canvas, frame, skip, expected in self._cases():
+            worker._canvas_sig = canvas
+            worker._prev_row, worker._prev_delta = 0, expected
+
+            rust = worker._aligner.find_candidates(canvas, frame, skip, expected)
+            saved = worker._aligner
+            worker._aligner = None
+            py = worker._align_candidates(frame, skip)
+            worker._aligner = saved
+
+            assert rust == py, f"{name}: 原生与 Python 分支不一致\n  原生={rust}\n  Py={py}"
+
+    def test_rust_path_is_actually_used(self, worker):
+        """装配了 Aligner 时 _align_candidates 必须走原生路径（而非静默回落）。"""
+        assert worker._aligner is not None
+
+        class _SpyAligner:
+            """PyO3 frozen 类的方法只读，包一层记调用的替身。"""
+
+            def __init__(self, real):
+                self._real = real
+                self.calls = []
+
+            def find_candidates(self, *args, **kwargs):
+                self.calls.append(args)
+                return self._real.find_candidates(*args, **kwargs)
+
+        spy = _SpyAligner(worker._aligner)
+        worker._aligner = spy
+        try:
+            worker._canvas_sig = self._cases()[1][1]
+            worker._align_candidates(self._cases()[1][2], 0)
+            assert spy.calls, "候选召回应经由 j-stitch Aligner"
+        finally:
+            worker._aligner = spy._real

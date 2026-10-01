@@ -353,6 +353,28 @@ class _StitchWorker(threading.Thread):
         self._duplicate_count = 0
         self._final_image = None    # finalize 任务取出的最终成图
         self._last_preview_at = 0.0
+        # 候选投票与行校验的原生实现（j-stitch ≥ Aligner）：全画布键索引每帧
+        # 重建是 O(画布行数) 的 Python 字典循环，画布上万行后是帧管线大头。
+        # 旧版 j-stitch 没有该类时回落纯 Python 实现（_align_candidates 的
+        # Python 分支保留为行为基准）。
+        self._aligner = None
+        try:
+            import longstitch
+            self._aligner = longstitch.Aligner(
+                sig_bytes=self._SIG_BYTES,
+                key_seg_a=self._KEY_SEG_A,
+                key_seg_b=self._KEY_SEG_B,
+                bucket_cap=self._BUCKET_CAP,
+                n_candidates=self._CANDIDATES,
+                pix_candidates=self._PIX_CANDIDATES,
+                verify_rows=self._SIG_VERIFY_ROWS,
+                match_min_rows=self._MATCH_MIN_ROWS,
+                match_min_ratio=self._MATCH_MIN_RATIO,
+                row_match_max=self._ROW_MATCH_MAX,
+                min_overlap=self._MIN_OVERLAP,
+            )
+        except AttributeError:
+            pass
         # 积压计数（submit 加、处理完减），供主线程背压判断
         self._pending_lock = threading.Lock()
         self._pending = 0
@@ -660,6 +682,14 @@ class _StitchWorker(threading.Thread):
         if ch <= 0 or fh <= 0:
             return []
 
+        # 原生路径：投票与校验在 j-stitch 内完成（语义与下方 Python 分支一致）
+        aligner = getattr(self, "_aligner", None)
+        if aligner is not None:
+            return aligner.find_candidates(
+                canvas, frame_sig, skip_top, self._prev_row + self._prev_delta,
+            )
+
+        # ── 纯 Python 分支（旧版 j-stitch 的行为基准，勿改语义） ──
         # 画布：键 → 行号（每键封顶）
         index = {}
         for i in range(ch):

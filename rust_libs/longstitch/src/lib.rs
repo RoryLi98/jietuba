@@ -1,3 +1,4 @@
+pub mod align;
 pub mod error;
 pub mod hash;
 pub mod lcs;
@@ -139,6 +140,7 @@ fn stitch_images(
 fn longstitch(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add("StitchError", m.py().get_type_bound::<StitchError>())?;
+    m.add_class::<align::PyAligner>()?;
     m.add_class::<PyStitchResult>()?;
     m.add_function(wrap_pyfunction!(stitch_images, m)?)?;
     Ok(())
