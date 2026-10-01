@@ -549,15 +549,39 @@ class ClipboardManager:
             log_error(T("调整内容顺序失败: {e}", e=e), "Clipboard")
             return False
     
-    def get_by_group(self, group_id: Optional[int] = None, 
-                     offset: int = 0, limit: int = 50) -> List[ClipboardItem]:
-        """按分组查询"""
+    def get_by_group(self, group_id: Optional[int] = None,
+                     offset: int = 0, limit: int = 50,
+                     search: Optional[str] = None) -> List[ClipboardItem]:
+        """按分组查询（search 非空时在 Rust/SQLite 层过滤 content 或 title）"""
         if not self.is_available:
             return []
-        
+
         try:
-            result = self._manager.get_by_group(group_id, offset, limit)
+            result = self._manager.get_by_group(group_id, offset, limit, search)
             return [ClipboardItem.from_py_item(item) for item in result.items]
         except Exception as e:
             log_error(T("按分组查询失败: {e}", e=e), "Clipboard")
             return []
+
+    def get_group_move_state(self, item_id: int, group_id: int) -> tuple[bool, bool]:
+        """分组内条目能否上移/下移（Rust 侧只扫 id，不拉整组完整记录）"""
+        if not self.is_available:
+            return False, False
+
+        try:
+            return self._manager.get_group_move_state(item_id, group_id)
+        except Exception as e:
+            log_error(T("查询移动状态失败: {e}", e=e), "Clipboard")
+            return False, False
+
+    def get_group_move_target(self, item_id: int, group_id: int,
+                              direction: int) -> Optional[tuple[Optional[int], Optional[int]]]:
+        """上移/下移的目标位（move_item_between 的 before/after）；越界返回 None"""
+        if not self.is_available:
+            return None
+
+        try:
+            return self._manager.get_group_move_target(item_id, group_id, direction)
+        except Exception as e:
+            log_error(T("查询移动目标失败: {e}", e=e), "Clipboard")
+            return None

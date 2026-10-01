@@ -275,22 +275,14 @@ class ClipboardController(QObject):
             )
             return items, len(items)
 
+        # 搜索在 Rust/SQLite 层过滤：千条分组里不再"翻到哪搜到哪"
         items = self.manager.get_by_group(
             group_id=self.current_group_id,
             limit=limit,
-            offset=offset
+            offset=offset,
+            search=self._search_text,
         )
-        raw_count = len(items)
-
-        if self._search_text:
-            search_lower = self._search_text.lower()
-            items = [
-                item for item in items
-                if search_lower in item.content.lower()
-                or (item.title and search_lower in item.title.lower())
-            ]
-
-        return items, raw_count
+        return items, len(items)
     
     def check_scroll_load(self, scroll_value: int, scroll_max: int):
         """检查滚动位置，决定是否加载更多
@@ -758,36 +750,24 @@ class ClipboardController(QObject):
         self.item_row_moved.emit(index, target)
 
     def get_item_move_state(self, item_id: int, group_id: Optional[int]) -> tuple[bool, bool]:
-        """获取分组内容是否可上移/下移"""
+        """获取分组内容是否可上移/下移（Rust 侧只扫 id，不再拉整组完整记录）"""
         if group_id is None:
             return False, False
 
-        items = self.manager.get_by_group(group_id, offset=0, limit=1000)
-        for index, item in enumerate(items):
-            if item.id == item_id:
-                return index > 0, index < len(items) - 1
-        return False, False
+        return self.manager.get_group_move_state(item_id, group_id)
 
     def move_item_order(self, item_id: int, group_id: Optional[int], direction: int) -> bool:
         """移动分组内容顺序（direction: -1 上移, 1 下移）"""
         if group_id is None:
             return False
 
-        items = self.manager.get_by_group(group_id, offset=0, limit=1000)
-        current_index = next((i for i, item in enumerate(items) if item.id == item_id), None)
-        if current_index is None:
+        # 目标位在 Rust 侧计算（只扫 id），语义与旧实现一致：
+        # temp = 列表去掉本项；before = temp[new_idx-1]，after = temp[new_idx]
+        target = self.manager.get_group_move_target(item_id, group_id, direction)
+        if target is None:
             return False
 
-        new_index = current_index + (-1 if direction < 0 else 1)
-        if new_index < 0 or new_index >= len(items):
-            return False
-
-        temp_items = [item for i, item in enumerate(items) if i != current_index]
-        adjusted_new_index = new_index
-
-        before_id = temp_items[adjusted_new_index - 1].id if adjusted_new_index > 0 else None
-        after_id = temp_items[adjusted_new_index].id if adjusted_new_index < len(temp_items) else None
-
+        before_id, after_id = target
         if self.manager.move_item_between(item_id, before_id=before_id, after_id=after_id):
             if self.current_group_id == group_id:
                 self._move_loaded_item(item_id, direction)

@@ -518,35 +518,59 @@ impl Database {
     }
     
     /// 按分组查询
-    pub fn query_by_group(&self, group_id: Option<i64>, offset: i64, limit: i64) -> Result<PyPaginatedResult, String> {
-        let (where_clause, _count_params, _query_params): (String, Vec<i64>, Vec<i64>) = if let Some(gid) = group_id {
-            (
-                "WHERE group_id = ?".to_string(),
-                vec![gid],
-                vec![gid, limit, offset]
-            )
-        } else {
-            (
-                "WHERE group_id IS NULL".to_string(),
-                vec![],
-                vec![limit, offset]
-            )
+    pub fn query_by_group(&self, group_id: Option<i64>, offset: i64, limit: i64, search: Option<&str>) -> Result<PyPaginatedResult, String> {
+        // 搜索下推：content OR title 的 LIKE 匹配（SQL LIKE 对 ASCII 不区分
+        // 大小写，CJK 无大小写之分——与 Python 端 lower() 过滤语义一致），
+        // 千条分组里不再"翻到哪搜到哪"。
+        let search_clause = search
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| {
+                let like = format!("%{}%", s.replace('%', "\\%").replace('_', "\\_"));
+                (" AND (content LIKE ? ESCAPE '\\' OR (title IS NOT NULL AND title LIKE ? ESCAPE '\\'))".to_string(), like)
+            });
+
+        let (where_clause, count_params, query_params): (String, Vec<Value>, Vec<Value>) = match group_id {
+            Some(gid) => {
+                let mut clause = "WHERE group_id = ?".to_string();
+                let mut count_params: Vec<Value> = vec![Value::from(gid)];
+                let mut query_params: Vec<Value> = vec![Value::from(gid)];
+                if let Some((extra, like)) = &search_clause {
+                    clause.push_str(extra);
+                    let like_val = Value::from(like.clone());
+                    count_params.push(like_val.clone());
+                    count_params.push(like_val.clone());
+                    query_params.push(like_val.clone());
+                    query_params.push(like_val);
+                }
+                query_params.push(Value::from(limit));
+                query_params.push(Value::from(offset));
+                (clause, count_params, query_params)
+            }
+            None => {
+                let mut clause = "WHERE group_id IS NULL".to_string();
+                let mut count_params: Vec<Value> = vec![];
+                let mut query_params: Vec<Value> = vec![];
+                if let Some((extra, like)) = &search_clause {
+                    clause.push_str(extra);
+                    let like_val = Value::from(like.clone());
+                    count_params.push(like_val.clone());
+                    count_params.push(like_val.clone());
+                    query_params.push(like_val.clone());
+                    query_params.push(like_val);
+                }
+                query_params.push(Value::from(limit));
+                query_params.push(Value::from(offset));
+                (clause, count_params, query_params)
+            }
         };
-        
+
         // 获取总数
-        let total_count: i64 = if group_id.is_some() {
-            self.conn.query_row(
-                &format!("SELECT COUNT(*) FROM clipboard {}", where_clause),
-                params![group_id.unwrap()],
-                |row| row.get(0)
-            ).unwrap_or(0)
-        } else {
-            self.conn.query_row(
-                &format!("SELECT COUNT(*) FROM clipboard {}", where_clause),
-                [],
-                |row| row.get(0)
-            ).unwrap_or(0)
-        };
+        let total_count: i64 = self.conn.query_row(
+            &format!("SELECT COUNT(*) FROM clipboard {}", where_clause),
+            params_from_iter(count_params.iter()),
+            |row| row.get(0)
+        ).unwrap_or(0);
         
         // 查询数据 - 分组内按 ASC 排序（新内容在下，适合收藏内容）
         let query_sql = format!(
@@ -579,15 +603,66 @@ impl Database {
             })
         };
         
-        let items: Vec<PyClipboardItem> = if group_id.is_some() {
-            stmt.query_map(params![group_id.unwrap(), limit, offset], map_row)
-        } else {
-            stmt.query_map(params![limit, offset], map_row)
-        }.map_err(|e| format!("查询失败: {}", e))?
-        .filter_map(|r| r.ok())
-        .collect();
-        
+        let items: Vec<PyClipboardItem> = stmt
+            .query_map(params_from_iter(query_params.iter()), map_row)
+            .map_err(|e| format!("查询失败: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+
         Ok(PyPaginatedResult::new(total_count, items, offset, limit))
+    }
+
+    /// 分组内条目 id 列表（与 query_by_group 同序：置顶优先，item_order ASC）。
+    /// 只取 id，千条分组也仅几 KB。
+    fn group_item_ids(&self, group_id: i64) -> Result<Vec<i64>, String> {
+        let mut stmt = self.conn
+            .prepare("SELECT id FROM clipboard WHERE group_id = ?1 ORDER BY is_pinned DESC, item_order ASC")
+            .map_err(|e| format!("准备查询失败: {}", e))?;
+        let ids = stmt
+            .query_map(params![group_id], |row| row.get::<_, i64>(0))
+            .map_err(|e| format!("查询失败: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(ids)
+    }
+
+    /// 分组内某条目能否上移/下移（轻量：只扫 id，不再拉整组完整记录）。
+    pub fn get_group_move_state(&self, group_id: i64, item_id: i64) -> Result<(bool, bool), String> {
+        let ids = self.group_item_ids(group_id)?;
+        match ids.iter().position(|&id| id == item_id) {
+            Some(idx) => Ok((idx > 0, idx + 1 < ids.len())),
+            None => Ok((false, false)),
+        }
+    }
+
+    /// 计算上移/下移后的 move_item_between 参数（before_id, after_id）。
+    ///
+    /// 语义与控制器旧实现一致：temp = 列表去掉本项，new_idx = 当前位置 + direction，
+    /// before = temp[new_idx-1]，after = temp[new_idx]；越界返回 None。
+    pub fn get_group_move_target(
+        &self,
+        group_id: i64,
+        item_id: i64,
+        direction: i64,
+    ) -> Result<Option<(Option<i64>, Option<i64>)>, String> {
+        let ids = self.group_item_ids(group_id)?;
+        let Some(idx) = ids.iter().position(|&id| id == item_id) else {
+            return Ok(None);
+        };
+        let new_idx = idx as i64 + direction;
+        if new_idx < 0 || new_idx >= ids.len() as i64 {
+            return Ok(None);
+        }
+        let temp: Vec<i64> = ids
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(i, _)| *i != idx)
+            .map(|(_, id)| id)
+            .collect();
+        let before = if new_idx > 0 { Some(temp[(new_idx - 1) as usize]) } else { None };
+        let after = if (new_idx as usize) < temp.len() { Some(temp[new_idx as usize]) } else { None };
+        Ok(Some((before, after)))
     }
     
     /// 增加粘贴次数

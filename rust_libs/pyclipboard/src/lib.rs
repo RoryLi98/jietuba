@@ -1442,10 +1442,26 @@ impl PyClipboardManager {
     /// 
     /// Returns:
     ///     PyPaginatedResult: 分页结果
-    #[pyo3(signature = (group_id=None, offset=0, limit=50))]
-    fn get_by_group(&self, group_id: Option<i64>, offset: i64, limit: i64) -> PyResult<PyPaginatedResult> {
+    #[pyo3(signature = (group_id=None, offset=0, limit=50, search=None))]
+    fn get_by_group(&self, group_id: Option<i64>, offset: i64, limit: i64, search: Option<String>) -> PyResult<PyPaginatedResult> {
         let db = self.db.lock();
-        db.query_by_group(group_id, offset, limit)
+        db.query_by_group(group_id, offset, limit, search.as_deref())
+            .map_err(|e| PyRuntimeError::new_err(e))
+    }
+
+    /// 分组内某条目能否上移/下移（轻量查询，不拉完整记录）
+    #[pyo3(signature = (item_id, group_id))]
+    fn get_group_move_state(&self, item_id: i64, group_id: i64) -> PyResult<(bool, bool)> {
+        let db = self.db.lock();
+        db.get_group_move_state(group_id, item_id)
+            .map_err(|e| PyRuntimeError::new_err(e))
+    }
+
+    /// 计算上移/下移的目标位（move_item_between 的 before/after）；越界返回 None
+    #[pyo3(signature = (item_id, group_id, direction))]
+    fn get_group_move_target(&self, item_id: i64, group_id: i64, direction: i64) -> PyResult<Option<(Option<i64>, Option<i64>)>> {
+        let db = self.db.lock();
+        db.get_group_move_target(group_id, item_id, direction)
             .map_err(|e| PyRuntimeError::new_err(e))
     }
     
