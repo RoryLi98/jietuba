@@ -1725,6 +1725,7 @@ dependencies = [
  "image 0.25.9",
  "once_cell",
  "parking_lot",
+ "png 0.17.16",
  "pyo3",
  "rusqlite",
  "serde",
