@@ -8,8 +8,11 @@
 from time import perf_counter
 from typing import List, Optional
 
-from PySide6.QtCore import QDate, QEvent, QLocale, QPoint, QSettings, QTimer, Qt, Signal
-from PySide6.QtGui import QCursor
+from PySide6.QtCore import (
+    QDate, QEvent, QLocale, QObject, QPoint, QRunnable, QSettings,
+    QThreadPool, QTimer, Qt, Signal,
+)
+from PySide6.QtGui import QCursor, QImage
 from PySide6.QtWidgets import (
     QApplication,
     QCalendarWidget,
@@ -59,6 +62,51 @@ _DIRECT_PICK_BLOCKERS = (
 
 
 QUICK_EDIT_SHORTCUT = "inapp_clipboard_quick_edit"
+
+
+class _ThumbPrewarmBus(QObject):
+    """缩略图解码回填的信号总线：线程池 → 主线程。"""
+
+    decoded = Signal(str, int, object)  # data_url, side, QImage(或 None=失败)
+
+
+class _ThumbDecodeTask(QRunnable):
+    """后台解码一张缩略图：base64 → QImage → 按目标边长平滑缩放。
+
+    这些活原先在 delegate 的 paint() 里做，首次快速滚动长历史时每个图片行
+    都在 UI 线程解码，掉帧集中在这里。窗口销毁后迟到任务无处回填，静默丢弃。
+    """
+
+    def __init__(self, bus: _ThumbPrewarmBus, data_url: str, side: int):
+        super().__init__()
+        self._bus = bus
+        self._data_url = data_url
+        self._side = side
+
+    def run(self):
+        import base64
+
+        image = None
+        try:
+            if self._data_url.startswith("data:image"):
+                _, data = self._data_url.split(",", 1)
+                decoded = QImage()
+                decoded.loadFromData(base64.b64decode(data))
+                if not decoded.isNull():
+                    target = decoded.size().scaled(
+                        self._side, self._side, Qt.AspectRatioMode.KeepAspectRatio
+                    )
+                    image = decoded.scaled(
+                        target.width(), target.height(),
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+        except Exception:
+            image = None
+        try:
+            self._bus.decoded.emit(self._data_url, self._side, image)
+        except RuntimeError:
+            pass
 
 
 class ClipboardShortcutHandler(ShortcutHandler):
@@ -523,6 +571,8 @@ class ClipboardWindow(QWidget, FramelessMixin):
             image_size=self.config.get_clipboard_image_size(),
         )
         self.list_widget.setItemDelegate(self._item_delegate)
+        self._thumb_prewarm_bus = _ThumbPrewarmBus(self)
+        self._thumb_prewarm_bus.decoded.connect(self._on_thumb_decoded)
         self.list_widget.setMouseTracking(True)
         self.list_widget.viewport().setMouseTracking(True)
         self.list_widget.itemEntered.connect(self._on_delegate_item_entered)
@@ -847,7 +897,30 @@ class ClipboardWindow(QWidget, FramelessMixin):
 
         self.list_widget.setUpdatesEnabled(True)
         self.list_widget.scrollToTop()
+        self._prewarm_thumbnails(self.controller.current_items)
         self.list_widget.viewport().update()
+
+    def _prewarm_thumbnails(self, items: List[ClipboardItem]):
+        """把本页图片条目的缩略图解码丢进线程池，paint() 里直接命中缓存。
+
+        解码 + 平滑缩放是列表滚动掉帧的主因；逐条判重（has_thumbnail）保证
+        预热只做一次，行高变化后 (data_url, side) 键不同会自然重预热。
+        """
+        delegate = self._item_delegate
+        pool = QThreadPool.globalInstance()
+        for item in items:
+            if item.content_type != "image" or not item.thumbnail:
+                continue
+            side = delegate.image_row_side(item)
+            if delegate.has_thumbnail(item.thumbnail, side):
+                continue
+            pool.start(_ThumbDecodeTask(self._thumb_prewarm_bus, item.thumbnail, side))
+
+    def _on_thumb_decoded(self, data_url: str, side: int, image):
+        self._item_delegate.store_prewarmed(data_url, side, image)
+        if image is not None and not image.isNull():
+            # 更新事件 Qt 会自动合并，整页预热也只触发必要次数的重绘
+            self.list_widget.viewport().update()
 
     def _on_load_completed(self):
         QTimer.singleShot(0, self._check_and_load_more_if_needed)
@@ -877,6 +950,7 @@ class ClipboardWindow(QWidget, FramelessMixin):
 
         self.list_widget.setUpdatesEnabled(True)
         self.list_widget.viewport().update()
+        self._prewarm_thumbnails(items)
 
     def _on_scroll(self, value: int):
         scrollbar = self.list_widget.verticalScrollBar()

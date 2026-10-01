@@ -380,6 +380,34 @@ class ClipboardItemDelegate(QStyledItemDelegate):
             cache.pop(next(iter(cache)))
         return value
 
+    def has_thumbnail(self, data_url: str, side: int) -> bool:
+        """(data_url, side) 是否已在缓存（含失败占位），预热前判断用。"""
+        return (data_url, side) in self._thumb_cache
+
+    def image_row_side(self, item_data) -> int:
+        """图片行里缩略图的目标边长：paint 里取「行高 - 2」，这里同源推算，
+        供预热在行还没画出来之前就知道该缩到多大。"""
+        option = QStyleOptionViewItem()
+        option.rect = QRect(0, 0, 300, 0)
+        return self.sizeHint(option, QModelIndex()).height() - 2
+
+    def store_prewarmed(self, data_url: str, side: int, image):
+        """后台解码/缩放完成的回填（主线程调用）。paint 路径只查缓存，不再解码。
+
+        image 是线程池里已经缩放好的 QImage；解码失败传 None，与 _get_thumbnail
+        的失败占位语义一致，避免 paint 反复重试。
+        """
+        key = (data_url, side)
+        if key in self._thumb_cache:
+            return
+        if image is None or image.isNull():
+            self._get_thumbnail(data_url, side)
+            return
+        cache = self._thumb_cache
+        cache[key] = QPixmap.fromImage(image)
+        while len(cache) > self._THUMB_CACHE_LIMIT:
+            cache.pop(next(iter(cache)))
+
 
     __all__ = ["ClipboardItemDelegate", "ROLE_ITEM_DATA", "ROLE_ITEM_ID"]
  
