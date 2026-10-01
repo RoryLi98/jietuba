@@ -17,7 +17,7 @@ ocr_manager.py - OCR 功能模块
 OCR_VARIANT: str = "pp"
 
 from PySide6.QtGui import QPixmap, QImage
-from PySide6.QtCore import QBuffer, QIODevice
+from PySide6.QtCore import QBuffer, QIODevice, Qt
 from typing import Optional, Any
 import time
 import os
@@ -27,6 +27,10 @@ import traceback as _tb
 import threading
 
 from core.logger import T
+
+# j-ppocr 检测端的长边限制（ppocr_rust/src/engine.rs limit_side）：
+# 放大后仍超过它的图会被检测端缩回去，预放大只对没超的小图有意义
+_PP_OCR_DET_LIMIT_SIDE = 736.0
 
 def _ocr_log(msg, level: str = "INFO"):
     """写入日志（打包后使用 core.logger，否则 print）。msg 可以是 str 或 T() 构造的可翻译消息。"""
@@ -417,6 +421,39 @@ class OCRManager:
         raw = bytes(ptr[: stride * h])
         return raw, w, h, stride
 
+    def _maybe_upscale_for_ppocr(self, image: QImage) -> tuple[QImage, float]:
+        """按设置对小图做预放大（"OCR图像放大"设置的实际实现）。
+
+        ppocr 检测端会把长边超过 736 的图缩回去（engine.rs limit_side），大图
+        放大是纯浪费——只对放大后仍不超过检测边限的小图生效，正好对应设置
+        的本意"提升小字识别率"。返回 (图, 实际倍数)，倍数用于把识别结果的
+        坐标还原回原图坐标系。
+        """
+        if image.isNull():
+            return image, 1.0
+        try:
+            from settings.tool_settings import get_tool_settings_manager
+
+            manager = get_tool_settings_manager()
+            if not manager.get_ocr_upscale_enabled():
+                return image, 1.0
+            factor = float(manager.get_ocr_upscale_factor())
+        except Exception:
+            return image, 1.0
+        factor = min(max(factor, 1.0), 3.0)
+        long_side = max(image.width(), image.height())
+        if factor <= 1.0 or long_side * factor > _PP_OCR_DET_LIMIT_SIDE:
+            return image, 1.0
+        scaled = image.scaled(
+            round(image.width() * factor),
+            round(image.height() * factor),
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        if scaled.isNull():
+            return image, 1.0
+        return scaled, (scaled.width() / image.width())
+
     def _recognize_with_ppocr_rust(
         self,
         pixmap: QPixmap,
@@ -433,7 +470,9 @@ class OCRManager:
                 return self._format_error(return_format)
         try:
             start_time = time.time()
-            conv = self._qimage_to_rgb_bytes(pixmap)
+            image = pixmap if isinstance(pixmap, QImage) else pixmap.toImage()
+            image, upscale = self._maybe_upscale_for_ppocr(image)
+            conv = self._qimage_to_rgb_bytes(image)
             if conv is None:
                 return self._format_empty_result(return_format)
             raw, w, h, stride = conv
@@ -450,13 +489,14 @@ class OCRManager:
             if not lines:
                 return self._format_empty_result(return_format)
 
-            # ppocr_rust 返回 list[TextLine]，.points 是四个角点
+            # ppocr_rust 返回 list[TextLine]，.points 是四个角点。
+            # 识别在（可能预放大的）图上进行，坐标除回实际倍数还原到原图坐标系
             ocr_results = []
             for line in lines:
                 if not line.text:
                     continue
                 ocr_results.append([
-                    [[float(x), float(y)] for x, y in line.points],
+                    [[float(x) / upscale, float(y) / upscale] for x, y in line.points],
                     line.text,
                     float(line.score),
                 ])

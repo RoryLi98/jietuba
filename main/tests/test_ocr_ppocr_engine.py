@@ -29,6 +29,21 @@ class _FakeTextLine:
         self.score = score
 
 
+def _disable_upscale(monkeypatch):
+    """关掉"OCR图像放大"设置（默认开，本文件多数用例不关心它）。"""
+
+    class _Cfg:
+        def get_ocr_upscale_enabled(self):
+            return False
+
+        def get_ocr_upscale_factor(self):
+            return 2.0
+
+    import settings.tool_settings as _ts
+
+    monkeypatch.setattr(_ts, "get_tool_settings_manager", lambda: _Cfg())
+
+
 class _FakeEngine:
     def __init__(self, det_path, rec_path):
         self.det_path = det_path
@@ -117,7 +132,9 @@ class TestInitialize:
 
 class TestRecognize:
 
-    def test_textline_fields_are_flattened_for_downstream(self, manager, fake_ppocr, qapp):
+    def test_textline_fields_are_flattened_for_downstream(self, manager, fake_ppocr, qapp, monkeypatch):
+        # 本测试只管字段摊平，预放大另测（见 TestPpocrUpscale）——这里显式关掉
+        _disable_upscale(monkeypatch)
         result = manager._recognize_with_ppocr_rust(_image(), "dict")
         assert result["code"] == 100
         box, text, score = result["data"][0]["box"], result["data"][0]["text"], result["data"][0]["score"]
@@ -197,3 +214,51 @@ class TestReleaseAndStatus:
         assert manager.get_memory_status() == "未初始化"
         manager._initialize_ppocr_rust()
         assert "已初始化" in manager.get_memory_status()
+
+
+class TestPpocrUpscale:
+    """"OCR图像放大"设置的实际实现：小图预放大 + 坐标还原。"""
+
+    def _manager_with_lines(self, manager, fake_ppocr):
+        manager._initialize_ppocr_rust()
+        fake_ppocr.instances[0].lines = [_FakeTextLine([(0.0, 0.0), (9.0, 0.0), (9.0, 5.0), (0.0, 5.0)], "hello", 0.9)]
+
+    def _enable_upscale(self, monkeypatch, factor=2.0):
+        import settings.tool_settings as _ts
+
+        class _Cfg:
+            def get_ocr_upscale_enabled(self):
+                return True
+
+            def get_ocr_upscale_factor(self):
+                return factor
+
+        monkeypatch.setattr(_ts, "get_tool_settings_manager", lambda: _Cfg())
+
+    def test_small_image_points_scale_back(self, manager, fake_ppocr, qapp, monkeypatch):
+        """小图放大 2 倍识别后，文本框坐标除回原图坐标系。
+
+        假引擎给出的是放大坐标系里的点（0..18, 0..10），除回 2 倍后
+        应与原图坐标系下的期望框（0..9, 0..5）一致。"""
+        self._enable_upscale(monkeypatch, 2.0)
+        manager._initialize_ppocr_rust()
+        fake_ppocr.instances[0].lines = [
+            _FakeTextLine([(0.0, 0.0), (18.0, 0.0), (18.0, 10.0), (0.0, 10.0)], "hello", 0.9)]
+        result = manager._recognize_with_ppocr_rust(_image(12, 6), "dict")
+        box = result["data"][0]["box"]
+        assert box == [[0.0, 0.0], [9.0, 0.0], [9.0, 5.0], [0.0, 5.0]]
+        # 识别确实发生在放大后的图上（宽 24）
+        assert fake_ppocr.instances[0].recognize_calls[0][1] == 24
+
+    def test_large_image_not_upscaled(self, manager, fake_ppocr, qapp, monkeypatch):
+        """放大后超过检测边限（736）的大图不放大——检测端会缩回去，白费。"""
+        self._enable_upscale(monkeypatch, 2.0)
+        self._manager_with_lines(manager, fake_ppocr)
+        manager._recognize_with_ppocr_rust(_image(4000, 200), "text")
+        assert fake_ppocr.instances[0].recognize_calls[0][1] == 4000
+
+    def test_disabled_keeps_original_size(self, manager, fake_ppocr, qapp, monkeypatch):
+        _disable_upscale(monkeypatch)
+        self._manager_with_lines(manager, fake_ppocr)
+        manager._recognize_with_ppocr_rust(_image(12, 6), "text")
+        assert fake_ppocr.instances[0].recognize_calls[0][1] == 12
