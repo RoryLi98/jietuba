@@ -10,7 +10,7 @@ import time
 
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QBrush, QFont
-from PySide6.QtCore import QObject, Qt, Signal, Slot
+from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 from ui.dialogs import show_warning_dialog, show_error_dialog
 
 from core.shortcut_manager import HotkeySystem
@@ -80,6 +80,39 @@ def create_app_icon():
 
     log_warning(T("托盘图标资源不可用，改用占位图标: {icon_path}", icon_path=icon_path), "Tray")
     return create_fallback_app_icon()
+
+
+class _MainCaptureWorker(QThread):
+    """主截图的工作线程：DwmFlush 等合成、取帧、格式转换都在这里完成。
+
+    这些活原先排在 GUI 线程上，主线程一忙（OCR、GIF 编码、翻译）按热键就要
+    多等；挪出来后热键到出窗的延迟只取决于抓帧本身。HDR 会话常驻专用线程、
+    QImage 可跨线程共享，QuickCaptureWorker 已验证同一路子。
+    """
+
+    captured = Signal(object, object, object)  # image, rect, cursor
+    failed = Signal(str)
+
+    def __init__(self, include_cursor, parent=None):
+        super().__init__(parent)
+        self.include_cursor = include_cursor
+        self.cursor = None
+
+    def run(self):
+        try:
+            if self.include_cursor:
+                from capture.system_cursor import SystemCursor
+                self.cursor = SystemCursor.grab()
+            from capture.capture_service import CaptureService
+            image, rect = CaptureService().capture_all_screens(self.cursor)
+            if image.isNull():
+                raise RuntimeError("The captured image is empty")
+            if not self.isInterruptionRequested():
+                self.captured.emit(image, rect, self.cursor)
+        except Exception as exc:
+            log_exception(exc, T("截图失败"))
+            self.failed.emit(str(exc))
+
 
 class MainApp(QObject):
     # Rust clipboard watcher may call from a worker thread.  This signal safely
@@ -323,8 +356,11 @@ class MainApp(QObject):
         deadline = time.monotonic() + self._EXIT_THREAD_BUDGET_S
         for attr in ("_screenshot_preload_thread", "_ocr_preload_thread", "_capture_thread"):
             thread = getattr(self, attr, None)
-            if thread is None or not thread.isRunning():
-                continue
+            try:
+                if thread is None or not thread.isRunning():
+                    continue
+            except RuntimeError:
+                continue  # C++ 对象已被 deleteLater 回收，无事可等
             if thread.wait(max(0, int((deadline - time.monotonic()) * 1000))):
                 continue
             log_warning(
@@ -678,21 +714,40 @@ class MainApp(QObject):
         QTimer.singleShot(0, self._capture_and_prepare_window)
 
     def _capture_and_prepare_window(self):
-        """在主线程截图，随后创建或复用截图窗口"""
+        """后台线程截图（DwmFlush+取帧+转换不再占 GUI 线程），主线程只收结果建窗"""
         include_cursor = self.config_manager.get_app_setting("capture_include_cursor", False)
-        try:
-            from capture.capture_service import CaptureService
-            from capture.system_cursor import SystemCursor
-            cursor = SystemCursor.grab() if include_cursor else None
-            image, rect = CaptureService().capture_all_screens(cursor)
-        except Exception as e:
-            log_exception(e, T("截图失败"))
-            return
-        finally:
-            self._capture_pending = False
-            self.quick_capture.set_capture_pending(False)
+        worker = _MainCaptureWorker(include_cursor)
+        # 无 parent + finished 自毁：截图是高频动作，挂 parent 会让旧线程壳
+        # 在 MainApp 下无限累积。退出等待走 _wait_exit_threads（已防御已回收对象）
+        worker.finished.connect(worker.deleteLater)
+        worker.captured.connect(self._on_capture_thread_done, Qt.ConnectionType.QueuedConnection)
+        worker.failed.connect(self._on_capture_thread_failed, Qt.ConnectionType.QueuedConnection)
+        self._capture_thread = worker
+        worker.start()
 
+    def _on_capture_thread_done(self, image, rect, cursor):
+        self._capture_pending = False
+        self.quick_capture.set_capture_pending(False)
         self._on_capture_ready(image, rect, cursor)
+
+    def _on_capture_thread_failed(self, message):
+        self._capture_pending = False
+        self.quick_capture.set_capture_pending(False)
+        # 按热键没出窗又毫无提示，用户只会以为热键坏了（HDR 会话坏掉时最常见）。
+        # 10 秒限流：连续失败不刷屏。
+        now = time.monotonic()
+        if now - getattr(self, "_last_capture_fail_toast", 0.0) > 10.0:
+            self._last_capture_fail_toast = now
+            if self.tray_icon is not None:
+                try:
+                    self.tray_icon.showMessage(
+                        self.tr("截图失败"),
+                        message or self.tr("抓取屏幕失败，请重试"),
+                        QSystemTrayIcon.MessageIcon.Warning,
+                        3000,
+                    )
+                except Exception:
+                    pass
 
     def _on_capture_ready(self, image, rect, cursor=None):
         """截图完成后创建或复用截图窗口"""
