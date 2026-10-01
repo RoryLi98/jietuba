@@ -24,11 +24,16 @@ from gif.composer import _ComposeWorker
 
 @pytest.fixture
 def fake_store():
-    """模拟 gifrecorder.FrameStore：width/height 属性 + export_gif()/cancel_export()"""
+    """模拟 gifrecorder.FrameStore：width/height 属性 + export_gif()/cancel_export()
+
+    export_gif_bytes 显式置 None（不可调用）→ 走旧临时文件路径；字节路径的
+    测试自行替换为 MagicMock（见 TestComposeToBytes）。
+    """
     store = MagicMock()
     store.width = 640
     store.height = 480
     store.export_gif = MagicMock()
+    store.export_gif_bytes = None
     store.cancel_export = MagicMock()
     return store
 
@@ -76,29 +81,30 @@ class TestComposeToExplicitPath:
 
 class TestComposeToBytes:
     def test_compose_returns_bytes_when_path_is_none(self, qapp, fake_store):
-        def _fake_export(**kwargs):
-            with open(kwargs["path"], "wb") as f:
-                f.write(b"GIF89a_PAYLOAD")
-        fake_store.export_gif.side_effect = _fake_export
+        fake_store.export_gif_bytes = MagicMock(return_value=b"GIF89a_PAYLOAD")
 
         worker = _ComposeWorker(path=None, store=fake_store)
         result = worker._compose()
 
         assert result == b"GIF89a_PAYLOAD"
+        # 直出字节路径：不再走 export_gif + 临时文件
+        fake_store.export_gif.assert_not_called()
 
-    def test_temp_file_is_deleted_after_reading_bytes(self, qapp, fake_store):
-        captured_path = {}
-
-        def _fake_export(**kwargs):
-            captured_path["path"] = kwargs["path"]
-            with open(kwargs["path"], "wb") as f:
-                f.write(b"X")
-        fake_store.export_gif.side_effect = _fake_export
+    def test_bytes_path_never_creates_temp_file(self, qapp, fake_store):
+        fake_store.export_gif_bytes = MagicMock(return_value=b"X")
 
         worker = _ComposeWorker(path=None, store=fake_store)
-        worker._compose()
+        with patch.object(composer_module.tempfile, "mkstemp") as mkstemp:
+            worker._compose()
 
-        assert not os.path.isfile(captured_path["path"])
+        mkstemp.assert_not_called()
+
+    def test_bytes_path_cancelled_error_returns_none(self, qapp, fake_store):
+        fake_store.export_gif_bytes = MagicMock(
+            side_effect=RuntimeError("export cancelled by user"))
+
+        worker = _ComposeWorker(path=None, store=fake_store)
+        assert worker._compose() is None
 
 
 class TestGifWidthScaling:

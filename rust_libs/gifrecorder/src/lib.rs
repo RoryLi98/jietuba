@@ -291,57 +291,47 @@ impl PyFrameStore {
         cursor_infos: Option<Vec<Option<(i32, i32, u8, i8, u8, u8)>>>,
         speed: Option<f32>,
     ) -> PyResult<()> {
-        // 解析 cursor_sprites dict → CursorSprites
-        let parsed_sprites = match cursor_sprites {
-            Some(ref dict) => Some(parse_cursor_sprites(dict)?),
-            None => None,
-        };
-
-        // 转换 cursor_infos
-        let parsed_infos: Option<Vec<Option<gif_export::CursorInfo>>> = cursor_infos.map(|v| {
-            v.into_iter()
-                .map(|opt| {
-                    opt.map(|(x, y, press, scroll, burst_frame, burst_side)| {
-                        gif_export::CursorInfo {
-                            x, y, press, scroll, burst_frame, burst_side,
-                        }
-                    })
-                })
-                .collect()
-        });
-
-        let opts = gif_export::GifExportOptions {
-            path,
-            width,
-            height,
-            repeat,
-            frame_start,
-            frame_end,
-            cursor_sprites: parsed_sprites,
-            cursor_infos: parsed_infos,
-            speed_multiplier: speed.unwrap_or(1.0),
-        };
-
-        let store = self.inner.clone();
-
-        // 如果有 Python 回调，需要在 GIL 内调用
-        let progress: Option<gif_export::ProgressCallback> = match progress_callback {
-            Some(cb) => {
-                Some(Box::new(move |current, total| {
-                    Python::with_gil(|py| {
-                        match cb.call1(py, (current, total)) {
-                            Ok(result) => result.is_truthy(py).unwrap_or(true),
-                            Err(_) => false, // 回调异常 → 取消
-                        }
-                    })
-                }))
-            }
-            None => None,
-        };
+        let (mut opts, progress) = prepare_export_args(
+            width, height, repeat, frame_start, frame_end,
+            progress_callback, cursor_sprites, cursor_infos, speed,
+        )?;
+        opts.path = path;
 
         // 释放 GIL 执行耗时操作
         py.allow_threads(|| {
-            gif_export::export_gif(&store, &opts, progress)
+            gif_export::export_gif(&self.inner, &opts, progress)
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+        })
+    }
+
+    /// 导出为 GIF 字节串（剪贴板直用，不经临时文件）
+    ///
+    /// 参数除 path 外与 export_gif 相同；返回完整 GIF 的 bytes。
+    ///
+    /// Raises:
+    ///     ValueError: 导出失败或被取消
+    #[pyo3(signature = (width=0, height=0, repeat=0, frame_start=0, frame_end=0, progress_callback=None, cursor_sprites=None, cursor_infos=None, speed=None))]
+    fn export_gif_bytes(
+        &self,
+        py: Python<'_>,
+        width: u32,
+        height: u32,
+        repeat: u16,
+        frame_start: usize,
+        frame_end: usize,
+        progress_callback: Option<PyObject>,
+        cursor_sprites: Option<Bound<'_, PyDict>>,
+        cursor_infos: Option<Vec<Option<(i32, i32, u8, i8, u8, u8)>>>,
+        speed: Option<f32>,
+    ) -> PyResult<Vec<u8>> {
+        let (opts, progress) = prepare_export_args(
+            width, height, repeat, frame_start, frame_end,
+            progress_callback, cursor_sprites, cursor_infos, speed,
+        )?;
+
+        // 释放 GIL 执行耗时操作
+        py.allow_threads(|| {
+            gif_export::export_gif_bytes(&self.inner, &opts, progress)
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
         })
     }
@@ -360,6 +350,68 @@ impl PyFrameStore {
 // ═══════════════════════════════════════════════
 //  PyFrameDecoder — Python 包装
 // ═══════════════════════════════════════════════
+
+/// 解析 export_gif / export_gif_bytes 共用的可选参数
+#[allow(clippy::too_many_arguments)]
+fn prepare_export_args(
+    width: u32,
+    height: u32,
+    repeat: u16,
+    frame_start: usize,
+    frame_end: usize,
+    progress_callback: Option<PyObject>,
+    cursor_sprites: Option<Bound<'_, PyDict>>,
+    cursor_infos: Option<Vec<Option<(i32, i32, u8, i8, u8, u8)>>>,
+    speed: Option<f32>,
+) -> PyResult<(gif_export::GifExportOptions, Option<gif_export::ProgressCallback>)> {
+    // 解析 cursor_sprites dict → CursorSprites
+    let parsed_sprites = match cursor_sprites {
+        Some(ref dict) => Some(parse_cursor_sprites(dict)?),
+        None => None,
+    };
+
+    // 转换 cursor_infos
+    let parsed_infos: Option<Vec<Option<gif_export::CursorInfo>>> = cursor_infos.map(|v| {
+        v.into_iter()
+            .map(|opt| {
+                opt.map(|(x, y, press, scroll, burst_frame, burst_side)| {
+                    gif_export::CursorInfo {
+                        x, y, press, scroll, burst_frame, burst_side,
+                    }
+                })
+            })
+            .collect()
+    });
+
+    let opts = gif_export::GifExportOptions {
+        path: String::new(),
+        width,
+        height,
+        repeat,
+        frame_start,
+        frame_end,
+        cursor_sprites: parsed_sprites,
+        cursor_infos: parsed_infos,
+        speed_multiplier: speed.unwrap_or(1.0),
+    };
+
+    // 如果有 Python 回调，需要在 GIL 内调用
+    let progress: Option<gif_export::ProgressCallback> = match progress_callback {
+        Some(cb) => {
+            Some(Box::new(move |current, total| {
+                Python::with_gil(|py| {
+                    match cb.call1(py, (current, total)) {
+                        Ok(result) => result.is_truthy(py).unwrap_or(true),
+                        Err(_) => false, // 回调异常 → 取消
+                    }
+                })
+            }))
+        }
+        None => None,
+    };
+
+    Ok((opts, progress))
+}
 
 /// 后台帧解码器
 ///

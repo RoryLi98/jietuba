@@ -76,75 +76,53 @@ class _ComposeWorker(QObject):
             self.finished.emit(False, None)
 
     def _compose(self):
-        need_bytes = self._path is None
-        if need_bytes:
-            tmp_fd, out_path = tempfile.mkstemp(suffix=".gif", prefix="jietuba_")
-            os.close(tmp_fd)
-        else:
-            out_path = self._path
+        if not callable(getattr(self._store, "export_gif_bytes", None)):
+            # 旧版 gifrecorder 兜底：走临时文件
+            need_bytes = self._path is None
+            if need_bytes:
+                tmp_fd, out_path = tempfile.mkstemp(suffix=".gif", prefix="jietuba_")
+                os.close(tmp_fd)
+            else:
+                out_path = self._path
 
-        ok = self._do_compose(out_path)
+            ok = self._do_compose(out_path)
 
-        if not ok or self._cancel:
+            if not ok or self._cancel:
+                if need_bytes:
+                    try:
+                        os.unlink(out_path)
+                    except Exception as e:
+                        log_exception(e, T("GIF 取消后删除临时文件"))
+                return None
+
             if need_bytes:
                 try:
-                    os.unlink(out_path)
-                except Exception as e:
-                    log_exception(e, T("GIF 取消后删除临时文件"))
-            return None
+                    with open(out_path, "rb") as f:
+                        return f.read()
+                finally:
+                    try:
+                        os.unlink(out_path)
+                    except Exception as e:
+                        log_exception(e, T("GIF 读取后删除临时文件"))
+            else:
+                return out_path
 
-        if need_bytes:
-            try:
-                with open(out_path, "rb") as f:
-                    return f.read()
-            finally:
-                try:
-                    os.unlink(out_path)
-                except Exception as e:
-                    log_exception(e, T("GIF 读取后删除临时文件"))
-        else:
-            return out_path
+        # gifrecorder ≥ 直出字节版：贴剪贴板不再经临时文件一写一读
+        if self._path is None:
+            if self._cancel:
+                return None
+            data = self._do_compose_bytes()
+            return data if (data and not self._cancel) else None
+
+        ok = self._do_compose(self._path)
+        if not ok or self._cancel:
+            return None
+        return self._path
 
     def _do_compose(self, out_path: str) -> bool:
         """使用 gifrecorder.FrameStore.export_gif() 导出"""
-        # 计算输出尺寸
-        gif_width = self._gif_width
-        gif_height = 0
-        if gif_width > 0 and self._store.width > 0:
-            ratio = gif_width / self._store.width
-            gif_height = max(2, int(self._store.height * ratio))
-            gif_height = gif_height if gif_height % 2 == 0 else gif_height - 1
-        else:
-            gif_width = self._store.width
-            gif_height = self._store.height
-
-        log_info(
-            T("使用 gifrecorder export_gif: {gif_width}x{gif_height}",
-              gif_width=gif_width, gif_height=gif_height),
-            "GIF",
-        )
-
-        def _progress(done, total):
-            self.progress.emit(done, total)
-            return not self._cancel   # 返回 False 取消
-
         try:
-            # 构建 cursor 导出参数
-            export_kwargs = dict(
-                path=out_path,
-                width=gif_width,
-                height=gif_height,
-                repeat=0,
-                frame_start=self._frame_start,
-                frame_end=self._frame_end,
-                progress_callback=_progress,
-                speed=self._speed_multiplier,
-            )
-            if self._cursor_sprites and self._cursor_infos:
-                export_kwargs["cursor_sprites"] = self._cursor_sprites
-                export_kwargs["cursor_infos"] = self._cursor_infos
-
-            self._store.export_gif(**export_kwargs)
+            self._store.export_gif(path=out_path, **self._export_kwargs())
         except Exception as e:
             err_str = str(e)
             if "cancelled" in err_str:
@@ -159,6 +137,59 @@ class _ComposeWorker(QObject):
             "GIF",
         )
         return True
+
+    def _do_compose_bytes(self):
+        """使用 export_gif_bytes() 直出字节；失败/取消返回 None。"""
+        try:
+            data = self._store.export_gif_bytes(**self._export_kwargs())
+        except Exception as e:
+            err_str = str(e)
+            if "cancelled" in err_str:
+                return None
+            log_error(T("export_gif_bytes 失败: {e}", e=e), "GIF")
+            return None
+
+        log_info(
+            T("GIF 导出完成: 内存 {size_kb:.1f} KB", size_kb=len(data) / 1024),
+            "GIF",
+        )
+        return data
+
+    def _export_kwargs(self) -> dict:
+        """计算输出尺寸并组装 export_gif / export_gif_bytes 的公共参数"""
+        gif_width = self._gif_width
+        gif_height = 0
+        if gif_width > 0 and self._store.width > 0:
+            ratio = gif_width / self._store.width
+            gif_height = max(2, int(self._store.height * ratio))
+            gif_height = gif_height if gif_height % 2 == 0 else gif_height - 1
+        else:
+            gif_width = self._store.width
+            gif_height = self._store.height
+
+        log_info(
+            T("使用 gifrecorder 导出 GIF: {gif_width}x{gif_height}",
+              gif_width=gif_width, gif_height=gif_height),
+            "GIF",
+        )
+
+        def _progress(done, total):
+            self.progress.emit(done, total)
+            return not self._cancel   # 返回 False 取消
+
+        export_kwargs = dict(
+            width=gif_width,
+            height=gif_height,
+            repeat=0,
+            frame_start=self._frame_start,
+            frame_end=self._frame_end,
+            progress_callback=_progress,
+            speed=self._speed_multiplier,
+        )
+        if self._cursor_sprites and self._cursor_infos:
+            export_kwargs["cursor_sprites"] = self._cursor_sprites
+            export_kwargs["cursor_infos"] = self._cursor_infos
+        return export_kwargs
 
 
 # ── 进度浮层（无边框纯进度条） ──────────────────────────

@@ -100,6 +100,34 @@ pub fn export_gif(
     opts: &GifExportOptions,
     progress: Option<ProgressCallback>,
 ) -> Result<(), String> {
+    let file = File::create(&opts.path).map_err(|e| format!("create file: {e}"))?;
+    let writer = BufWriter::with_capacity(256 * 1024, file); // 256KB 写缓冲
+    export_into(store, opts, progress, writer)
+}
+
+/// 导出到内存：剪贴板直用，省掉"写临时文件再整读回来"的一写一读。
+///
+/// 编码器与写缓冲在内部作用域结束时 drop（trailer 落盘、缓冲 flush 进 buf），
+/// 之后 buf 即为完整 GIF 字节。
+pub fn export_gif_bytes(
+    store: &Arc<FrameStore>,
+    opts: &GifExportOptions,
+    progress: Option<ProgressCallback>,
+) -> Result<Vec<u8>, String> {
+    let mut buf = Vec::new();
+    {
+        let writer = BufWriter::with_capacity(256 * 1024, &mut buf);
+        export_into(store, opts, progress, writer)?;
+    }
+    Ok(buf)
+}
+
+fn export_into<W: std::io::Write>(
+    store: &Arc<FrameStore>,
+    opts: &GifExportOptions,
+    progress: Option<ProgressCallback>,
+    writer: W,
+) -> Result<(), String> {
     let total_n = store.frame_count();
     if total_n == 0 {
         return Err("no frames to export".into());
@@ -145,8 +173,6 @@ pub fn export_gif(
     )?;
 
     // ── gif crate 编码器（固定全局调色板 + 帧差分） ──
-    let file = File::create(&opts.path).map_err(|e| format!("create file: {e}"))?;
-    let writer = BufWriter::with_capacity(256 * 1024, file); // 256KB 写缓冲
     let mut encoder = GifLowEncoder::new(
         writer,
         dst_w as u16,
