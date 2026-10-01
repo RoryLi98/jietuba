@@ -38,6 +38,7 @@ def app(monkeypatch):
         settings_window=None,
         _capture_pending=False,
         _logger=Mock(),
+        _wait_exit_threads=Mock(),
         app=Mock(),
         tr=lambda text: text,
     )

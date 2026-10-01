@@ -932,10 +932,12 @@ class MainApp(QObject):
     def quit_app(self):
         """托盘"退出"入口。
 
-        实际清理全部放在 aboutToQuit 的 _on_about_to_quit 里做一次——那里是
-        唯一能覆盖所有退出路径（托盘、系统注销/关机、会话结束）的位置，
-        这里只负责让事件循环退出。
+        用户主动退出时先把快速截图的全局监听关掉（close 幂等）；其余清理全部
+        放在 aboutToQuit 的 _on_about_to_quit 里做一次——那里是唯一能覆盖所有
+        退出路径（托盘、系统注销/关机、会话结束）的位置，这里只负责退出事件循环。
         """
+        if getattr(self, "quick_capture", None):
+            self.quick_capture.close()
         self.app.quit()
         
     def run(self):

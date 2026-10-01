@@ -109,6 +109,7 @@ def test_preload_warms_up_only_the_engines_in_use(engine, warm_up_mss, warm_up_h
     with patch.object(QTimer, "singleShot"):
         manager.build_and_start()
 
-    manager._steps[0]()
+    # 链首是托盘与全局热键（越早激活，"双击后没反应"的时间窗越短），截图预热是第二步
+    manager._steps[1]()
     manager._preload_screenshot_modules.assert_called_once_with(warm_up_mss=warm_up_mss)
     assert (manager._preload_hdr_session in manager._steps) is warm_up_hdr

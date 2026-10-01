@@ -48,6 +48,7 @@ from .jietuba_long_stitch_unified import (
 )
 
 from settings import get_tool_settings_manager
+from capture.capture_service import grab_region_hdr, uses_hdr_engine
 from core.save import SaveService
 from core import log_debug, log_info, safe_event
 from core.logger import log_exception, T, LogMsg
@@ -1122,6 +1123,9 @@ class ScrollCaptureWindow(QWidget):
         # 去重相关（worker 内部亦有一份，手动抓帧路径仍会用）
         self.duplicate_threshold = 0.95
 
+        # 截图引擎按设置走 HDR（auto 且屏开 HDR）；本会话抓帧失败则退回 GDI
+        self._use_hdr = uses_hdr_engine()
+
         # 自动收尾
         self._auto_finish_scheduled = False
         # 会话收尾重入守卫：完成/钉图执行期间，挂着的自动收尾定时器
@@ -1731,7 +1735,25 @@ class ScrollCaptureWindow(QWidget):
                 _log_stitch(T("[WARN] 排除浮动工具栏截图失败: {e}", e=e))
 
     def _grab_region(self):
-        """抓取截图区域，返回 (QPixmap, 签名)。失败时返回 (None, None)。"""
+        """截取截图区域，返回 (QPixmap, 签名)，失败时返回 (None, None)。"""
+        image = self._grab_capture_rect()
+        if image is None:
+            return None, None
+        pixmap = QPixmap.fromImage(image)
+        if pixmap.isNull():
+            return None, None
+        return pixmap, self._signature(pixmap)
+
+    def _grab_capture_rect(self) -> Optional[QImage]:
+        """截取 capture_rect（物理像素）；引擎要求 HDR 时走 HDR，失败后本会话退回 GDI grabWindow。"""
+        if self._use_hdr:
+            try:
+                return grab_region_hdr(self.capture_rect)
+            except Exception as e:
+                self._use_hdr = False
+                _log_stitch(T("HDR 抓帧失败，本会话改用 GDI: {error}", error=e), force=True)
+
+        # 获取所在屏幕并转换为相对坐标
         app = QGuiApplication.instance()
         capture_center_x = self.capture_rect.x() + self.capture_rect.width() // 2
         capture_center_y = self.capture_rect.y() + self.capture_rect.height() // 2
@@ -1744,7 +1766,7 @@ class ScrollCaptureWindow(QWidget):
 
         screen_geometry = screen.geometry()
 
-        # 将虚拟桌面坐标转换为相对于目标屏幕的坐标
+        # 跨屏时把绝对坐标转成相对目标屏幕的坐标
         relative_x = self.capture_rect.x() - screen_geometry.x()
         relative_y = self.capture_rect.y() - screen_geometry.y()
 
@@ -1756,8 +1778,8 @@ class ScrollCaptureWindow(QWidget):
             self.capture_rect.height()
         )
         if pixmap.isNull():
-            return None, None
-        return pixmap, self._signature(pixmap)
+            return None
+        return pixmap.toImage()
 
     def _signature(self, pixmap):
         """内容的降采样签名：32x32 ARGB32 的全部字节拼成一个大整数。

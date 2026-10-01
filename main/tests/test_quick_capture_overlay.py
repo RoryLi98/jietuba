@@ -125,11 +125,12 @@ def test_reuses_normal_capture_widgets_without_a_frozen_background(overlay, qapp
     def pixel_at(global_x, global_y):
         return image.pixelColor(global_x - overlay.x(), global_y - overlay.y())
 
-    # 框内每个远离边框的像素均透明，没有普通截图的底图或灰色遮罩。
+    # 框内每个远离边框的像素均透明，没有普通截图的底图或灰色遮罩；
+    # 采样点放在选区下方空白区（信息面板会按缩放基准加宽，顶边采样不可靠）
     assert all(pixel_at(x, y).alpha() == 0
                for y in range(100, 180) for x in range(80, 220))
     assert pixel_at(70, 130) == get_theme().theme_color
-    assert pixel_at(300, 30).alpha() == 0
+    assert pixel_at(150, 250).alpha() == 0
     assert "70,90" in overlay.info_panel._info_label.text()
     assert "160 × 100 px" in overlay.info_panel._info_label.text()
     assert not overlay.info_panel.btn_border.isVisible()
@@ -277,9 +278,10 @@ def test_drag_updates_selection_without_resetting_virtual_desktop_geometry(overl
 
 def test_desktop_origin_change_repositions_unchanged_selection_and_info(overlay):
     start, end = QPoint(60, 100), QPoint(240, 200)
-    overlay.show_selection(start, end, QRect(0, 0, 500, 400))
+    # 窗口足够大：信息面板按缩放基准加宽后也不会触发贴边钳制，位置断言才稳定
+    overlay.show_selection(start, end, QRect(0, 0, 900, 700))
     previous_info_pos = overlay.info_panel.pos()
-    bounds = QRect(-100, -60, 500, 400)
+    bounds = QRect(-100, -60, 900, 700)
     overlay.show_selection(start, end, bounds)
     assert overlay.geometry() == bounds
     assert overlay.model.rect() == QRectF(60, 100, 180, 100)
