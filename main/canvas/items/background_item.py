@@ -101,10 +101,12 @@ class BackgroundItem(QGraphicsPixmapItem):
         if source.isNull():
             return QImage()
         rgba = source.convertToFormat(QImage.Format.Format_RGBA8888)
+        # bits() 是 memoryview，直接喂 frombytes——多包一层 bytes() 是一次
+        # 全屏纯冗余拷贝（4K 约 33MB）
         pil_source = Image.frombytes(
             "RGBA",
             (rgba.width(), rgba.height()),
-            bytes(rgba.bits()),
+            rgba.bits(),
             "raw",
             "RGBA",
             rgba.bytesPerLine(),
