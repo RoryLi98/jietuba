@@ -35,5 +35,8 @@ base64 = "0.22"
 # 图片处理
 image.workspace = true
 
+# PNG 编码（fdeflate 快速压缩，剪贴板图片格式准备）
+png = "0.17"
+
 # zstd 压缩（用于超过 100KB 的格式数据）
 zstd = "0.13"

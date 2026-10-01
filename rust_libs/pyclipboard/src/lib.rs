@@ -1,8 +1,11 @@
+use pyo3::buffer::PyBuffer;
 use pyo3::prelude::*;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::types::PyBytes;
 
 mod database;
+mod image_formats;
+use image_formats::prepare_from_slice;
 mod types;
 
 use database::Database;
@@ -77,6 +80,7 @@ fn pyclipboard(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(set_clipboard_text, m)?)?;
     m.add_function(wrap_pyfunction!(get_clipboard_image, m)?)?;
     m.add_function(wrap_pyfunction!(set_clipboard_image, m)?)?;
+    m.add_function(wrap_pyfunction!(prepare_image_formats, m)?)?;
     m.add_function(wrap_pyfunction!(get_clipboard_html, m)?)?;
     m.add_function(wrap_pyfunction!(get_clipboard_rtf, m)?)?;
     m.add_function(wrap_pyfunction!(get_clipboard_files, m)?)?;
@@ -250,6 +254,32 @@ mod cf_html_tests {
     fn garbage_without_any_html_yields_none() {
         assert_eq!(extract_html_from_cf_html(b"Version:0.9\r\nStartHTML:0000000200\r\n"), None);
     }
+}
+
+/// 从 ARGB32（QImage 内存布局 BGRA）裸像素构造 (DIBV5, PNG)。
+///
+/// bgra 接受任何 buffer protocol 对象（memoryview/bytes），要求 C-contiguous
+/// 且长度恰为 width*height*4。核心逻辑见 image_formats::prepare_from_slice。
+#[pyfunction]
+fn prepare_image_formats<'py>(
+    py: Python<'py>,
+    bgra: PyBuffer<u8>,
+    width: usize,
+    height: usize,
+) -> PyResult<(Bound<'py, PyBytes>, Bound<'py, PyBytes>)> {
+    let pixels = buffer_as_bytes(py, &bgra)?;
+    let (dibv5, png) = image_formats::prepare_from_slice(pixels, width, height)?;
+    Ok((PyBytes::new_bound(py, &dibv5), PyBytes::new_bound(py, &png)))
+}
+
+/// PyBuffer → &[u8]：ReadOnlyCell 与 u8 内存布局一致，可安全 cast（同 gifrecorder）。
+fn buffer_as_bytes<'a>(py: Python<'a>, buf: &'a PyBuffer<u8>) -> PyResult<&'a [u8]> {
+    let cells = buf.as_slice(py).ok_or_else(|| {
+        PyRuntimeError::new_err("buffer 必须是 C-contiguous 连续内存")
+    })?;
+    let ptr = cells.as_ptr() as *const u8;
+    let len = cells.len();
+    Ok(unsafe { std::slice::from_raw_parts(ptr, len) })
 }
 
 /// 获取剪贴板文本

@@ -247,12 +247,10 @@ def _copy_win32_legacy(image: QImage, file_reference: str | None) -> None:
     import time as _time
     _t0 = _time.perf_counter()
 
-    # 准备数据
-    dibv5_data = _build_dibv5(image)
+    # 准备数据（pyclipboard 原生优先，见 _prepare_image_formats）
+    dibv5_data, png_data = _prepare_image_formats(image)
     _t1 = _time.perf_counter()
-
-    png_data = _build_png(image)
-    _t2 = _time.perf_counter()
+    _t2 = _t1
 
     # 注册 PNG 格式
     fmt_png = win32clipboard.RegisterClipboardFormat("PNG")
@@ -273,14 +271,36 @@ def _copy_win32_legacy(image: QImage, file_reference: str | None) -> None:
     log_debug(
         T(
             "已复制到剪切板 (Win32) "
-            "dibv5={dibv5_ms:.1f}ms png={png_ms:.1f}ms win32={win32_ms:.1f}ms",
-            dibv5_ms=(_t1 - _t0) * 1000,
-            png_ms=(_t2 - _t1) * 1000,
+            "格式准备={prep_ms:.1f}ms win32={win32_ms:.1f}ms",
+            prep_ms=(_t1 - _t0) * 1000,
             win32_ms=(_t3 - _t2) * 1000,
         ),
         "Clipboard"
     )
     log_info(T("已复制到剪切板 (Win32 CF_DIBV5 + PNG)"), "Clipboard")
+
+
+def _prepare_image_formats(image: QImage) -> tuple[bytes, bytes]:
+    """返回 (DIBV5, PNG)。优先 pyclipboard 原生实现，旧版 wheel 回落 Qt 路径。
+
+    原生路径把 DIBV5 的翻转打包与 PNG 编码合并进一次 BGRA→输出：省掉
+    Qt mirrored + bytes() 的两次全图拷贝，PNG 用 png crate 快速压缩
+    （4K 截图整体耗时约为 Qt 路径的三分之一）。
+    """
+    try:
+        import pyclipboard
+        prepare = pyclipboard.prepare_image_formats
+    except (ImportError, AttributeError):
+        return _build_dibv5(image), _build_png(image)
+
+    img = image.convertToFormat(QImage.Format.Format_ARGB32)
+    w, h = img.width(), img.height()
+    try:
+        dibv5, png = prepare(img.constBits(), w, h)
+        return bytes(dibv5), bytes(png)
+    except Exception as e:
+        log_warning(T("pyclipboard 图片格式准备失败，回落 Qt 路径: {e}", e=e), "Clipboard")
+        return _build_dibv5(image), _build_png(image)
 
 
 def _build_dibv5(image: QImage) -> bytes:
