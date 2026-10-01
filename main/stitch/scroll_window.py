@@ -1011,7 +1011,8 @@ class _StitchWorker(threading.Thread):
         """生成显示方向正确的预览缩略图（QImage）。
 
         画布是自然朝向，这里只剩横向模式的旋转；缩略 + 旋转都发生在
-        节流后的这一次，成本与拼接图尺寸解耦。
+        节流后的这一次。resize 返回新图且 reducing_gap 分级降采样，
+        不必像 thumbnail() 那样先整幅拷贝画布（长图一次 170MB 纯 memcpy）。
         """
         display = self._decode_stitched()
         if display is None:
@@ -1019,10 +1020,14 @@ class _StitchWorker(threading.Thread):
         if self.scroll_direction == "horizontal" and self._count >= 2:
             display = display.rotate(90, expand=True)
 
-        thumb = display.copy()
-        thumb.thumbnail(
-            (self._PREVIEW_LONG_SIDE, self._PREVIEW_LONG_SIDE),
+        target = self._PREVIEW_LONG_SIDE
+        scale = min(target / display.width, target / display.height, 1.0)
+        thumb_w = max(1, round(display.width * scale))
+        thumb_h = max(1, round(display.height * scale))
+        thumb = display.resize(
+            (thumb_w, thumb_h),
             Image.Resampling.BILINEAR,
+            reducing_gap=2.0,
         )
         rgba = thumb.convert("RGBA")
         data = rgba.tobytes("raw", "RGBA")
