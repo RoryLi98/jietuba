@@ -114,6 +114,10 @@ def window(qapp, monkeypatch):
     monkeypatch.setattr(
         QScreen, "grabWindow", _GrabSeq([_make_pixmap(80)])
     )
+    # 监视抓帧在 _WatchGrabber 线程（不走 QScreen.grabWindow）：必须在 show()
+    # 之前注入，否则 grabber 会把真实桌面抓进来当基准帧
+    seq = _GrabSeq([_make_pixmap(80)])
+    monkeypatch.setattr(win._watch_grabber, "_grab", lambda: seq(None, 0))
     win.show()
     # 初始帧（showEvent + 100ms 延迟 → 泵事件循环等它跑完）
     assert _pump_until(qapp, lambda: len(win.screenshots) >= 1), "初始帧未采集"
@@ -127,8 +131,8 @@ class TestContentAwareWatcher:
 
     def test_change_captures_and_stitches_frame(self, qapp, window, monkeypatch):
         """内容变化 → 自动采集第二帧，拼接结果长高（成图不再随回包走）。"""
-        window._grab_seq = _GrabSeq([_make_pixmap(60)])
-        monkeypatch.setattr(QScreen, "grabWindow", window._grab_seq)
+        seq = _GrabSeq([_make_pixmap(60)])
+        monkeypatch.setattr(window._watch_grabber, "_grab", lambda: seq(None, 0))
 
         assert _pump_until(
             qapp,
@@ -144,7 +148,7 @@ class TestContentAwareWatcher:
         背压（pending ≥ 2 跳过）兜底，所以这里断言的是"抓得到"而不是"不抓"。
         """
         seq = _Alternator([_make_pixmap(70), _make_pixmap(30)])
-        monkeypatch.setattr(QScreen, "grabWindow", seq)
+        monkeypatch.setattr(window._watch_grabber, "_grab", lambda: seq(None, 0))
 
         assert _pump_until(
             qapp, lambda: len(window.screenshots) >= 2, timeout_s=1.0
@@ -153,9 +157,8 @@ class TestContentAwareWatcher:
     def test_idle_timeout_schedules_auto_finish(self, qapp, window, monkeypatch):
         """已有 ≥2 帧后内容长期静止 → 自动收尾被排上。"""
         # 先让第二帧发生：变化 + 稳定
-        monkeypatch.setattr(
-            QScreen, "grabWindow", _GrabSeq([_make_pixmap(60)])
-        )
+        seq = _GrabSeq([_make_pixmap(60)])
+        monkeypatch.setattr(window._watch_grabber, "_grab", lambda: seq(None, 0))
         assert _pump_until(qapp, lambda: len(window.screenshots) >= 2)
 
         # 内容保持一致（grab 序列耗尽后重复最后一帧）→ 静止 → 自动收尾
@@ -191,18 +194,22 @@ class TestContentAwareWatcher:
         seq = _Alternator([_make_page(80, 40), _make_page(80, None)])
         monkeypatch.setattr(QScreen, "grabWindow", seq)
         win = ScrollCaptureWindow(QRect(0, 0, 120, 100), None)
+        # 同 fixture：show() 前注入，喂与初始帧一致的内容
+        base = _GrabSeq([_make_page(80, 40)])
+        monkeypatch.setattr(win._watch_grabber, "_grab", lambda: base(None, 0))
         win.show()
         try:
             assert _pump_until(qapp, lambda: len(win.screenshots) >= 1), "初始帧未采集"
+            flicker = _Alternator([_make_page(80, 40), _make_page(80, None)])
+            monkeypatch.setattr(win._watch_grabber, "_grab", lambda: flicker(None, 0))
             # 光标闪烁 0.6s：不应产生第二帧
             assert not _pump_until(
                 qapp, lambda: len(win.screenshots) >= 2, timeout_s=0.6
             ), "光标闪烁不该被当成新内容"
 
             # 真实滚动 20px：光标随内容上移，横带 80→60（重叠区逐像素一致）
-            monkeypatch.setattr(
-                QScreen, "grabWindow", _GrabSeq([_make_page(60, 20)])
-            )
+            seq = _GrabSeq([_make_page(60, 20)])
+            monkeypatch.setattr(win._watch_grabber, "_grab", lambda: seq(None, 0))
             assert _pump_until(
                 qapp,
                 lambda: len(win.screenshots) >= 2

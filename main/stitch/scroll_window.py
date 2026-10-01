@@ -36,7 +36,7 @@ import time
 import ctypes
 import threading
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QApplication
-from PySide6.QtCore import Qt, QRect, QTimer, Signal, QPoint
+from PySide6.QtCore import Qt, QRect, QTimer, Signal, QPoint, QThread
 from PySide6.QtGui import QPainter, QPen, QColor, QPixmap, QGuiApplication, QImage
 from typing import Optional
 from PIL import Image, ImageChops, ImageStat
@@ -48,7 +48,7 @@ from .jietuba_long_stitch_unified import (
 )
 
 from settings import get_tool_settings_manager
-from capture.capture_service import grab_region_hdr, uses_hdr_engine
+from capture.capture_service import grab_region_hdr, grab_region_mss, uses_hdr_engine
 from core.save import SaveService
 from core import log_debug, log_info, safe_event
 from core.logger import log_exception, T, LogMsg
@@ -342,6 +342,7 @@ class _StitchWorker(threading.Thread):
         # 滚动条区域后计算，供落位对齐用）
         self._canvas = None
         self._canvas_sig = None
+        self._canvas_png_cache = None  # 画布 PNG 字节缓存（见 _canvas_png），画布变更时置空
         self._stitched_w = 0
         self._stitched_h = 0
         # 上一帧的顶行与相邻两次落位的行差（仅用于候选平局时的惯性裁决）
@@ -617,10 +618,22 @@ class _StitchWorker(threading.Thread):
         """设定规范画布（首帧 / 横向旋转 / Rust 兜底并入）。"""
         self._canvas = im
         self._canvas_sig = self._row_signatures(im)
+        self._canvas_png_cache = None
         self._stitched_w, self._stitched_h = im.size
         # 画布换了坐标系，行号基准与滚动惯性重新起算
         self._prev_row = 0
         self._prev_delta = 0
+
+    def _canvas_png(self) -> bytes:
+        """画布 PNG 字节（缓存）。
+
+        兜底路径可能连续多帧走到这里（近纯色页面签名凑不出候选），画布没变
+        就不必每帧重新编码整张图——画布随帧数线性变大，不缓存的话那是 O(n²)
+        的编码开销。仅拼接工作线程访问，无需加锁。
+        """
+        if self._canvas_png_cache is None:
+            self._canvas_png_cache = self._encode_png(self._canvas)
+        return self._canvas_png_cache
 
     def _align_candidates(self, frame_sig: bytes, skip_top: int = 0) -> list:
         """在画布行签名里找出新帧顶行的候选偏移 dy（画布行号，可为负）。
@@ -871,6 +884,7 @@ class _StitchWorker(threading.Thread):
 
         self._canvas = grown
         self._canvas_sig = bytes(sig)
+        self._canvas_png_cache = None
         self._stitched_w, self._stitched_h = cw, new_h
         self._prev_delta = dy - prev_row
         self._prev_row = dy + ext
@@ -903,7 +917,7 @@ class _StitchWorker(threading.Thread):
         from .jietuba_long_stitch_unified import config
 
         auto = longstitch.stitch(
-            self._encode_png(self._canvas),
+            self._canvas_png(),
             self._encode_png(pil_image),
             detect_direction=True,
             # config 默认 0 一向被当作「用库的默认值 20」处理
@@ -1060,6 +1074,93 @@ class ScrollCaptureShortcutHandler(ShortcutHandler):
         return False
 
 
+class _WatchGrabber(QThread):
+    """长截图的内容监视线程：抓帧与签名挪出 GUI 线程。
+
+    GUI 线程忙（收尾保存、OCR、翻译）时定时器会延迟，监视节奏跟着拖，
+    快速滚动就漏帧。抓帧走 HDR 会话或 mss BitBlt——两者都能在任意线程
+    调用（QScreen.grabWindow 不行，所以回退路径用 mss）；签名在 QImage
+    上算，同样可跨线程。只保留最新一帧：GUI 追上时拿到的就是当前画面，
+    与主线程的背压语义一致，中间帧本就该跳过。
+    """
+
+    def __init__(self, capture_rect, signature_size, idle_ms, parent=None):
+        super().__init__(parent)
+        self._capture_rect = QRect(capture_rect)
+        self._signature_size = signature_size
+        self._use_hdr = uses_hdr_engine()
+        self._lock = threading.Lock()
+        self._interval_ms = max(20, int(idle_ms))
+        self._sample = None  # (QImage, sig)
+
+    def set_interval(self, ms):
+        with self._lock:
+            self._interval_ms = max(20, int(ms))
+
+    def latest(self):
+        """取走最新样本；没有新样本（抓帧失败或未轮转完）返回 None。"""
+        with self._lock:
+            sample, self._sample = self._sample, None
+        return sample
+
+    def run(self):
+        while not self.isInterruptionRequested():
+            with self._lock:
+                interval = self._interval_ms
+            image_sig = self._grab_and_sign()
+            if image_sig is not None:
+                with self._lock:
+                    self._sample = image_sig
+            # 分片睡眠：间隔调整与停止请求都能及时生效
+            end = time.monotonic() + interval / 1000.0
+            while not self.isInterruptionRequested():
+                remain = end - time.monotonic()
+                if remain <= 0:
+                    break
+                self.msleep(min(50, max(1, int(remain * 1000))))
+
+    def _grab_and_sign(self):
+        image = self._grab()
+        if image is None:
+            return None
+        return image, self._signature(image)
+
+    def _grab(self):
+        """抓一帧 capture_rect；HDR 优先，失败本线程内退回 mss。测试从这注入假帧。"""
+        image = None
+        if self._use_hdr:
+            try:
+                image = grab_region_hdr(self._capture_rect)
+            except Exception as e:
+                self._use_hdr = False
+                _log_stitch(T("HDR 抓帧失败，本会话改用 GDI: {error}", error=e), force=True)
+        if image is None or image.isNull():
+            try:
+                image = grab_region_mss(self._capture_rect)
+            except Exception as e:
+                _log_stitch(T("[WARN] 监视抓帧失败: {e}", e=e), force=True)
+                return None
+        return None if image.isNull() else image
+
+    def _signature(self, image):
+        """内容的降采样签名：32x32 ARGB32 的全部字节拼成一个大整数（与主线程 _signature 同构）。
+
+        正常路径收 QImage；测试注入的替身可能是 QPixmap，一并兼容。
+        """
+        size = self._signature_size
+        small = image.scaled(
+            size, size,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.FastTransformation,
+        )
+        if isinstance(small, QPixmap):
+            small = small.toImage()
+        if small.format() != QImage.Format.Format_ARGB32:
+            small = small.convertToFormat(QImage.Format.Format_ARGB32)
+        bits = small.constBits()
+        return int.from_bytes(bytes(bits[: size * size * 4]), "little")
+
+
 class ScrollCaptureWindow(QWidget):
     """滚动长截图窗口
 
@@ -1079,6 +1180,8 @@ class ScrollCaptureWindow(QWidget):
     # 与上一张已采集帧不同 → 立刻抓帧拼接（worker 积压 ≥2 时跳过，
     # 由背压控帧）。用户以任意速度滚动都能正确出帧。
     _WATCH_IDLE_MS = 250     # 内容与上帧一致时的轮询间隔（省 CPU）
+    _WATCH_IDLE_SLOW_MS = 600    # 静止 1.5s 后：进一步降频
+    _WATCH_IDLE_SLOWEST_MS = 1200  # 静止 4s 后：最低档（一有变化立即回 90ms）
     _WATCH_ACTIVE_MS = 90    # 检测到变化后的轮询间隔（快速出帧）
     _STABLE_TICKS = 2        # 连续 N 次采样一致即认为内容已稳定
     _SIGNATURE_SIZE = 32     # 内容签名边长（32x32 ARGB32）
@@ -1152,10 +1255,14 @@ class ScrollCaptureWindow(QWidget):
             Qt.ConnectionType.QueuedConnection
         )
 
-        # 内容监视定时器：初始采集完成后再启动（见 _capture_initial_screenshot）
+        # 内容监视定时器：初始采集完成后再启动（见 _capture_initial_screenshot）。
+        # 抓帧与签名在 _WatchGrabber 线程完成，定时器只在 GUI 线程应用最新样本
         self._watch_timer = QTimer(self)
         self._watch_timer.setInterval(self._WATCH_IDLE_MS)
         self._watch_timer.timeout.connect(self._watch_tick)
+        self._watch_grabber = _WatchGrabber(
+            self.capture_rect, self._SIGNATURE_SIZE, self._WATCH_IDLE_MS, parent=self
+        )
 
         self._setup_window()
         self._setup_ui()
@@ -1685,6 +1792,8 @@ class ScrollCaptureWindow(QWidget):
         # 内容监视从这里开始：之后框内画面一有变化并稳定，就自动采集拼接
         if not self._watch_timer.isActive():
             self._watch_timer.start()
+            if not self._watch_grabber.isRunning():
+                self._watch_grabber.start()
             _log_stitch(T("[OK] 内容监视已启动（检测到画面变化并稳定后自动采集）"), force=True)
 
     def _calculate_image_hash(self, pil_image):
@@ -1810,9 +1919,21 @@ class ScrollCaptureWindow(QWidget):
     def _set_watch_interval(self, ms):
         if self._watch_timer.interval() != ms:
             self._watch_timer.setInterval(ms)
+        grabber = getattr(self, "_watch_grabber", None)
+        if grabber is not None:
+            grabber.set_interval(ms)
+
+    def _idle_watch_interval(self, idle_for: float):
+        """静止后的轮询间隔自适应拉长：越闲越省 CPU（监视线程的抓帧是大头），
+        一有变化立即回 _WATCH_ACTIVE_MS。"""
+        if idle_for >= 4.0:
+            return self._WATCH_IDLE_SLOWEST_MS
+        if idle_for >= 1.5:
+            return self._WATCH_IDLE_SLOW_MS
+        return self._WATCH_IDLE_MS
 
     def _watch_tick(self):
-        """内容感知监视的一次采样：内容一变就抓帧。
+        """内容感知监视的一次采样应用：样本由 _WatchGrabber 在后台采集。
 
         与上一张已采集帧一致 → 内容没动（阅读停顿/已到底），计入静止
         时长作为自动收尾依据；不一致 → 立即抓帧提交拼接。快速滚动时
@@ -1822,14 +1943,17 @@ class ScrollCaptureWindow(QWidget):
         if not self.isVisible():
             return
 
-        pixmap, sig = self._grab_region()
-        if pixmap is None:
+        grabber = getattr(self, "_watch_grabber", None)
+        sample = grabber.latest() if grabber is not None else None
+        if sample is None:
             return
+        image, sig = sample
         now = time.monotonic()
 
         if self._sig_similar(sig, self._last_captured_sig):
             # 内容与上一张已采集帧一致：静止计时
-            self._set_watch_interval(self._WATCH_IDLE_MS)
+            idle_for = now - self._idle_started_at if self._idle_started_at is not None else 0.0
+            self._set_watch_interval(self._idle_watch_interval(idle_for))
             if self._idle_started_at is None:
                 self._idle_started_at = now
             # 预览因节流而滞后时，趁空闲补一次刷新
@@ -1848,6 +1972,8 @@ class ScrollCaptureWindow(QWidget):
             return
 
         self._last_captured_sig = sig
+        # 测试替身可能直接给 QPixmap；正常路径这里是 QImage
+        pixmap = image if isinstance(image, QPixmap) else QPixmap.fromImage(image)
         self._do_capture(pixmap)
 
     def _maybe_auto_finish(self, idle_seconds: float):
@@ -2267,6 +2393,9 @@ class ScrollCaptureWindow(QWidget):
         self._auto_finish_scheduled = False
         if hasattr(self, "_watch_timer"):
             self._watch_timer.start(self._WATCH_IDLE_MS)
+        grabber = getattr(self, "_watch_grabber", None)
+        if grabber is not None and not grabber.isRunning():
+            grabber.start()
 
     def _abandon_as_cancelled(self):
         """按取消收场：丢弃已拼内容、停 worker、发 cancelled 并关窗。
@@ -2314,6 +2443,14 @@ class ScrollCaptureWindow(QWidget):
                 self._stitch_worker.stop()
                 self._stitch_worker.join(timeout=3.0)
                 self._stitch_worker = None
+
+            # 停止监视抓帧线程：requestInterruption 后分片睡眠最多 50ms 就会退出，
+            # wait 只是兜底
+            grabber = getattr(self, '_watch_grabber', None)
+            if grabber is not None:
+                grabber.requestInterruption()
+                grabber.wait(2000)
+                self._watch_grabber = None
 
             if hasattr(self, 'screenshots'):
                 self.screenshots.clear()

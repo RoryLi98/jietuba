@@ -260,6 +260,13 @@ def _grab_region(session, rect, adaptive):
                   QImage.Format.Format_RGB32).copy()
 
 
+def grab_region_mss(rect):
+    """GDI BitBlt（mss）抓取一块区域，返回 QImage。与 grab_region_hdr 同为跨线程安全，
+    长截图监视线程的 HDR 不可用回退走这里；QScreen.grabWindow 不能离开 GUI 线程。
+    """
+    return CaptureService._capture_region_with_mss(rect)
+
+
 def hdr_display_active():
     """是否有显示器开着 HDR（Windows 高级颜色）。不建会话、不加载显卡驱动，每次截图前都可以调用。"""
     if hdrcapture is None:
