@@ -300,21 +300,6 @@ class NumberTool(Tool):
             log_debug(T("创建后场景中序号数量: {count_after}", count_after=count_after), "NumberTool")
             
     
-    def _update_cursor(self, scene):
-        """更新光标显示下一个序号"""
-        if not self._is_qobject_alive(scene):
-            log_debug(T("scene 已失效，跳过光标更新"), "NumberTool")
-            return
-        next_num = self.get_next_number(scene)
-        log_debug(T("更新光标时下一个序号: {next_num}", next_num=next_num), "NumberTool")
-        
-        view = getattr(scene, 'view', None)
-        cursor_manager = getattr(view, 'cursor_manager', None) if view else None
-        if self._is_qobject_alive(view) and self._is_qobject_alive(cursor_manager):
-            try:
-                cursor_manager.set_tool_cursor(self.id, force=True)
-            except RuntimeError as exc:
-                log_warning(T("设置光标失败：{exc}", exc=exc), "NumberTool")
 
     @staticmethod
     def _is_qobject_alive(obj) -> bool:

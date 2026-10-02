@@ -256,26 +256,6 @@ class FinishPage(BasePage):
         )
         return f'"{sys.executable}" "{main_script}"'
 
-    @classmethod
-    def _get_autostart(cls) -> bool:
-        """检测注册表 HKCU\\Run 中是否存在本程序的启动项"""
-        import winreg
-        try:
-            key = winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER,
-                cls._AUTOSTART_REG_KEY,
-                0,
-                winreg.KEY_READ,
-            )
-            try:
-                winreg.QueryValueEx(key, cls._AUTOSTART_APP_NAME)
-                return True
-            except FileNotFoundError:
-                return False
-            finally:
-                winreg.CloseKey(key)
-        except Exception:
-            return False
 
     @classmethod
     def _set_autostart(cls, enabled: bool):

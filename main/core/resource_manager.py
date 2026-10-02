@@ -137,9 +137,3 @@ class ResourceManager:
         ResourceManager._icon_cache[cache_key] = icon
         return icon
 
-    @staticmethod
-    def get_icon_by_name(icon_name: str, size: int = 0):
-        """按 svg/ 下的文件名取图标，等价于 get_icon(get_icon_path(name), size)。"""
-        return ResourceManager.get_icon(
-            ResourceManager.get_icon_path(icon_name), size
-        )

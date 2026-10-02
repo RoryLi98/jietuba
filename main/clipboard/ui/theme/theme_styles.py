@@ -499,46 +499,6 @@ class ThemeStyleGenerator:
             }}
         """
 
-    def generate_time_filter_combo_style(self) -> str:
-        """Generate the compact content-type filter combo style."""
-        return f"""
-            QComboBox {{
-                background: {self.colors.bg_primary};
-                color: {self.colors.text_primary};
-                border: 1px solid {self.colors.border_primary};
-                border-radius: 4px;
-                padding: 3px 12px 3px 8px;
-                font-size: 12px;
-            }}
-            QComboBox:hover {{
-                background: {self.colors.bg_hover};
-            }}
-            QComboBox::drop-down {{
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 10px;
-                border-left: none;
-                border-top-right-radius: 4px;
-                border-bottom-right-radius: 4px;
-                background: {self.colors.bg_tertiary};
-            }}
-            QComboBox::down-arrow {{
-                image: none;
-                width: 0px;
-                height: 0px;
-                border-left: 3px solid transparent;
-                border-right: 3px solid transparent;
-                border-top: 4px solid {self.colors.text_secondary};
-            }}
-            QComboBox QAbstractItemView {{
-                background: {self.colors.bg_primary};
-                color: {self.colors.text_primary};
-                border: 1px solid {self.colors.border_primary};
-                selection-background-color: {self.colors.accent_primary};
-                selection-color: white;
-                outline: none;
-            }}
-        """
 
     def generate_time_filter_type_btn_style(self) -> str:
         """Generate the custom content-type dropdown button style."""

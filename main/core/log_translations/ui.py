@@ -42,8 +42,6 @@ TRANSLATIONS: dict[str, str] = {
 
     # -- ui/toolbar.py --
     "初始化线条样式失败: {exc}": "Failed to initialize line style: {exc}",
-    "同步形状线条样式失败: {exc}": "Failed to sync shape line style: {exc}",
-    "同步荧光笔模式失败: {exc}": "Failed to sync highlighter mode: {exc}",
     "保存荧光笔模式失败: {exc}": "Failed to save highlighter mode: {exc}",
     "设置高亮笔光标": "Setting highlighter cursor",
 

@@ -242,11 +242,6 @@ class OCRTextLayer(QWidget):
         self.drawing_mode = bool(active)
         self._apply_effective_enabled()
 
-    def set_draw_tool_active(self, active: bool):
-        """供工具栏按钮调用：按钮按下(True)/抬起(False) 即切换文字层。
-        注意：这里代表工具处于"绘制工具被选中"的状态，而非实际开始绘制过程。
-        """
-        self.set_drawing_mode(active)
 
     def _apply_effective_enabled(self):
         """应用有效的启用状态：启用时始终显示层（无文字时事件会自动穿透）"""
@@ -561,15 +556,6 @@ class OCRTextLayer(QWidget):
         self._translate_thread.start()
         log_info(T("原位翻译开始: {line_count} 行", line_count=len(texts)), "OCRLayer")
 
-    def cancel_in_place_translation(self) -> None:
-        """清除译文贴片并恢复原文显示"""
-        if self._translate_thread is not None:
-            try:
-                self._translate_thread.finished_ok.disconnect(self._on_translated)
-            except (RuntimeError, TypeError):
-                pass
-            self._translate_thread = None
-        self._set_translate_mode(False)
 
     def _set_translate_mode(self, active: bool):
         self._translate_mode = bool(active)

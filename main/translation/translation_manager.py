@@ -143,10 +143,6 @@ class TranslationManager(QObject):
             cls._instance = TranslationManager()
         return cls._instance
     
-    @classmethod
-    def has_instance(cls) -> bool:
-        """检查单例是否已创建"""
-        return cls._instance is not None
     
     def configure(self, api_key: str, use_pro: bool = False, 
                   split_sentences: str = "nonewlines", preserve_formatting: bool = True):
@@ -712,9 +708,6 @@ class TranslationManager(QObject):
             if not ocr_thread.wait(max(0, ocr_timeout_ms)):
                 log_warning(T("退出时 OCR 线程未在期限内结束"), "Translation")
 
-    def is_dialog_open(self) -> bool:
-        """检查翻译窗口是否打开"""
-        return self._is_dialog_valid() and self._dialog.isVisible()
     
     @classmethod
     def cleanup(cls):

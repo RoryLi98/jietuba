@@ -25,7 +25,6 @@ TRANSLATIONS: dict[str, str] = {
     "保存目标语言失败: {e}": "Failed to save target language: {e}",
     "创建新翻译窗口": "Creating new translation window",
     "复用现有翻译窗口": "Reusing existing translation window",
-    "调用翻译引擎 {provider_name}: target={target_lang}, preserve_formatting={preserve_formatting}": "Calling translation engine {provider_name}: target={target_lang}, preserve_formatting={preserve_formatting}",
     "忽略已被新请求替代的翻译结果": "Ignoring translation result superseded by a newer request",
     "翻译完成: success={success}, detected_lang={detected_lang}": "Translation finished: success={success}, detected_lang={detected_lang}",
     "翻译请求: -> {target_lang}": "Translation requested: -> {target_lang}",

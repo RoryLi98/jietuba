@@ -16,6 +16,5 @@ TRANSLATIONS: dict[str, str] = {
     "获取鼠标所在显示器": "Failed to get the monitor under the cursor",
     "获取虚拟屏幕尺寸": "Failed to get virtual screen size",
     "降级获取主显示器尺寸": "Falling back to primary monitor size",
-    "查找窗口失败: {e}": "Failed to find window: {e}",
     "绘制鼠标指针": "Drawing the mouse pointer",
 }

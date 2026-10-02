@@ -94,8 +94,6 @@ class CursorOverlay(QWidget):
         self._visible_flag = visible
         self.update()
 
-    def is_cursor_visible(self) -> bool:
-        return self._visible_flag
 
     def set_frame_cursor(self, cursor: CursorSnapshot | None):
         """设置当前帧的鼠标状态，触发重绘"""

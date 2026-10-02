@@ -580,8 +580,6 @@ class SmartEditController(QObject):
                 self._repaint_handles()
 
 
-    def _is_text_item_editing(self, item: QGraphicsItem) -> bool:
-        return isinstance(item, TextItem) and item.is_editing()
 
     def delete_selected(self, suppress_block: bool = False, renumber_numbers: bool = False):
         """删除当前选中的图元，推入撤销栈"""
@@ -705,9 +703,6 @@ class SmartEditController(QObject):
 
         return True
     
-    def get_selected_item(self) -> Optional[QGraphicsItem]:
-        """获取当前选中的图元"""
-        return self.selected_item
 
     def _capture_layer_state(self, item: Optional[QGraphicsItem]) -> Optional[Dict[str, Any]]:
         if not item or not self.layer_editor:

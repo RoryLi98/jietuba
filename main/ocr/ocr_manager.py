@@ -22,7 +22,6 @@ from typing import Optional, Any
 import time
 import os
 import sys
-import ctypes
 import traceback as _tb
 import threading
 
@@ -47,25 +46,6 @@ def _ocr_log(msg, level: str = "INFO"):
     except Exception:
         pass
 
-def _preload_crt_for_pyinstaller():
-    """
-    在 PyInstaller 打包环境中预加载 MSVC CRT 运行时库。
-    """
-    if not getattr(sys, 'frozen', False):
-        return  # 非打包环境不需要
-    
-    crt_dlls = [
-        "ucrtbase.dll",
-        "vcruntime140.dll", 
-        "vcruntime140_1.dll",
-        "msvcp140.dll",
-    ]
-    
-    for dll in crt_dlls:
-        try:
-            ctypes.CDLL(dll)
-        except OSError:
-            pass  # DLL 可能已加载或不存在，忽略
 
 
 # 尝试导入 windows_media_ocr（Rust 库，同时包含高精度识别引擎）
@@ -867,21 +847,8 @@ def recognize_text(pixmap: QPixmap, **kwargs) -> Any:
     return _ocr_manager.recognize_pixmap(pixmap, **kwargs)
 
 
-def release_ocr_engine():
-    """
-    内存优化：释放 OCR 引擎，回收内存
-    
-    建议在以下场景调用：
-    - 钉图窗口关闭后
-    - 长时间不使用 OCR 时
-    - 应用切换到后台时
-    """
-    _ocr_manager.release_engine()
 
 
-def get_ocr_memory_status() -> str:
-    """获取 OCR 引擎内存状态"""
-    return _ocr_manager.get_memory_status()
 
 
 def format_ocr_result_text(result: dict, separator: str = "\n") -> str:

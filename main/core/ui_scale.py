@@ -119,9 +119,6 @@ class UIScaleManager:
             return cls.DEFAULT_PERCENT
         return min(cls.PERCENT_OPTIONS, key=lambda option: (abs(option - value), option))
 
-    def reset_to_default(self):
-        self.set_percent(self.DEFAULT_PERCENT)
-
 
 def recommended_scale_percent(system_dpi=None) -> int:
     """按系统缩放区间选择保守的首次运行档位（96 DPI = 100%）。

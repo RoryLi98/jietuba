@@ -45,9 +45,6 @@ TRANSLATIONS: dict[str, str] = {
     "创建前场景中序号数量: {prev_count}, 将创建序号: {number}": "Number count in scene before creation: {prev_count}, will create number: {number}",
     "统计创建后序号失败：{exc}": "Failed to count numbers after creation: {exc}",
     "创建后场景中序号数量: {count_after}": "Number count in scene after creation: {count_after}",
-    "scene 已失效，跳过光标更新": "Scene is no longer valid, skipping cursor update",
-    "更新光标时下一个序号: {next_num}": "Next number when updating cursor: {next_num}",
-    "设置光标失败：{exc}": "Failed to set cursor: {exc}",
 
     # cursor_manager.py
     "同步更新覆盖光标": "Syncing override cursor",

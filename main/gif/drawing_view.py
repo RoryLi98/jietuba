@@ -352,8 +352,6 @@ class GifDrawingView(CanvasView):
         if hasattr(self, 'smart_edit_controller'):
             self.smart_edit_controller.clear_selection()
 
-    def has_drawings(self) -> bool:
-        return len(self._gif_scene.items()) > 1
 
     # ── 穿透控制 ──
 

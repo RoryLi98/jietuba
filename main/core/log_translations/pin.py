@@ -32,8 +32,6 @@ TRANSLATIONS: dict[str, str] = {
     "准备翻译 {count} 个字符": "Preparing to translate {count} character(s)",
     "翻译启动失败: {e}": "Failed to start translation: {e}",
 
-    # pin_thumbnail.py
-    "进入缩略图模式，场景中心: ({scene_x:.1f}, {scene_y:.1f})": "Entering thumbnail mode, scene center: ({scene_x:.1f}, {scene_y:.1f})",
     "退出缩略图模式": "Exiting thumbnail mode",
 
     # pin_shortcut.py
@@ -45,8 +43,6 @@ TRANSLATIONS: dict[str, str] = {
     "识别失败: {e}，耗时: {elapsed:.3f}秒": "Recognition failed: {e}, elapsed: {elapsed:.3f}s",
     "钉图自动 OCR 已关闭，跳过自动识别": "Automatic pin OCR is disabled, skipping automatic recognition",
     "OCR 模块不可用（无OCR版本），静默跳过": "OCR module unavailable (non-OCR build), silently skipping",
-    "OCR 引擎初始化失败": "OCR engine initialization failed",
-    "OCR 引擎已就绪（支持中日韩英混合识别）": "OCR engine ready (supports mixed CJK/English recognition)",
     "OCR层初始化几何: {rect}": "OCR layer initialized with geometry: {rect}",
     "OCR初始化": "OCR initialization",
     "开始异步识别文字...": "Starting asynchronous text recognition...",

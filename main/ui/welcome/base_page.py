@@ -6,8 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-from PySide6.QtCore import Qt, QSize, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QSizePolicy
 from core.ui_scale import dialog_scaled
 from ui.fluent_lite import SwitchButton
@@ -196,19 +195,6 @@ class IllustrationArea(QFrame):
         # 默认不放任何内容
         return
 
-    def set_pixmap(self, pixmap: QPixmap, max_size: QSize | None = None) -> None:
-        """便捷方法：在区域中央显示一张图片"""
-        if max_size is None:
-            max_size = QSize(dialog_scaled(280), dialog_scaled(180))
-        lbl = QLabel(self)
-        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        scaled = pixmap.scaled(
-            max_size,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        lbl.setPixmap(scaled)
-        self._layout.addWidget(lbl)
 
 
 # ─────────────────────────────────────────

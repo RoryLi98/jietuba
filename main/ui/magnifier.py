@@ -336,9 +336,6 @@ class MagnifierOverlay(QWidget):
 		self._cached_sample_image = None
 		self.update()
 	
-	def get_zoom_factor(self) -> float:
-		"""获取当前放大倍数"""
-		return self._zoom_factor
 
 	@property
 	def sample_size(self) -> int:

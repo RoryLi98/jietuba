@@ -4,7 +4,7 @@
 """
 
 from PySide6.QtCore import QRectF
-from PySide6.QtGui import QImage, QPainter, QPixmap
+from PySide6.QtGui import QImage, QPainter
 
 from core import log_debug, log_warning, T
 
@@ -21,17 +21,6 @@ class ExportService:
         """
         self.scene = scene
     
-    def get_result_pixmap(self) -> QPixmap:
-        """
-        获取最终结果图像 (选区内容)
-        """
-        # 获取选区
-        selection_rect = self.scene.selection_model.rect()
-        if selection_rect.isEmpty():
-            # 如果没有选区，导出整个场景
-            selection_rect = self.scene.sceneRect()
-            
-        return QPixmap.fromImage(self.export(selection_rect))
 
     def export(self, selection_rect: QRectF) -> QImage:
         """

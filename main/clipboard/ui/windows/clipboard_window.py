@@ -1384,8 +1384,6 @@ class ClipboardWindow(QWidget, FramelessMixin):
 
             log_warning(T("打开文件位置失败: {e}", e=e), "Clipboard")
 
-    def _on_clear_clicked(self):
-        self.controller.clear_history(parent_widget=self)
 
     def _on_new_item(self, item=None):
         self.controller.on_new_content(self.isVisible(), item)

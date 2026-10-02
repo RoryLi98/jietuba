@@ -365,33 +365,3 @@ def is_smart_selection_available() -> bool:
 # 便捷接口
 # ============================================================================
 
-def find_window_at_cursor(screen_offset_x: int = 0, screen_offset_y: int = 0) -> Optional[List[int]]:
-    """
-    快捷方式：查找当前鼠标位置的窗口
-    
-    Args:
-        screen_offset_x: 屏幕X偏移
-        screen_offset_y: 屏幕Y偏移
-    
-    Returns:
-        窗口矩形 [x1, y1, x2, y2]，如果功能不可用则返回 None
-    """
-    if not WINDOWS_API_AVAILABLE:
-        return None
-    
-    try:
-        from PySide6.QtGui import QCursor
-        
-        finder = WindowFinder(screen_offset_x, screen_offset_y)
-        finder.find_windows()
-        
-        # 获取当前鼠标位置
-        cursor_pos = QCursor.pos()
-        x = cursor_pos.x() - screen_offset_x
-        y = cursor_pos.y() - screen_offset_y
-        
-        return finder.find_window_at_point(x, y)
-    except Exception as e:
-        log_error(T("查找窗口失败: {e}", e=e), module="SmartSelection")
-        return None
- 

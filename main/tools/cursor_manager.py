@@ -155,26 +155,6 @@ class CursorManager:
         self.scene.addItem(self.brush_indicator)
         self.indicator_visible = True
     
-    def update_brush_indicator(self, pos: QPointF, size: int):
-        """
-        更新画笔指示器位置和大小
-        
-        Args:
-            pos: 新位置（场景坐标）
-            size: 画笔大小
-        """
-        if self.brush_indicator:
-            # 更新位置和大小
-            radius = size / 2
-            self.brush_indicator.setRect(
-                pos.x() - radius,
-                pos.y() - radius,
-                size,
-                size
-            )
-        else:
-            # 如果不存在则创建
-            self.show_brush_indicator(pos, size)
     
     def hide_brush_indicator(self):
         """隐藏画笔大小指示器"""

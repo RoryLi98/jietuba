@@ -1079,8 +1079,6 @@ class SettingsDialog(FrostedFramelessDialog):
             self.config_manager.set_ocr_enabled(self.ocr_enable_toggle.isChecked())
         if hasattr(self, 'ocr_engine_combo'):
             self.config_manager.set_ocr_engine(self.ocr_engine_combo.currentData())
-        if hasattr(self, 'ocr_grayscale_toggle'):
-            self.config_manager.set_ocr_grayscale_enabled(self.ocr_grayscale_toggle.isChecked())
         if hasattr(self, 'ocr_upscale_toggle'):
             self.config_manager.set_ocr_upscale_enabled(self.ocr_upscale_toggle.isChecked())
         if hasattr(self, 'ocr_scale_spinbox'):
@@ -1382,7 +1380,7 @@ class SettingsDialog(FrostedFramelessDialog):
                       'magnifier_enabled_toggle', 'magnifier_grid_toggle',
                       'magnifier_hint_toggle',
                       'ocr_enable_toggle',
-                      'ocr_grayscale_toggle', 'ocr_upscale_toggle',
+                      'ocr_upscale_toggle',
                       'split_sentences_toggle',
                       'preserve_formatting_toggle', 'log_toggle',
                       'clipboard_enabled_toggle', 'clipboard_auto_paste_toggle',
@@ -1657,8 +1655,6 @@ class SettingsDialog(FrostedFramelessDialog):
             index = self.ocr_engine_combo.findData(self.config_manager.get_ocr_engine())
             if index >= 0:
                 self.ocr_engine_combo.setCurrentIndex(index)
-        if hasattr(self, 'ocr_grayscale_toggle'):
-            self.ocr_grayscale_toggle.setChecked(self.config_manager.get_ocr_grayscale_enabled())
         if hasattr(self, 'ocr_upscale_toggle'):
             self.ocr_upscale_toggle.setChecked(self.config_manager.get_ocr_upscale_enabled())
         if hasattr(self, 'ocr_scale_spinbox'):

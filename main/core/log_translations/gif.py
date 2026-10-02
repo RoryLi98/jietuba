@@ -74,7 +74,6 @@ TRANSLATIONS: dict[str, str] = {
     "GIF 合成失败: {e}": "GIF composition failed: {e}",
     "GIF 取消后删除临时文件": "Deleting temp file after GIF export cancelled",
     "GIF 读取后删除临时文件": "Deleting temp file after reading GIF",
-    "使用 gifrecorder export_gif: {gif_width}x{gif_height}": "Using gifrecorder export_gif: {gif_width}x{gif_height}",
     "export_gif 失败: {e}": "export_gif failed: {e}",
     "GIF 导出完成: {out_path} ({size_kb:.1f} KB)": "GIF export complete: {out_path} ({size_kb:.1f} KB)",
     "居中进度对话框": "Centering progress dialog",
@@ -84,8 +83,6 @@ TRANSLATIONS: dict[str, str] = {
     "绘制层穿透=开": "Drawing layer click-through=on",
     "绘制层穿透=关": "Drawing layer click-through=off",
 
-    # drawing_toolbar.py
-    "加载绘制工具样式": "Loading drawing tool style",
 
     # cursor_overlay.py
     "设置光标覆盖层透明": "Setting cursor overlay transparency",

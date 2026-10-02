@@ -209,9 +209,6 @@ class _DotIndicator(QWidget):
         self.setFixedHeight(dialog_scaled(16))
         self.setMinimumWidth(count * dialog_scaled(20))
 
-    def set_current(self, idx: int):
-        self._current = idx
-        self.update()
 
     @safe_event
     def paintEvent(self, event):

@@ -315,9 +315,6 @@ class StepperWidget(QWidget):
     def value(self) -> int:
         return int(self._value)
 
-    def setSuffix(self, suffix: str):
-        self._suffix = str(suffix)
-        self._refresh_label()
 
     def setToolTip(self, text: str):
         super().setToolTip(text)
@@ -635,25 +632,6 @@ class BaseSettingsPanel(QWidget):
         self.color_changed.emit(self.current_color)
         self.color_picker_btn.set_color(self.current_color)
         
-    def _get_preset_button_style(self, color: str) -> str:
-        """根据颜色生成预设按钮样式"""
-        if color == "#FFFFFF":
-            border_color = "#888888"
-        elif color == "#000000":
-            border_color = "#666666"
-        else:
-            border_color = "#333333"
-        
-        return f"""
-            QPushButton {{
-                background-color: {color};
-                border: 2px solid {border_color};
-                border-radius: 8px;
-            }}
-            QPushButton:hover {{
-                border: 3px solid #000;
-            }}
-        """
 
     def _opacity_to_percent(self, opacity: int) -> int:
         """0-255 透明度转百分比"""

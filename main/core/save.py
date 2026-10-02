@@ -29,32 +29,6 @@ class SaveService:
         """Return default directory based on current config."""
         return self.config_manager.get_screenshot_save_path()
 
-    def save_qimage_async(
-        self,
-        image: QImage,
-        *,
-        directory: Optional[str] = None,
-        prefix: str = "截图",
-        suffix: str = "",
-        image_format: str = "PNG",
-        pdf_dpi: int = DEFAULT_PDF_DPI,
-        callback: Optional[Callable[[bool, str], None]] = None,
-    ) -> Optional[str]:
-        """Save a QImage in a background thread."""
-        if image is None or image.isNull():
-            log_warning("QImage is null, skip saving", "Save")
-            return None
-
-        image_copy = image.copy()
-        return self._save_qimage_async(
-            image_copy,
-            directory=directory,
-            prefix=prefix,
-            suffix=suffix,
-            image_format=image_format,
-            pdf_dpi=pdf_dpi,
-            callback=callback,
-        )
 
     def save_qimage(
         self,

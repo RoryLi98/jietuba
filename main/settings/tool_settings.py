@@ -366,7 +366,6 @@ class ToolSettingsManager(QObject):
         # OCR
         "ocr_enabled": True,                   # 钉图后自动 OCR（保留旧键名以兼容已有配置）
         "ocr_engine": "ppocr_rust",            # OCR引擎类型 (ppocr_rust 推荐, windows_media_ocr 备用)
-        "ocr_grayscale": False,                # OCR灰度转换（Windows OCR 不需要）
         "ocr_upscale": True,                   # OCR图像放大（提升小字识别率）
         "ocr_upscale_factor": 2.0,             # OCR放大倍数（1.0-3.0）
         
@@ -375,7 +374,6 @@ class ToolSettingsManager(QObject):
         "clipboard_auto_paste": True,          # 选择后自动粘贴（发送 Ctrl+V）
         "clipboard_close_after_paste": True,   # 粘贴后关闭窗口（关掉则窗口常驻，可连续粘贴）
         "clipboard_history_limit": 1000,        # 历史记录数量限制（0 为不限制）
-        "clipboard_auto_cleanup": True,        # 自动清理超出限制的记录
         "clipboard_window_width": 450,         # 剪贴板窗口默认宽度
         "clipboard_window_height": 750,        # 剪贴板窗口默认高度
         "clipboard_window_opacity": 20,         # 剪贴板窗口透明度（0=不透明）
@@ -465,7 +463,6 @@ class ToolSettingsManager(QObject):
         "pin_auto_toolbar": False,             # 钉图自动显示工具栏
         "pin_thumbnail_height": 100,           # 钉图缩略图高度（像素，40-400，宽度等比）
 
-        "pin_default_opacity": 1.0,            # 钉图默认透明度（0.1-1.0）
         "pin_rounded_corners": False,          # Windows 11 系统圆角和阴影
         "pin_auto_border": True,               # 新钉图默认显示主题色描边
         "pin_hover_buttons": False,            # 悬停时显示右上角按钮
@@ -730,12 +727,6 @@ class ToolSettingsManager(QObject):
         
         self.qsettings.setValue(setting_key, value)
 
-    def reset_all_settings(self):
-        """重置所有设置（工具设置 + 应用设置）为默认值"""
-        self.reset_all()           # 重置工具设置
-        self.reset_app_settings()  # 重置应用设置
-        from core.logger import log_info, T
-        log_info(T("所有设置已重置为默认值"), "Settings")
     
     def get_color(self, tool_id: str) -> QColor:
         """获取工具的颜色（返回 QColor 对象）"""
@@ -763,13 +754,7 @@ class ToolSettingsManager(QObject):
         """设置工具的透明度"""
         self.set_setting(tool_id, "opacity", opacity, save_immediately)
     
-    def get_font_size(self, tool_id: str) -> int:
-        """获取文字工具的字体大小"""
-        return self.get_setting(tool_id, "font_size", 14)
     
-    def set_font_size(self, tool_id: str, size: int, save_immediately: bool = True):
-        """设置文字工具的字体大小"""
-        self.set_setting(tool_id, "font_size", size, save_immediately)
     
     def export_settings(self) -> Dict[str, Dict[str, Any]]:
         """导出所有工具设置（用于备份）"""
@@ -778,13 +763,6 @@ class ToolSettingsManager(QObject):
             for tool_id, tool_setting in self._tool_settings.items()
         }
     
-    def import_settings(self, settings_dict: Dict[str, Dict[str, Any]]):
-        """导入工具设置（用于恢复备份）"""
-        for tool_id, settings in settings_dict.items():
-            tool_setting = self._tool_settings.get(tool_id)
-            if tool_setting:
-                tool_setting.from_dict(settings)
-                self._save_tool_settings(tool_setting)
     
     # ========================================================================
     # 应用程序级别设置（整合自 ConfigManager）
@@ -1142,10 +1120,6 @@ class ToolSettingsManager(QObject):
         """设置 OCR 引擎类型"""
         self.qsettings.setValue("app/ocr_engine", value)
     
-    def get_ocr_grayscale_enabled(self) -> bool:
-        """获取 OCR 灰度化"""
-        return self.qsettings.value("app/ocr_grayscale", self.APP_DEFAULT_SETTINGS["ocr_grayscale"], type=bool)
-    
     # ==================== 钉图设置 ====================
     
     def get_pin_auto_toolbar(self) -> bool:
@@ -1169,11 +1143,6 @@ class ToolSettingsManager(QObject):
         self.qsettings.setValue(
             "pin/thumbnail_height", max(40, min(400, int(height)))
         )
-    
-
-    def set_ocr_grayscale_enabled(self, value: bool):
-        """设置 OCR 灰度化"""
-        self.qsettings.setValue("app/ocr_grayscale", value)
     
     def get_ocr_upscale_enabled(self) -> bool:
         """获取 OCR 放大"""
@@ -1634,14 +1603,6 @@ class ToolSettingsManager(QObject):
     
 
 
-    def set_clipboard_display_lines(self, value: int):
-        """
-        [已废弃 2026-01-17] 设置剪贴板项显示行数（1/2）
-        
-        此方法已废弃，请使用 set_clipboard_font_size() 代替
-        此方法现在不执行任何操作
-        """
-        pass  # 向后兼容：不执行任何操作
     
     def get_clipboard_window_opacity(self) -> int:
         """获取剪贴板窗口透明度（0=不透明，数值越大越透明）"""
@@ -1708,9 +1669,6 @@ class ToolSettingsManager(QObject):
                                     self.APP_DEFAULT_SETTINGS["clipboard_line_height_padding"], 
                                     type=int)
     
-    def set_clipboard_line_height_padding(self, value: int):
-        """设置多行显示时的额外行高边距（像素）"""
-        self.qsettings.setValue("clipboard/line_height_padding", max(0, value))
     
     def get_clipboard_move_to_top_on_paste(self) -> bool:
         """获取粘贴后是否将内容移到最前（默认 True）"""

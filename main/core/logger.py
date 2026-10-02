@@ -648,22 +648,6 @@ def log_exception(e: Exception, context: MessageType = "", silent: bool = True):
     get_logger().exception(e, context, silent)
 
 
-def log_exception_full(e: Exception, context: MessageType = ""):
-    """
-    记录异常（包含完整堆栈，用于调试严重错误）
-    
-    Args:
-        e: 异常对象
-        context: 上下文描述
-    
-    使用示例：
-        try:
-            critical_operation()
-        except Exception as e:
-            log_exception_full(e, "关键操作失败")
-            raise  # 可选：继续抛出
-    """
-    get_logger().exception_with_traceback(e, context)
 
 
 # ============================================================================
@@ -746,15 +730,4 @@ def set_log_level(level: int):
     get_logger().set_level(level)
 
 
-def set_console_log_level(level: int):
-    """
-    设置控制台日志级别（减少控制台噪音）
-    
-    Args:
-        level: LogLevel.DEBUG / INFO / WARNING / ERROR
-    
-    示例：
-        set_console_log_level(LogLevel.WARNING)  # 控制台只显示警告和错误
-    """
-    get_logger().set_console_level(level)
  

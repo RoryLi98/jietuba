@@ -501,11 +501,6 @@ class ThemeManager(QObject):
         all_themes.update(self._custom_themes)
         return all_themes
 
-    def get_preset_themes(self) -> Dict[str, Theme]:
-        """获取预设主题"""
-        presets = PRESET_THEMES.copy()
-        presets[FOLLOW_THEME_NAME] = build_follow_theme()
-        return presets
 
     def refresh_follow_theme(self):
         """截图主题色 / 界面明暗变化后，若正在跟随则重建并广播。"""
@@ -529,29 +524,8 @@ class ThemeManager(QObject):
         self._custom_themes[theme.name] = theme
         return True
     
-    def remove_custom_theme(self, theme_name: str) -> bool:
-        """删除自定义主题"""
-        if theme_name in self._custom_themes:
-            del self._custom_themes[theme_name]
-            return True
-        return False
     
-    def export_theme(self, theme_name: str) -> Optional[Dict[str, Any]]:
-        """导出主题为字典"""
-        all_themes = self.get_all_themes()
-        if theme_name in all_themes:
-            return all_themes[theme_name].to_dict()
-        return None
     
-    def import_theme(self, theme_data: Dict[str, Any]) -> bool:
-        """从字典导入主题"""
-        try:
-            theme = Theme.from_dict(theme_data)
-            return self.add_custom_theme(theme)
-        except Exception as e:
-            log_exception(e, T("导入主题"))
-            return False
-
 
 # 全局主题管理器实例
 _theme_manager: Optional[ThemeManager] = None

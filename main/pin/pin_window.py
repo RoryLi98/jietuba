@@ -322,11 +322,6 @@ class PinWindow(QWidget):
     # 视图 / 缩放
     # ==================================================================
 
-    def update_display(self):
-        if hasattr(self, 'view') and self.view:
-            self.view.viewport().update()
-        else:
-            self.update()
 
     def _update_view_transform(self):
         if not getattr(self, 'view', None) or not getattr(self, 'canvas', None):

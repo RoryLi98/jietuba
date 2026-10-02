@@ -1241,14 +1241,11 @@ class ScrollCaptureWindow(QWidget):
     _WATCH_IDLE_SLOW_MS = 600    # 静止 1.5s 后：进一步降频
     _WATCH_IDLE_SLOWEST_MS = 1200  # 静止 4s 后：最低档（一有变化立即回 90ms）
     _WATCH_ACTIVE_MS = 90    # 检测到变化后的轮询间隔（快速出帧）
-    _STABLE_TICKS = 2        # 连续 N 次采样一致即认为内容已稳定
     _SIGNATURE_SIZE = 32     # 内容签名边长（32x32 ARGB32）
     # 签名差异位比例阈值：容忍光标闪烁、抗锯齿抖动这类微变化（32x32x4
     # 字节 = 32768 位，0.5% ≈ 163 位）
     _SIGNATURE_MAX_DIFF_BITS = 160
-    _CHANGE_FORCE_CAPTURE_S = 0.7   # 内容持续变化超过 N 秒强拍一帧（动画页兜底）
-    _AUTO_FINISH_IDLE_S = 5.0       # 内容静止 N 秒且已拼≥2帧 → 自动收尾
-    _AUTO_FINISH_WARN_S = 3.0       # 静止到 N 秒时先给出提示
+    _AUTO_FINISH_WARN_S = 3.0       # 静止到 N 秒时先给出提示，随后自动收尾
 
     def __init__(self, capture_rect, parent=None, config_manager=None):
         """初始化滚动截图窗口
@@ -2562,27 +2559,6 @@ class ScrollCaptureWindow(QWidget):
         self._cleanup()
         super().closeEvent(event)
     
-    def get_screenshots(self):
-        """获取所有截图"""
-        return self.screenshots
     
-    def get_stitched_result(self):
-        """获取实时拼接的结果图
-        
-        Returns:
-            PIL.Image: 拼接好的完整图片，如果没有截图则返回None
-            
-        注意：
-            - 竖向模式：返回原始拼接结果
-            - 横向模式：返回旋转后的结果（在_on_finish中已处理）
-        """
-        return self.stitched_result
     
-    def get_scroll_distances(self):
-        """获取所有滚动距离记录
-        
-        Returns:
-            List[int]: 滚动距离列表，每个元素表示相邻两张截图之间的估计滚动距离（像素）
-        """
-        return self.scroll_distances
  

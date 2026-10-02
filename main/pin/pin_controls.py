@@ -160,16 +160,6 @@ class PinControlButtons:
         self.close_button.raise_()
         self.toolbar_toggle_button.raise_()
 
-    def show_hover_controls(self, show_toolbar_button: bool = True):
-        """
-        显示悬停时的控制按钮
-
-        Args:
-            show_toolbar_button: 是否显示工具栏切换按钮
-        """
-        self.close_button.show()
-        self.toolbar_toggle_button.setVisible(show_toolbar_button)
-        self._restack()
 
     def hide_all(self):
         """隐藏所有控制按钮"""

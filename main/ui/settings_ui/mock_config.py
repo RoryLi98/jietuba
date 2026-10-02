@@ -51,7 +51,6 @@ APP_DEFAULT_SETTINGS = {
     "show_main_window": True,
     "ocr_enabled": True,
     "ocr_engine": "windos_ocr",
-    "ocr_grayscale_enabled": False,
     "ocr_upscale_enabled": False,
     "ocr_upscale_factor": 2.0,
     "pin_auto_toolbar": True,
@@ -76,7 +75,6 @@ APP_DEFAULT_SETTINGS = {
     "clipboard_auto_paste": False,
     "clipboard_close_after_paste": True,
     "clipboard_history_limit": 100,
-    "clipboard_auto_cleanup": False,
     "magnifier_enabled": True,
     "magnifier_grid": False,
     "magnifier_hint": True,
@@ -202,8 +200,6 @@ class MockConfig:
     def set_ocr_enabled(self, v): pass
     def get_ocr_engine(self): return "windos_ocr"
     def set_ocr_engine(self, v): pass
-    def get_ocr_grayscale_enabled(self): return False
-    def set_ocr_grayscale_enabled(self, v): pass
     def get_ocr_upscale_enabled(self): return False
     def set_ocr_upscale_enabled(self, v): pass
     def get_ocr_upscale_factor(self): return 2.0
@@ -289,8 +285,6 @@ class MockConfig:
     def set_clipboard_history_limit(self, v): pass
     def get_clipboard_db_path(self): return ""
     def set_clipboard_db_path(self, v): pass
-    def get_clipboard_auto_cleanup(self): return False
-    def set_clipboard_auto_cleanup(self, v): pass
     def get_clipboard_theme(self): return "light"
     def set_clipboard_theme(self, v): pass
     def get_clipboard_font_size(self): return 17

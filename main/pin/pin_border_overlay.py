@@ -50,7 +50,4 @@ class PinBorderOverlay(QWidget):
         self.corner_radius = radius
         self.update()
 
-    def set_border_color(self, color: QColor):
-        self.border_color = color
-        self.update()
  

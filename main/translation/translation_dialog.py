@@ -805,8 +805,6 @@ class TranslationDialog(FramelessWindow):
         else:
             self.set_translation_error(error)
 
-    def get_source_lang(self) -> str:
-        return str(self.source_language.currentData())
 
     def get_target_lang(self) -> str:
         return str(self.target_language.currentData())

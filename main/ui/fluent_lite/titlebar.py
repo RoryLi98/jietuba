@@ -24,12 +24,6 @@ class _FluentCaptionButton(TitleBarButton):
         self.kind = kind
         self._is_maximized = False
 
-    def setMaxState(self, is_maximized):
-        is_maximized = bool(is_maximized)
-        if self._is_maximized == is_maximized:
-            return
-        self._is_maximized = is_maximized
-        self.update()
 
     def paintEvent(self, event):
         del event

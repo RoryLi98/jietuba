@@ -37,8 +37,6 @@ from .ocr_manager import (
     get_current_engine,
     initialize_ocr,
     recognize_text,
-    release_ocr_engine,
-    get_ocr_memory_status,
     format_ocr_result_text
 )
 
@@ -50,8 +48,6 @@ __all__ = [
     'get_current_engine',
     'initialize_ocr',
     'recognize_text',
-    'release_ocr_engine',
-    'get_ocr_memory_status',
     'format_ocr_result_text'
 ]
  

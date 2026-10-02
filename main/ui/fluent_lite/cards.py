@@ -234,9 +234,6 @@ class SettingCardGroup(QWidget):
         self._cards.append(card)
         self.adjustSize()
 
-    def addSettingCards(self, cards):
-        for card in cards:
-            self.addSettingCard(card)
 
     def _sync_control_column(self):
         """控件列按组内最宽的一套控件取值，跨组不强求同宽。

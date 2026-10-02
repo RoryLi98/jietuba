@@ -30,10 +30,4 @@ TRANSLATIONS: dict[str, str] = {
     "windows_media_ocr 引擎初始化成功": "windows_media_ocr engine initialized successfully",
     "OCR 管理器状态已重置": "OCR manager state reset",
     "释放 OCR 资源时出错: {e}": "Error while releasing OCR resources: {e}",
-    "ppocr_rust 初始化失败: {e}\n{tb}": "ppocr_rust initialization failed: {e}\n{tb}",
-    "高精度引擎初始化失败: {e}\n{tb}": "High-precision engine initialization failed: {e}\n{tb}",
-    "windows_media_ocr 初始化失败: {e}\n{tb}": "windows_media_ocr initialization failed: {e}\n{tb}",
-    "ppocr_rust 识别失败: {e}\n{tb}": "ppocr_rust recognition failed: {e}\n{tb}",
-    "高精度引擎识别失败: {e}\n{tb}": "High-precision engine recognition failed: {e}\n{tb}",
-    "windows_media_ocr 识别失败: {e}\n{tb}": "windows_media_ocr recognition failed: {e}\n{tb}",
 }

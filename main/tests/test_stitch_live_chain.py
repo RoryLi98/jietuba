@@ -107,7 +107,7 @@ def window(qapp, monkeypatch):
 
     monkeypatch.setattr(ScrollCaptureWindow, "_WATCH_IDLE_MS", 20)
     monkeypatch.setattr(ScrollCaptureWindow, "_WATCH_ACTIVE_MS", 20)
-    monkeypatch.setattr(ScrollCaptureWindow, "_AUTO_FINISH_IDLE_S", 0.4)
+    monkeypatch.setattr(ScrollCaptureWindow, "_AUTO_FINISH_WARN_S", 0.4)
     monkeypatch.setattr(ScrollCaptureWindow, "_AUTO_FINISH_WARN_S", 0.2)
 
     win = ScrollCaptureWindow(QRect(0, 0, 120, 100), None)
@@ -188,7 +188,7 @@ class TestContentAwareWatcher:
 
         monkeypatch.setattr(ScrollCaptureWindow, "_WATCH_IDLE_MS", 20)
         monkeypatch.setattr(ScrollCaptureWindow, "_WATCH_ACTIVE_MS", 20)
-        monkeypatch.setattr(ScrollCaptureWindow, "_AUTO_FINISH_IDLE_S", 5.0)
+        monkeypatch.setattr(ScrollCaptureWindow, "_AUTO_FINISH_WARN_S", 3.0)
         monkeypatch.setattr(ScrollCaptureWindow, "_AUTO_FINISH_WARN_S", 3.0)
 
         seq = _Alternator([_make_page(80, 40), _make_page(80, None)])

@@ -177,8 +177,6 @@ class PlaybackEngine(QObject):
         elif self._current > self._trim_end:
             self.seek(self._trim_end)
 
-    def get_frame(self, index: int) -> FrameData:
-        return self._frames[index]
 
     def get_frame_image(self, index: int, display_width: int, display_height: int) -> Optional[QImage]:
         """单帧按需解码，用于 seek 预览 / 首帧展示。"""

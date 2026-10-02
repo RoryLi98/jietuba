@@ -255,11 +255,6 @@ class ClipboardController(QObject):
                 self._pending_reload = False
                 QTimer.singleShot(0, self.load_history)
     
-    def load_more_if_needed(self):
-        """根据需要加载更多数据"""
-        if not self._has_more or self._is_loading:
-            return
-        self._load_more_items()
 
     def _fetch_items_page(self, limit: int, offset: int) -> Tuple[List[ClipboardItem], int]:
         if self.current_group_id is None:

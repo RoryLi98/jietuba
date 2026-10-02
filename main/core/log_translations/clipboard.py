@@ -20,7 +20,6 @@ TRANSLATIONS: dict[str, str] = {
     # themes.py
     "加载保存的主题": "Loading saved theme",
     "保存主题设置": "Saving theme settings",
-    "导入主题": "Importing theme",
 
     # preview_popup.py
     "加载文本预览": "Loading text preview",
@@ -33,21 +32,7 @@ TRANSLATIONS: dict[str, str] = {
     "🔄 SelectionManager 已重置": "🔄 SelectionManager reset",
     "✅ 激活项: {item_id}": "✅ Activated item: {item_id}",
 
-    # manage_dialog.py
-    "old_index={old_index}, new_index={new_index}": "old_index={old_index}, new_index={new_index}",
-    "当前有 {count} 个分组": "Currently {count} group(s)",
-    "索引越界: old_index={old_index}": "Index out of bounds: old_index={old_index}",
-    "调整后索引越界: old_pos={old_pos}": "Adjusted index out of bounds: old_pos={old_pos}",
-    "移动分组: ID={group_id}, name={group_name}": "Moving group: ID={group_id}, name={group_name}",
-    "计算: before_id={before_id}, after_id={after_id}": "Computed: before_id={before_id}, after_id={after_id}",
-    "移动成功: ID={group_id}, before={before_id}, after={after_id}": "Move succeeded: ID={group_id}, before={before_id}, after={after_id}",
-    "移动失败: {e}": "Move failed: {e}",
     "拖拽分组移动失败": "Drag-and-drop group move failed",
-    "未选择分组": "No group selected",
-    "当前分组有 {count} 个内容": "Current group has {count} item(s)",
-    "索引越界: old_index={old_index}, items count={items_count}": "Index out of bounds: old_index={old_index}, items count={items_count}",
-    "移动项: ID={item_id}, title={item_title}": "Moving item: ID={item_id}, title={item_title}",
-    "移动成功: ID={item_id}, before={before_id}, after={after_id}": "Move succeeded: ID={item_id}, before={before_id}, after={after_id}",
     "拖拽内容移动失败": "Drag-and-drop item move failed",
 
     # clipboard_window.py

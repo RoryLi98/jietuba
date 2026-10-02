@@ -134,8 +134,6 @@ class ClipboardItemDelegate(QStyledItemDelegate):
     def set_image_size(self, size: str):
         self._image_row_span = IMAGE_ROW_SPANS.get(size, 1)
 
-    def set_show_shortcuts(self, show: bool):
-        self._show_shortcuts = show
 
     def set_pick_keys(self, keys: str):
         """直选粘贴键，按顺序标在前几行上。"""
@@ -170,9 +168,6 @@ class ClipboardItemDelegate(QStyledItemDelegate):
             "shortcut_text": _hex_to_qcolor(c.shortcut_key_color),
         }
 
-    @classmethod
-    def clear_thumb_cache(cls):
-        cls._thumb_cache.clear()
 
     def _rebuild_font_cache(self):
         """预创建 paint 中需要的所有 QFont 和 QFontMetrics"""

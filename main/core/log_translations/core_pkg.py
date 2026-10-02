@@ -1,11 +1,6 @@
 """main/core/ 目录下 log_* 调用的中→英翻译表。"""
 
 TRANSLATIONS: dict[str, str] = {
-    # core/logger.py 自身的启动/关闭诊断信息
-    "\n{sep}\nJietuba 截图工具 - 运行日志\n启动时间: {start_time}\n日志目录: {log_dir}\n"
-    "日志级别: {file_level} (文件) / {console_level} (控制台)\n{sep}\n":
-        "\n{sep}\nJietuba Screenshot Tool - Runtime Log\nStarted: {start_time}\nLog directory: {log_dir}\n"
-        "Log level: {file_level} (file) / {console_level} (console)\n{sep}\n",
     "[WARN] [Logger] 日志功能已禁用": "[WARN] [Logger] Logging is disabled",
     "[WARN] [Logger] 日志系统已经初始化": "[WARN] [Logger] Logging system already initialized",
     "[OK] [Logger] 日志系统启动成功，日志文件：{log_path}": "[OK] [Logger] Logging system started, log file: {log_path}",
@@ -30,20 +25,11 @@ TRANSLATIONS: dict[str, str] = {
     "剪切板: Win32 写入失败 ({e})": "Clipboard: Win32 write failed ({e})",
     "图像投递: 图像为空，跳过": "Image delivery: image is empty, skipping",
     "图像投递: 未请求复制或保存，跳过": "Image delivery: neither copy nor save was requested, skipping",
-    "图像投递: 非 Windows 平台，剪贴板仍走主线程回退": "Image delivery: non-Windows platform, clipboard still falls back to the main thread",
-    "异步图像投递完成 clipboard={clipboard_ok} save={save_ok} "
-    "clipboard={clipboard_ms:.1f}ms save={save_ms:.1f}ms total={total_ms:.1f}ms":
-        "Async image delivery complete clipboard={clipboard_ok} save={save_ok} "
-        "clipboard={clipboard_ms:.1f}ms save={save_ms:.1f}ms total={total_ms:.1f}ms",
     "图像投递: 后台任务失败 ({exc})": "Image delivery: background task failed ({exc})",
     "图像投递: 预留保存路径失败，剪贴板不写入文件路径 ({exc})":
         "Image delivery: failed to reserve a save path, the clipboard carries no file path ({exc})",
     "剪贴板: {path_name} 写入时剪贴板被占用，准备重试 {attempt_next}/{total_attempts}":
         "Clipboard: {path_name} write found the clipboard busy, retrying {attempt_next}/{total_attempts}",
-    "已复制到剪切板 (Win32) "
-    "dibv5={dibv5_ms:.1f}ms png={png_ms:.1f}ms win32={win32_ms:.1f}ms":
-        "Copied to clipboard (Win32) "
-        "dibv5={dibv5_ms:.1f}ms png={png_ms:.1f}ms win32={win32_ms:.1f}ms",
     "已复制到剪切板 (Win32 CF_DIBV5 + PNG)": "Copied to clipboard (Win32 CF_DIBV5 + PNG)",
     "已复制到剪切板 (Qt)": "Copied to clipboard (Qt)",
 
@@ -78,8 +64,6 @@ TRANSLATIONS: dict[str, str] = {
     "工具栏预加载失败: {e}": "Toolbar preload failed: {e}",
     "开始预加载截图相关模块...": "Starting preload of screenshot-related modules...",
     "mss 模块已加载并预热": "mss module loaded and warmed up",
-    "canvas 模块已加载": "canvas module loaded",
-    "tools 模块已加载": "tools module loaded",
     "win32gui 模块已加载": "win32gui module loaded",
     "win32gui 未安装，跳过": "win32gui not installed, skipping",
     "win32clipboard 模块已加载": "win32clipboard module loaded",
@@ -88,13 +72,8 @@ TRANSLATIONS: dict[str, str] = {
     "预热PNG编码器": "Warming up PNG encoder",
     "UI 组件已加载": "UI components loaded",
     "CaptureService 已加载": "CaptureService loaded",
-    "GIF 模块已加载": "GIF module loaded",
-    "GIF 模块预加载失败: {e}": "GIF module preload failed: {e}",
-    "长截图模块已加载": "Scrolling screenshot module loaded",
-    "长截图模块预加载失败: {e}": "Scrolling screenshot module preload failed: {e}",
     "截图模块预加载完成": "Screenshot module preload complete",
     "截图模块预加载失败: {e}": "Screenshot module preload failed: {e}",
-    "OCR 功能已禁用，跳过预加载": "OCR feature disabled, skipping preload",
     "开始在后台线程预加载 OCR 模块和引擎...": "Starting background-thread preload of OCR module and engine...",
     "OCR 模块不可用（无OCR版本）": "OCR module unavailable (non-OCR build)",
     "OCR 预加载成功": "OCR preload succeeded",
@@ -133,8 +112,6 @@ TRANSLATIONS: dict[str, str] = {
     "热键回调 id={hotkey_id}": "Hotkey callback id={hotkey_id}",
     "系统组合键回调 name={name}": "Taken-over system hotkey callback name={name}",
     "ShortcutManager 已安装（KeyPress + WM_HOTKEY）": "ShortcutManager installed (KeyPress + WM_HOTKEY)",
-    "注册 handler: {handler_name} (优先级 {priority})，"
-    "当前共 {handler_count} 个": "Registered handler: {handler_name} (priority {priority}), {handler_count} total",
     "注销 handler: {handler_name}": "Unregistered handler: {handler_name}",
     "按键被 {handler_name} 消费 (key=0x{key_hex:X})": "Key consumed by {handler_name} (key=0x{key_hex:X})",
     "系统热键被 {handler_name} 拦截 (id={hotkey_id})": "System hotkey intercepted by {handler_name} (id={hotkey_id})",
