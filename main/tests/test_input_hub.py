@@ -124,3 +124,29 @@ def test_real_hub_starts_without_low_level_hooks_and_closes_promptly(qapp):
     hub_module.close_input_hub()
     hub_module.input_hub()
     hub_module.close_input_hub()
+
+
+class TestCloseBoundedJoin:
+    """close() 的 join 必须有界：原生线程卡死不能拖住退出路径的 GUI 线程。"""
+
+    def test_close_returns_even_if_event_thread_hangs(self, qapp, monkeypatch):
+        from core.input_hub import InputHub
+
+        class _StuckNative:
+            """close() 后 next_event 永不返回的病态原生侧。"""
+
+            def close(self):
+                pass
+
+            def next_event(self):
+                import time
+
+                time.sleep(5)
+                return None
+
+        hub = InputHub(_StuckNative())
+        hub.start()
+        t0 = time.monotonic()
+        hub.close()
+        elapsed = time.monotonic() - t0
+        assert elapsed < 3.0, f"close() 应在超时上限附近返回，实际 {elapsed:.1f}s"

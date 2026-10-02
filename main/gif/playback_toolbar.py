@@ -427,6 +427,15 @@ class PlaybackToolbar(QWidget):
     def _on_trim_changed(self, start: int, end: int):
         self.trim_changed.emit(start, end)
 
+    def set_export_busy(self, busy: bool):
+        """导出进行中禁用保存/复制按钮。
+
+        合成走嵌套事件循环，期间点击仍会派发；不禁用的话二次导出会对同一
+        FrameStore 并发跑两条 Rust 编码流水线（取消标志互相踩）。
+        """
+        for btn in (self._save_btn, self._copy_btn):
+            btn.setEnabled(not busy)
+
     def _on_save_clicked(self):
         self.save_requested.emit()
 

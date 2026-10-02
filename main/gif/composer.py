@@ -14,13 +14,13 @@ import os
 import tempfile
 from typing import Optional
 
-from PySide6.QtCore import QObject, QThread, Signal, Qt, QEventLoop
+from PySide6.QtCore import QObject, QThread, QTimer, Signal, Qt, QEventLoop
 from PySide6.QtWidgets import (QApplication, QFrame,
                               QProgressBar)
 from ui.dialogs import show_warning_dialog
 
 from ._widgets import PROGRESS_BAR_STYLE
-from core.logger import log_info, log_error, log_exception, T
+from core.logger import log_info, log_error, log_exception, log_warning, T
 
 try:
     import gifrecorder
@@ -195,6 +195,8 @@ class _ComposeWorker(QObject):
 # ── 进度浮层（无边框纯进度条） ──────────────────────────
 
 class ComposerProgressDialog(QFrame):
+    # 进度静默看门狗阈值：分批导出每批都会报一次进度，60s 无进度基本可判卡死
+    _PROGRESS_SILENCE_TIMEOUT_MS = 60_000
     """
     无边框纯进度条浮层，样式与录制结束等待进度条保持一致。
     居中于 parent 窗口；合成完成/取消后 loop.quit() 解除阻塞。
@@ -222,6 +224,11 @@ class ComposerProgressDialog(QFrame):
 
         self._thread: Optional[QThread] = None
         self._worker: Optional[_ComposeWorker] = None
+        # 进度静默看门狗：合成卡死（原生侧既不报错也不取消）时 _loop.exec()
+        # 会永久挂起 GUI 线程。超过阈值没有任何进度就取消导出并强制退出。
+        self._watchdog = QTimer(self)
+        self._watchdog.setSingleShot(True)
+        self._watchdog.timeout.connect(self._on_progress_silence)
 
     def _center_on(self, parent, center_pos=None):
         if center_pos is not None:
@@ -264,8 +271,10 @@ class ComposerProgressDialog(QFrame):
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_finished)
         self._thread.start()
+        self._watchdog.start(self._PROGRESS_SILENCE_TIMEOUT_MS)
 
     def _on_progress(self, done: int, total: int):
+        self._watchdog.start(self._PROGRESS_SILENCE_TIMEOUT_MS)
         if total <= 0:
             if self._bar.maximum() != 0:
                 self._bar.setRange(0, 0)
@@ -275,6 +284,7 @@ class ComposerProgressDialog(QFrame):
             self._bar.setValue(int(done / total * 100))
 
     def _on_finished(self, ok: bool, result):
+        self._watchdog.stop()
         self._ok = ok
         self._result = result
         # 先释放 worker 对 store 的引用，避免多余的 Arc 引用延迟释放
@@ -300,6 +310,25 @@ class ComposerProgressDialog(QFrame):
                 "未找到 gifrecorder 模块，无法导出 GIF。\n\n"
                 "请确认 gifrecorder 已正确安装。",
             )
+
+    def _on_progress_silence(self):
+        """进度静默超时：先取消导出（正常取消会经 finished 走完整清理），
+        同时强制退出事件循环兜底——原生侧真卡死时 finished 不会再来了。
+
+        强制退出路径不动 self._thread：线程还卡在原生调用里，deleteLater/
+        wait 都不安全；线程对象泄漏一次属于可接受的病理情形，日志会说明。
+        """
+        log_warning(
+            T("GIF 导出 {timeout_ms}ms 无任何进度，疑似卡死：已请求取消并关闭进度框",
+              timeout_ms=self._PROGRESS_SILENCE_TIMEOUT_MS),
+            "GIF",
+        )
+        if self._worker is not None:
+            try:
+                self._worker.cancel()
+            except Exception as e:
+                log_exception(e, T("看门狗取消 GIF 导出"))
+        self._loop.quit()
 
     @staticmethod
     def run_compose(path: Optional[str] = None,

@@ -1139,20 +1139,43 @@ class _WatchGrabber(QThread):
         return sample
 
     def run(self):
+        # 任何一轮抓帧/签名抛意外异常都只丢弃本轮，监视线程不能悄悄死掉——
+        # 它一死整个内容感知长截图就断了采集来源，且无人察觉
+        last_error_log = 0.0
         while not self.isInterruptionRequested():
             with self._lock:
                 interval = self._interval_ms
-            image_sig = self._grab_and_sign()
-            if image_sig is not None:
-                with self._lock:
-                    self._sample = image_sig
-            # 分片睡眠：间隔调整与停止请求都能及时生效
-            end = time.monotonic() + interval / 1000.0
-            while not self.isInterruptionRequested():
-                remain = end - time.monotonic()
-                if remain <= 0:
-                    break
-                self.msleep(min(50, max(1, int(remain * 1000))))
+            try:
+                image_sig = self._grab_and_sign()
+                if image_sig is not None:
+                    with self._lock:
+                        self._sample = image_sig
+            except Exception as e:
+                # HDR→mss 回退在 _grab 内部处理；到这里的是意外异常
+                # （显示器拔掉、驱动报错等）。限流记日志，按当前节奏重试。
+                now = time.monotonic()
+                if now - last_error_log > 3.0:
+                    last_error_log = now
+                    _log_stitch(T("[WARN] 监视抓帧异常，本轮跳过: {e}", e=e), force=True)
+            self._interruptible_sleep(interval)
+
+    def _interruptible_sleep(self, interval_ms):
+        """分片睡眠：停止请求与「间隔调小」都能及时生效。
+
+        空闲档（最长 1200ms）里内容突然动起来时，_set_watch_interval 会把
+        间隔调回 90ms——入睡后对比当前值，发现调小就立即醒来抓帧，首帧
+        延迟从秒级回到 ~50ms；调大不打断，免得节奏被频繁变更搅乱。
+        """
+        end = time.monotonic() + interval_ms / 1000.0
+        while not self.isInterruptionRequested():
+            with self._lock:
+                current = self._interval_ms
+            if current < interval_ms:
+                break
+            remain = end - time.monotonic()
+            if remain <= 0:
+                break
+            self.msleep(min(50, max(1, int(remain * 1000))))
 
     def _grab_and_sign(self):
         image = self._grab()

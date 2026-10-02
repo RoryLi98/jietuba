@@ -292,3 +292,30 @@ class TestSpeedMultiplierClamp:
     def test_speed_multiplier_passed_through_when_valid(self, qapp, fake_store):
         worker = _ComposeWorker(path="x.gif", store=fake_store, speed_multiplier=2.5)
         assert worker._speed_multiplier == 2.5
+
+
+class TestProgressSilenceWatchdog:
+    """进度静默看门狗：合成卡死时取消导出并退出事件循环，GUI 不能被挂死。"""
+
+    def test_silence_cancels_worker(self, qapp):
+        from gif.composer import ComposerProgressDialog
+
+        dlg = ComposerProgressDialog()
+        try:
+            dlg._worker = MagicMock()
+            dlg._on_progress_silence()
+            dlg._worker.cancel.assert_called_once()
+        finally:
+            dlg.deleteLater()
+
+    def test_progress_feeds_the_watchdog(self, qapp):
+        from gif.composer import ComposerProgressDialog
+
+        dlg = ComposerProgressDialog()
+        try:
+            dlg._watchdog.start(1000)
+            dlg._on_progress(1, 10)
+            remaining = dlg._watchdog.remainingTime()
+            assert remaining > 30_000, "收到进度后看门狗应被重置到完整阈值"
+        finally:
+            dlg.deleteLater()

@@ -48,6 +48,7 @@ class PlaybackController(QObject):
         self._cursor_overlay: Optional[CursorOverlay] = None
         self._cursor_export_enabled: bool = True
         self._export_speed: float = 1.0   # 导出速度倍率，与播放速度同步
+        self._composing = False           # 导出进行中标志（合成用嵌套事件循环，可重入）
 
         # 由 GifRecordWindow 注入的上下文
         self._rect = QRect()
@@ -384,6 +385,22 @@ class PlaybackController(QObject):
 
     def _compose_and_export(self, output_path: str, copy_to_clipboard: bool):
         """弹出进度框导出 GIF，完成后写文件或复制到剪贴板"""
+        # 合成期间事件循环照常派发点击，必须有重入守卫：同一 FrameStore
+        # 并发两条 Rust 导出流水线会互相踩取消标志
+        if self._composing:
+            log_warning(T("GIF 正在导出中，忽略重复请求"), "GIF")
+            return
+        self._composing = True
+        if self._playback_toolbar is not None:
+            self._playback_toolbar.set_export_busy(True)
+        try:
+            self._compose_and_export_inner(output_path, copy_to_clipboard)
+        finally:
+            self._composing = False
+            if self._playback_toolbar is not None:
+                self._playback_toolbar.set_export_busy(False)
+
+    def _compose_and_export_inner(self, output_path: str, copy_to_clipboard: bool):
         frames = self._recorder.frames
         store = self._recorder.store
         if store:

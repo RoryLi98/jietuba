@@ -226,3 +226,53 @@ class TestContentAwareWatcher:
         s2 = window._signature(_make_pixmap(60))
         assert not window._sig_similar(s1, s2), "真实滚动被判成了同一画面"
         assert window._sig_similar(s1, s1), "相同画面被判成了不同"
+
+
+class TestWatchGrabberRobustness:
+    """监视线程的两条鲁棒性约束：异常不致死、间隔调小立即生效。"""
+
+    def test_grab_exception_does_not_kill_the_thread(self, qapp, monkeypatch):
+        """抓帧抛意外异常只丢本轮，监视线程必须活着（死了没人察觉）。"""
+        from stitch.scroll_window import _WatchGrabber
+
+        grabber = _WatchGrabber(QRect(0, 0, 10, 10), 32, 20)
+        calls = {"n": 0}
+
+        def _boom():
+            calls["n"] += 1
+            raise RuntimeError("display gone")
+
+        monkeypatch.setattr(grabber, "_grab", _boom)
+        grabber.start()
+        try:
+            deadline = time.time() + 0.5
+            while time.time() < deadline and calls["n"] < 3:
+                time.sleep(0.01)
+            assert calls["n"] >= 2, "异常后应按节奏重试"
+            assert grabber.isRunning(), "监视线程不能被异常杀死"
+            assert grabber.latest() is None
+        finally:
+            grabber.requestInterruption()
+            grabber.wait(2000)
+
+    def test_interval_reduction_interrupts_sleep(self, qapp):
+        """空闲长睡眠中把间隔调小 → 立即醒来（首帧延迟不被 1.2s 拖住）。"""
+        from stitch.scroll_window import _WatchGrabber
+
+        grabber = _WatchGrabber(QRect(0, 0, 10, 10), 32, 1200)
+        t0 = time.monotonic()
+        grabber.set_interval(90)  # 模拟内容动起来
+        grabber._interruptible_sleep(1200)
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        assert elapsed_ms < 200, f"调小间隔应立即结束睡眠，实际 {elapsed_ms:.0f}ms"
+
+    def test_interval_increase_does_not_abort_sleep(self, qapp):
+        """调大不打断当前睡眠（免得节奏被频繁变更搅乱）。"""
+        from stitch.scroll_window import _WatchGrabber
+
+        grabber = _WatchGrabber(QRect(0, 0, 10, 10), 32, 50)
+        t0 = time.monotonic()
+        grabber.set_interval(1200)  # 调大：本次仍睡满
+        grabber._interruptible_sleep(50)
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        assert elapsed_ms >= 45, f"调大不应提前唤醒，实际 {elapsed_ms:.0f}ms"

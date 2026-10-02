@@ -9,7 +9,7 @@ import threading
 
 from PySide6.QtCore import QObject, Signal
 
-from core.logger import log_exception
+from core.logger import T, log_exception, log_warning
 
 
 class InputHub(QObject):
@@ -68,7 +68,12 @@ class InputHub(QObject):
         self._closed = True
         self.native.close()
         if self._thread is not None:
-            self._thread.join()
+            # 有界等待：正常情况 close() 后 next_event 交完队列即返回 None；
+            # 原生侧万一卡住，不能拖着调用方（退出路径的 GUI 线程）一起挂死。
+            # 线程本身是 daemon，超时后随解释器收尾。
+            self._thread.join(timeout=2.0)
+            if self._thread.is_alive():
+                log_warning(T("InputHub 事件线程 2 秒内未随 close() 结束，放弃等待"), "InputHub")
             self._thread = None
 
 
