@@ -22,7 +22,7 @@ from core.logger import (
 )
 
 # ── 全局版本号 ────────────────────────────────────────────
-APP_VERSION = "2.1.2"
+APP_VERSION = "2.1.3"
 
 
 def create_fallback_app_icon():
@@ -570,7 +570,7 @@ class MainApp(QObject):
                     failed_hotkeys.append((self.tr("Clipboard (2)"), clipboard_hotkey_2))
 
             # Win+V 被系统占着，RegisterHotKey 注册不上，只能由输入钩子接管
-            if self.config_manager.get_app_setting("clipboard_take_over_win_v", False):
+            if self.config_manager.get_app_setting("clipboard_take_over_win_v"):
                 if not self.hotkey_system.register_hook_hotkey(
                     "clipboard", ["win"], ord("V"), self.open_clipboard_window
                 ):
@@ -781,6 +781,8 @@ class MainApp(QObject):
                     prefetched_rect=rect,
                     prefetched_cursor=cursor,
                 )
+                # 持久窗口只连接一次，清理完会话后恢复全局拖选。
+                self.screenshot_window.session_ended.connect(self.quick_capture.sync_input_availability)
         finally:
             self.quick_capture.set_capture_pending(False)
     
