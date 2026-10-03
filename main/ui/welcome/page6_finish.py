@@ -12,7 +12,7 @@ from PySide6.QtCore import Qt, QTimer, QElapsedTimer, QEasingCurve, QPointF
 from PySide6.QtGui import QPainter, QColor, QPen, QPainterPath
 from core import safe_event
 from core.i18n import make_tr
-from core.logger import log_info, log_exception, T
+from core.logger import log_info, log_exception, T, log_warning
 from core.ui_theme import set_own_style
 
 if __package__:
@@ -242,19 +242,23 @@ class FinishPage(BasePage):
     _AUTOSTART_APP_NAME = "Jietuba"
 
     @classmethod
-    def _get_exe_path(cls) -> str:
-        """获取当前运行的可执行文件路径。
-        打包后（PyInstaller frozen）返回 .exe 路径；
-        开发模式下返回 python.exe + 主脚本路径。
+    def _get_exe_path(cls) -> "str | None":
+        """获取应写入自启动的可执行文件路径；拿不到返回 None。
+
+        打包后（PyInstaller frozen）返回 .exe 自身（windowed，无控制台）。
+        开发模式下绝不能注册 python.exe——那是控制台版解释器，开机自启会
+        弹出命令行窗口，关掉它应用也跟着退出；此时回退到仓库里已构建的
+        dist\jietuba_pp.exe，连它都没有则由调用方拒绝开启自启动。
         """
         import sys, os
         if getattr(sys, 'frozen', False):
             return sys.executable
-        # 开发模式：python.exe main/main_app.py
-        main_script = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "main_app.py")
+        built = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "dist", "jietuba_pp.exe")
         )
-        return f'"{sys.executable}" "{main_script}"'
+        if os.path.exists(built):
+            return f'"{built}"'
+        return None
 
 
     @classmethod
@@ -270,6 +274,12 @@ class FinishPage(BasePage):
             )
             if enabled:
                 exe_path = cls._get_exe_path()
+                if not exe_path:
+                    log_warning(
+                        T("未找到可执行文件（先运行打包脚本生成 dist\jietuba_pp.exe），无法开启自启动"),
+                        "page6",
+                    )
+                    return False
                 winreg.SetValueEx(key, cls._AUTOSTART_APP_NAME, 0, winreg.REG_SZ, exe_path)
                 log_info(T("已写入开机自启注册表项: {exe_path}", exe_path=exe_path), "page6")
             else:
@@ -279,8 +289,10 @@ class FinishPage(BasePage):
                 except FileNotFoundError:
                     pass  # 不存在则忽略
             winreg.CloseKey(key)
+            return True
         except Exception as e:
             log_exception(e, T("设置开机自启"))
+        return False
 
     # ── 桌面快捷方式辅助 ─────────────────────────────────
 

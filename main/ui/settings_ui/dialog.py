@@ -1127,7 +1127,9 @@ class SettingsDialog(FrostedFramelessDialog):
             from ..welcome.page6_finish import FinishPage as _FP
             # 开关状态落配置，下次打开按配置显示（未设置过时默认开启）
             self.config_manager.set_app_setting("autostart_enabled", self.autostart_toggle.isChecked())
-            _FP._set_autostart(self.autostart_toggle.isChecked())
+            if _FP._set_autostart(self.autostart_toggle.isChecked()) is False:
+                # 找不到可执行文件等原因：开关弹回，保持与注册表一致
+                self.autostart_toggle.setChecked(not self.autostart_toggle.isChecked())
         if hasattr(self, 'show_main_window_toggle'):
             self.config_manager.set_show_main_window(self.show_main_window_toggle.isChecked())
         if hasattr(self, 'pin_auto_toolbar_toggle'):
