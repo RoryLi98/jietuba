@@ -521,7 +521,22 @@ def test_welcome_wizard_scales_its_own_window_and_shared_widgets(qapp):
 
     mock = _dev_bootstrap()
 
-    get_dialog_scale().set_percent(80)
+    # 构建向导会按 mock 配置给 QCoreApplication 装 EN translator——
+    # 先卸下再恢复"无 translator"的原态，否则泄漏到后续测试
+    # （welcome_clipboard 以中文为源语言，断言依赖无翻译态）
+    from PySide6.QtCore import QCoreApplication
+    from core.i18n import I18nManager
+
+    # _translator 挂在单例实例上（XmlTranslator 是 QTranslator 子类，读 xml）；
+    # 读类属性拿到的是 None——这正是首轮修复踩的坑
+    i18n_instance = I18nManager.instance()
+    original_translator = i18n_instance._translator
+    if original_translator is not None:
+        QCoreApplication.removeTranslator(original_translator)
+        i18n_instance._translator = None
+    scale = get_dialog_scale()
+    original_percent = scale.percent
+    scale.set_percent(80)
     small = WelcomeWizard(mock)
     try:
         assert small.width() == dialog_scaled(WelcomeWizard.WINDOW_W)
@@ -531,7 +546,7 @@ def test_welcome_wizard_scales_its_own_window_and_shared_widgets(qapp):
         small.hide()
         small.deleteLater()
 
-    get_dialog_scale().set_percent(150)
+    scale.set_percent(150)
     large = WelcomeWizard(mock)
     try:
         assert large.width() == dialog_scaled(WelcomeWizard.WINDOW_W)
@@ -541,6 +556,14 @@ def test_welcome_wizard_scales_its_own_window_and_shared_widgets(qapp):
     finally:
         large.hide()
         large.deleteLater()
+        scale.set_percent(original_percent)  # 恢复：污染后续测试的对话框缩放
+        # 恢复 translator 原态：先卸掉向导新装的，再装回原来的（若有）
+        if I18nManager.instance()._translator is not None:
+            QCoreApplication.removeTranslator(I18nManager.instance()._translator)
+            I18nManager.instance()._translator = None
+        if original_translator is not None:
+            QCoreApplication.installTranslator(original_translator)
+            I18nManager.instance()._translator = original_translator
 
 
 # ---------------------------------------------------------------------------

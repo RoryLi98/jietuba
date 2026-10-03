@@ -45,7 +45,6 @@ class _StepItem(QFrame):
     def __init__(self, index: int, parent=None):
         super().__init__(parent)
         self._index = index
-        self._hovered = False
         self.setObjectName("StepItem")
         self.setFixedHeight(dialog_scaled(52))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -83,10 +82,15 @@ class _StepItem(QFrame):
         self._apply_welcome_theme()
 
     def _apply_welcome_theme(self, _tokens=None):
+        """按步骤状态（active/completed/idle）整体设一次样式。
+
+        hover/focus 的视觉变化全部由 QSS 伪状态承担——原先 enter/leave/focus
+        每次都整段重设样式表（三份大段 f-string 重解析重绘），鼠标扫过侧栏
+        会一顿一顿。状态切换仍走这里（低频），伪状态变化由 Qt 免费处理。
+        """
         theme = welcome_theme()
         active = getattr(self, "_active", False)
         completed = getattr(self, "_completed", False)
-        interactive = self._hovered or self.hasFocus()
         s = dialog_scaled
         if active:
             self.setStyleSheet(f"""
@@ -112,13 +116,15 @@ class _StepItem(QFrame):
                 }}
             """)
         elif completed:
-            background = theme.panel_subtle if interactive else "transparent"
-            border = theme.border if interactive else "transparent"
             self.setStyleSheet(f"""
                 #StepItem {{
-                    background: {background};
-                    border: 1px solid {border};
+                    background: transparent;
+                    border: 1px solid transparent;
                     border-radius: {s(10)}px;
+                }}
+                #StepItem:hover, #StepItem:focus {{
+                    background: {theme.panel_subtle};
+                    border: 1px solid {theme.border};
                 }}
                 #StepNumber {{
                     background: {theme.panel};
@@ -137,13 +143,15 @@ class _StepItem(QFrame):
                 }}
             """)
         else:
-            background = theme.panel_subtle if interactive else "transparent"
-            border = theme.border if interactive else "transparent"
             self.setStyleSheet(f"""
                 #StepItem {{
-                    background: {background};
-                    border: 1px solid {border};
+                    background: transparent;
+                    border: 1px solid transparent;
                     border-radius: {s(10)}px;
+                }}
+                #StepItem:hover, #StepItem:focus {{
+                    background: {theme.panel_subtle};
+                    border: 1px solid {theme.border};
                 }}
                 #StepNumber {{
                     background: transparent;
@@ -161,24 +169,6 @@ class _StepItem(QFrame):
                     font-weight: 500;
                 }}
             """)
-
-    def enterEvent(self, event):
-        self._hovered = True
-        self._apply_welcome_theme()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        self._hovered = False
-        self._apply_welcome_theme()
-        super().leaveEvent(event)
-
-    def focusInEvent(self, event):
-        self._apply_welcome_theme()
-        super().focusInEvent(event)
-
-    def focusOutEvent(self, event):
-        self._apply_welcome_theme()
-        super().focusOutEvent(event)
 
     def mouseReleaseEvent(self, event):
         if (

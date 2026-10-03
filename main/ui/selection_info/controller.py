@@ -12,7 +12,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, QTimer
+from PySide6.QtCore import QRectF, QThread, QTimer, Signal
+from PySide6.QtGui import QImage
 from core import log_debug, T
 from capture.capture_service import CaptureService
 
@@ -20,6 +21,30 @@ from .hook_manager import HookManager
 from .lock_ratio import LockRatioLogic
 from .rounded_corners import RoundedCornersLogic
 from .border_shadow import BorderShadowLogic
+
+
+class _BackgroundRefreshWorker(QThread):
+    """长按刷新的抓帧线程：同步截屏不再占死 GUI 线程。
+
+    CaptureService 线程安全（HDR 会话在专用线程、mss BitBlt 可任意线程），
+    quick capture 与主截图均已验证同一路子。空图表示本轮失败，调用方据此
+    释放 in-flight 标记。
+    """
+
+    captured = Signal(object)
+
+    def __init__(self, cursor):
+        super().__init__()
+        self._cursor = cursor
+        self._service = CaptureService()
+
+    def run(self):
+        try:
+            image, _rect = self._service.capture_all_screens(self._cursor)
+        except Exception as e:
+            log_debug(T("刷新背景失败: {e}", e=e))
+            image = QImage()
+        self.captured.emit(image)
 
 
 class SelectionInfoController:
@@ -84,6 +109,8 @@ class SelectionInfoController:
         self._long_press_timer.setInterval(300)   # 按住 300ms 进入连续模式
         self._long_press_timer.timeout.connect(self._start_continuous_refresh)
         self._refresh_pending = False             # 单击标记
+        self._refresh_in_flight = False           # 后台抓帧在途标记（背压）
+        self._refresh_worker = None
 
         self._connect()
 
@@ -188,7 +215,12 @@ class SelectionInfoController:
         self._refresh_timer.start()
 
     def _do_refresh_background(self):
-        """执行一次背景刷新：首次调用时设置隐身，然后截屏更新背景"""
+        """长按刷新的一拍：截屏在工作线程完成，GUI 线程只收图上屏。
+
+        原先 30ms 一拍的同步截屏（实测 20ms+，含引擎设置读取与全屏拷贝）
+        把 GUI 线程占死；挪到线程后用 in-flight 标记做背压——上一帧没
+        回来就跳过本拍，节奏自适应帧率。
+        """
         try:
             win = self._parent_window
             # 窗口已关闭或正在关闭时不再刷新
@@ -200,14 +232,30 @@ class SelectionInfoController:
             if not getattr(win, '_exclude_from_capture_set', False):
                 win._set_exclude_from_capture(True)
                 win._exclude_from_capture_set = True
-            # 此时指针正按在刷新按钮上，沿用会话开始时记下的那份
-            new_image, _ = CaptureService().capture_all_screens(
-                getattr(win, '_capture_cursor', None)
-            )
-            win.original_image = new_image
-            win.scene.background.update_image(new_image)
+            if self._refresh_in_flight:
+                return  # 上一帧还在路上：背压跳过本拍
+            self._refresh_in_flight = True
+            worker = _BackgroundRefreshWorker(getattr(win, '_capture_cursor', None))
+            # 以窗口（QWidget）为接收者：信号队列投递回 GUI 线程
+            worker.captured.connect(win._on_background_refresh_captured)
+            worker.finished.connect(worker.deleteLater)
+            self._refresh_worker = worker  # 持引用防 GC
+            worker.start()
         except Exception as e:
+            self._refresh_in_flight = False
             log_debug(T("刷新背景失败: {e}", e=e))
+
+    def _on_refresh_delivered(self, image):
+        """工作线程送回新背景（经窗口槽转发，此刻已在 GUI 线程）。"""
+        self._refresh_in_flight = False
+        self._refresh_worker = None
+        if image.isNull():
+            return
+        win = self._parent_window
+        if win is None or getattr(win, '_is_closing', False):
+            return
+        win.original_image = image
+        win.scene.background.update_image(image)
 
     # ------------------------------------------------------------------
     # 清理

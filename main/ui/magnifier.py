@@ -40,6 +40,7 @@ class MagnifierOverlay(QWidget):
 	GRID_MIN_CELL = 5
 
 	def __init__(self, parent: QWidget, scene, view, config_manager=None):
+		self._zoom_dirty = False
 		super().__init__(parent)
 		self.scene = scene
 		self.view = view
@@ -318,6 +319,13 @@ class MagnifierOverlay(QWidget):
 		QApplication.clipboard().setText(text)
 		return True
 	
+	def hideEvent(self, event):
+		"""截图会话结束：把连按攒下的倍数一次性落盘"""
+		if getattr(self, "_zoom_dirty", False) and self.config_manager:
+			self._zoom_dirty = False
+			self.config_manager.qsettings.setValue("app/magnifier_zoom", self._zoom_factor)
+		super().hideEvent(event)
+
 	def adjust_zoom(self, delta: int):
 		"""调整放大倍数
 		
@@ -326,9 +334,9 @@ class MagnifierOverlay(QWidget):
 		"""
 		self._zoom_factor += delta * 0.25
 		self._zoom_factor = max(self._zoom_min, min(self._zoom_max, self._zoom_factor))
-		# 保存到配置
-		if self.config_manager:
-			self.config_manager.qsettings.setValue("app/magnifier_zoom", self._zoom_factor)
+		# 只标脏不落盘：连按 PgUp/PgDn 时每档一次 QSettings 写入纯属浪费，
+		# 会话结束（hideEvent）时统一保存
+		self._zoom_dirty = True
 		log_debug(T("调整倍数: {zoom_factor:.2f}x", zoom_factor=self._zoom_factor), "Magnifier")
 		# 清空缓存，因为缩放倍数变了
 		self._last_sample_pt = None

@@ -528,9 +528,15 @@ def setup_logger(config_manager=None):
     logger.set_level(log_level)
     logger.set_console_level(log_level)
     
-    # 清理过期日志文件
+    # 清理过期日志文件：挪到后台线程——冷盘/杀软实时扫描下这是一次可感知的
+    # 磁盘 I/O，不该挡在 GUI 起来之前。目录扫描只删过期文件，不碰活动日志。
     if retention_days > 0:
-        cleanup_old_logs(log_dir, retention_days)
+        threading.Thread(
+            target=cleanup_old_logs,
+            args=(log_dir, retention_days),
+            name="log-cleanup",
+            daemon=True,
+        ).start()
 
 
 def _trim_fixed_log(file_path: Path, max_bytes: int):

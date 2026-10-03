@@ -24,6 +24,8 @@ class _POINT(ctypes.Structure):
 
 from concurrent.futures import Future
 
+import threading
+
 from PySide6.QtCore import QObject, QTimer, QRect, QThread, Qt, Signal
 
 from capture.capture_service import lend_hdr_session, return_hdr_session, uses_hdr_engine
@@ -96,6 +98,9 @@ class FrameRecorder(QObject):
 
     frame_captured = Signal(int)   # 当前总帧数
     state_changed  = Signal(str)   # "IDLE" / "RECORDING" / ...
+    # 后台预备完成/失败（会话或 (session, 异常)），队列回 GUI 线程处理
+    session_ready = Signal(object)
+    start_failed = Signal(object)
     limit_reached  = Signal()      # 达到最大录制时长，自动触发停止
     stop_finished  = Signal()      # stop_async 完成后发射
 
@@ -119,6 +124,9 @@ class FrameRecorder(QObject):
         self._store = None            # gifrecorder.FrameStore
         self._session = None          # gifrecorder.RecordSession
         self._prepared = None         # Future[RecordSession]，见 prepare()
+        self._starting = False        # 后台预备会话进行中（点录制后的等待期）
+        self.session_ready.connect(self._on_session_ready)
+        self.start_failed.connect(self._on_start_failed)
         self._hdr_lent = False        # 截图会话是否借给了录制线程
         self._rec_width: int = 0
         self._rec_height: int = 0
@@ -198,6 +206,7 @@ class FrameRecorder(QObject):
 
     def release(self):
         """录制窗口关闭时调用：停掉预备或录制中的线程并交还截图会话，都在后台完成。"""
+        self._starting = False
         self._timer.stop()
         self._stop_scroll_listener()
         prepared, self._prepared = self._prepared, None
@@ -261,15 +270,34 @@ class FrameRecorder(QObject):
         # 取出预备好的录制线程；没预备过就现在预备，出帧会晚一些
         self.prepare()
         prepared, self._prepared = self._prepared, None
-        try:
-            self._session = prepared.result()
-            self._session.begin(self._store, left, top, w, h, self._fps)
-        except Exception as e:
-            log_error(T("RecordSession 启动失败: {e}", e=e), "GIF")
-            if self._session is not None:
-                self._session.stop()
-            self._store = None
-            self._session = None
+        if prepared.done():
+            # 常规路径：窗口打开时早已预备好，无需等待，同步进入录制
+            try:
+                self._session = prepared.result()
+                self._session.begin(self._store, left, top, w, h, self._fps)
+            except Exception as e:
+                log_error(T("RecordSession 启动失败: {e}", e=e), "GIF")
+                if self._session is not None:
+                    self._session.stop()
+                self._store = None
+                self._session = None
+                return
+        else:
+            # 窗口刚开就点录制：借会话 + prepare 还在路上（可达几百毫秒），
+            # 等待挪到后台线程，GUI 不冻。就绪后经信号队列回 GUI 线程进入录制。
+            self._starting = True
+
+            def _activate():
+                session = None
+                try:
+                    session = prepared.result()
+                    session.begin(self._store, left, top, w, h, self._fps)
+                except Exception as e:
+                    self.start_failed.emit((session, e))
+                    return
+                self.session_ready.emit(session)
+
+            threading.Thread(target=_activate, name="gif-start", daemon=True).start()
             return
 
         self._start_time = time.perf_counter()
@@ -281,6 +309,46 @@ class FrameRecorder(QObject):
         self._start_scroll_listener()
         self.state_changed.emit(self._state.name)
         log_info(T("录制开始: {w}x{h} @ {fps}fps", w=w, h=h, fps=self._fps), "GIF")
+
+    def _on_session_ready(self, session):
+        """后台预备完成（已回 GUI 线程）：进入录制态。
+
+        等待期间用户可能已点停止/关闭窗口（_starting 被复位）：此时不能把
+        会话挂回去，直接停掉并交还，避免 duplication 泄漏。
+        """
+        self._starting = False
+        if self._store is None or self._state not in (RecordState.IDLE, RecordState.STOPPED):
+            try:
+                session.stop()
+            except Exception as e:
+                log_exception(e, T("停止迟到的录制会话"))
+            _session_stopped(session)
+            return
+        self._session = session
+        self._start_time = time.perf_counter()
+        self._pause_offset = 0.0
+        self._pause_start = 0.0
+
+        self._state = RecordState.RECORDING
+        self._timer.start(1000 // self._fps)
+        self._start_scroll_listener()
+        self.state_changed.emit(self._state.name)
+        log_info(T("录制开始: {w}x{h} @ {fps}fps", w=self._rec_width, h=self._rec_height, fps=self._fps), "GIF")
+
+    def _on_start_failed(self, payload):
+        """后台预备失败（已回 GUI 线程）：回到停止态并释放资源。"""
+        session, exc = payload
+        self._starting = False
+        log_error(T("RecordSession 启动失败: {e}", e=exc), "GIF")
+        if session is not None:
+            try:
+                session.stop()
+            except Exception as e:
+                log_exception(e, T("停止失败的录制会话"))
+            _session_stopped(session)
+        self._store = None
+        self._session = None
+        self.state_changed.emit(self._state.name)
 
     def pause(self):
         """暂停录制"""
@@ -311,6 +379,7 @@ class FrameRecorder(QObject):
 
     def stop(self) -> List[FrameData]:
         """同步停止录制"""
+        self._starting = False
         self._timer.stop()
         self._stop_session()
         if self._store is not None:

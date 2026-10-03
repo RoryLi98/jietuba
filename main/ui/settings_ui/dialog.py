@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QStackedWidget, QWidget, QDialogButtonBox,
     QFileDialog,
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from ui.dialogs import show_info_dialog, show_warning_dialog
 from PySide6.QtGui import QColor, QFont, QIcon, QGuiApplication
 
@@ -105,6 +105,10 @@ def save_inapp_shortcut_edits(config_manager, edits):
         config_manager.set_inapp_shortcut(
             cfg_key, "" if is_reserved_inapp_shortcut(value) else value
         )
+
+
+# 任务栏图标 ICO 的进程级缓存路径（见 SettingsDialog._apply_taskbar_icon）
+_taskbar_ico_path = None
 
 
 class SettingsDialog(FrostedFramelessDialog):
@@ -638,14 +642,26 @@ class SettingsDialog(FrostedFramelessDialog):
 
     def _connect_action_button_tracking(self, page):
         """Keep Apply in sync with edits made anywhere in the settings pages."""
+        if getattr(self, "_action_buttons_timer", None) is None:
+            self._action_buttons_timer = QTimer(self)
+            self._action_buttons_timer.setSingleShot(True)
+            self._action_buttons_timer.setInterval(150)
         for widget in page.findChildren(QWidget):
             for signal_name in _tracked_signals(type(widget)):
                 getattr(widget, signal_name).connect(self._update_action_buttons)
 
     def _update_action_buttons(self, *_args):
-        """Enable Apply only while the current values differ from the baseline."""
+        """Enable Apply only while the current values differ from the baseline.
+
+        控件信号每次改动都会连到这里，而全量快照+比较是 O(已建页全部控件)；
+        滑动条连击时每秒几十次信号——带参（信号触发）走 150ms 去抖合并，
+        无参（初始化/应用后/页面切换的显式调用）立即计算。
+        """
         apply_btn = getattr(self, "_footer_ok_btn", None)
         if apply_btn is None:
+            return
+        if _args and getattr(self, "_action_buttons_timer", None) is not None:
+            self._action_buttons_timer.start()
             return
         dirty = self._has_unsaved_changes()
         apply_btn.setEnabled(dirty)
@@ -1482,22 +1498,32 @@ class SettingsDialog(FrostedFramelessDialog):
 
     def _apply_taskbar_icon(self):
         try:
-            import ctypes, tempfile
-            from PySide6.QtGui import QPixmap, QIcon, QPainter
+            import ctypes
+            from PySide6.QtGui import QIcon
             from core.resource_manager import ResourceManager
 
             _icon_path = ResourceManager.get_resource_path("svg/托盘.svg")
             if not os.path.exists(_icon_path):
                 return
 
-            pix = QPixmap(32, 32)
-            pix.fill(Qt.GlobalColor.transparent)
-            p = QPainter(pix)
-            QIcon(_icon_path).paint(p, 0, 0, 32, 32)
-            p.end()
+            # 图标内容永不变化，只有窗口句柄会变：ICO 文件按进程只准备一次
+            # （原先每次打开设置都重栅格化 SVG 并写一次临时盘），
+            # showEvent 里只对新句柄发 WM_SETICON。
+            global _taskbar_ico_path
+            tmp_ico = _taskbar_ico_path
+            if tmp_ico is None:
+                from PySide6.QtGui import QPixmap, QPainter
 
-            tmp_ico = os.path.join(tempfile.gettempdir(), "jietuba_win_icon.ico")
-            pix.save(tmp_ico, "ICO")
+                pix = QPixmap(32, 32)
+                pix.fill(Qt.GlobalColor.transparent)
+                p = QPainter(pix)
+                QIcon(_icon_path).paint(p, 0, 0, 32, 32)
+                p.end()
+
+                import tempfile
+                tmp_ico = os.path.join(tempfile.gettempdir(), "jietuba_win_icon.ico")
+                pix.save(tmp_ico, "ICO")
+                _taskbar_ico_path = tmp_ico
 
             IMAGE_ICON = 1
             LR_LOADFROMFILE = 0x10

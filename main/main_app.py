@@ -10,7 +10,7 @@ import time
 
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QBrush, QFont
-from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
+from PySide6.QtCore import QObject, QThread, Qt, QTimer, Signal, Slot
 from ui.dialogs import show_warning_dialog, show_error_dialog
 
 from core.shortcut_manager import HotkeySystem
@@ -429,9 +429,16 @@ class MainApp(QObject):
         try:
             from pin.pin_manager import PinManager
             pin_manager = PinManager.instance()
-            pin_manager.pin_created.connect(lambda _pin: self._update_tray_menu())
-            pin_manager.pin_closed.connect(lambda _pin: self._update_tray_menu())
-            pin_manager.all_pins_closed.connect(self._update_tray_menu)
+            # 批量开关钉图时每条信号都全量重建菜单（QMenu + 十余个
+            # QAction）——经 200ms 去抖合并；语言/主题切换仍走立即路径。
+            if getattr(self, "_tray_menu_debounce", None) is None:
+                self._tray_menu_debounce = QTimer(self)
+                self._tray_menu_debounce.setSingleShot(True)
+                self._tray_menu_debounce.setInterval(200)
+                self._tray_menu_debounce.timeout.connect(self._update_tray_menu)
+            pin_manager.pin_created.connect(lambda _pin: self._tray_menu_debounce.start())
+            pin_manager.pin_closed.connect(lambda _pin: self._tray_menu_debounce.start())
+            pin_manager.all_pins_closed.connect(self._tray_menu_debounce.start)
             self._pin_tray_updates_connected = True
         except Exception as e:
             log_exception(e, T("连接钉图托盘菜单刷新信号"))

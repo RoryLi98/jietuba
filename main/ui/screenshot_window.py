@@ -720,6 +720,13 @@ class ScreenshotWindow(QWidget):
     # ------------------------------------------------------------------
     # 窗口截图可见性控制
     # ------------------------------------------------------------------
+    def _on_background_refresh_captured(self, image):
+        """长按刷新：工作线程送回的新背景（信号队列投递到 GUI 线程）。"""
+        if getattr(self, '_is_closing', False):
+            return
+        if getattr(self, 'info_controller', None):
+            self.info_controller._on_refresh_delivered(image)
+
     def _set_exclude_from_capture(self, exclude: bool):
         """设置本窗口是否对屏幕截图 API 不可见。
         
