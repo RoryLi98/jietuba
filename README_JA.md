@@ -319,7 +319,6 @@ clipboard/
 │   ├── widgets/
 │   │   ├── group_bar.py
 │   │   ├── item_delegate.py
-│   │   ├── item_widget.py
 │   │   ├── preview_popup.py
 │   │   ├── quick_edit_popup.py
 │   │   ├── manage_rows.py
@@ -389,7 +388,6 @@ gif/
 ├── record_window.py         # GifRecordWindow / AppState — ステートマシンコーディネーター（3層ウィンドウ）
 ├── overlay.py               # CaptureOverlay / OverlayMode — キャプチャオーバーレイ、領域調整
 ├── drawing_view.py          # GifDrawingView / GifDrawingScene — 録画中描画
-├── drawing_toolbar.py       # GifDrawingToolbar — 描画ツールバー
 ├── record_toolbar.py        # RecordToolbar — 開始/一時停止/停止コントロール
 ├── frame_recorder.py        # FrameRecorder / FrameData / CursorSnapshot — フレームサンプリング
 ├── playback_engine.py       # PlaybackEngine / PlayState — フレーム再生＆プレビュー
@@ -550,7 +548,6 @@ translation/
 ├── translation_manager.py   # TranslationManager — 翻訳ウィンドウマネージャー（シングルトン）
 ├── translation_dialog.py    # TranslationDialog — 翻訳結果ウィンドウ
 └── ui/
-    ├── dialog.py            # 翻訳ダイアログUI
     └── widgets.py           # 翻訳ウィジェット
 ```
 
@@ -602,7 +599,6 @@ ui/
 ├── dialogs.py               # StandardDialog — 確認、警告、情報、エラーダイアログ
 ├── toast.py                 # Toast — カーソル横に出る、フォーカスを奪わない一行通知
 ├── magnifier.py             # MagnifierOverlay — ピクセルレベル拡大鏡
-├── color_picker_dialog.py   # ColorPickerDialog — カスタムHSVカラーピッカー
 ├── color_picker_button.py   # ColorPickerButton — カラー選択ボタン
 ├── hotkey_edit.py           # HotkeyEdit — グローバルホットキーエディター
 ├── inapp_key_edit.py        # InAppKeyEdit — アプリ内ショートカットエディター

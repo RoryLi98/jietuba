@@ -320,7 +320,6 @@ clipboard/
 │   ├── widgets/
 │   │   ├── group_bar.py
 │   │   ├── item_delegate.py
-│   │   ├── item_widget.py
 │   │   ├── preview_popup.py
 │   │   ├── quick_edit_popup.py
 │   │   ├── manage_rows.py
@@ -390,7 +389,6 @@ gif/
 ├── record_window.py         # GifRecordWindow / AppState — state machine coordinator (3-layer window)
 ├── overlay.py               # CaptureOverlay / OverlayMode — capture overlay, region adjustment
 ├── drawing_view.py          # GifDrawingView / GifDrawingScene — drawing during recording
-├── drawing_toolbar.py       # GifDrawingToolbar — drawing tools toolbar
 ├── record_toolbar.py        # RecordToolbar — start/pause/stop controls
 ├── frame_recorder.py        # FrameRecorder / FrameData / CursorSnapshot — frame sampling
 ├── playback_engine.py       # PlaybackEngine / PlayState — frame playback and preview
@@ -551,7 +549,6 @@ translation/
 ├── translation_manager.py   # TranslationManager — translation window manager (singleton)
 ├── translation_dialog.py    # TranslationDialog — translation result window
 └── ui/
-    ├── dialog.py            # Translation dialog UI
     └── widgets.py           # Translation widgets
 ```
 
@@ -603,7 +600,6 @@ ui/
 ├── dialogs.py               # StandardDialog — confirm, warning, info, error dialogs
 ├── toast.py                 # Toast — one-line hint by the cursor that never takes focus
 ├── magnifier.py             # MagnifierOverlay — pixel-level magnifier
-├── color_picker_dialog.py   # ColorPickerDialog — custom HSV color picker
 ├── color_picker_button.py   # ColorPickerButton — color selection button
 ├── hotkey_edit.py           # HotkeyEdit — global hotkey editor
 ├── inapp_key_edit.py        # InAppKeyEdit — in-app shortcut editor

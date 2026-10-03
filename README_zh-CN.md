@@ -336,7 +336,6 @@ clipboard/
 │   ├── widgets/
 │   │   ├── group_bar.py
 │   │   ├── item_delegate.py
-│   │   ├── item_widget.py
 │   │   ├── preview_popup.py
 │   │   ├── quick_edit_popup.py
 │   │   ├── manage_rows.py
@@ -420,7 +419,6 @@ gif/
 ├── record_window.py         # GifRecordWindow / AppState — 主控制窗口，状态机协调器（管理3层窗口）
 ├── overlay.py               # CaptureOverlay / OverlayMode — 捕获覆盖层，选区调整界面
 ├── drawing_view.py          # GifDrawingView / GifDrawingScene — 录制中绘图编辑视图
-├── drawing_toolbar.py       # GifDrawingToolbar — 绘制工具栏
 ├── record_toolbar.py        # RecordToolbar — 录制控制工具栏（开始/暂停/停止）
 ├── frame_recorder.py        # FrameRecorder / FrameData / CursorSnapshot — 帧录制器，采样屏幕帧和光标
 ├── playback_engine.py       # PlaybackEngine / PlayState — 回放引擎，帧播放和预览
@@ -624,7 +622,6 @@ translation/
 ├── translation_dialog.py    # TranslationDialog / TranslationLoadingDialog — 翻译结果显示窗口
 └── ui/
     ├── __init__.py
-    ├── dialog.py            # 翻译对话框UI组件
     └── widgets.py           # 翻译相关小部件
 ```
 
@@ -679,7 +676,6 @@ ui/
 ├── dialogs.py               # StandardDialog / 对话框函数集 — 确认、警告、信息、错误对话框
 ├── toast.py                 # Toast — 光标旁不抢焦点的一行轻提示
 ├── magnifier.py             # MagnifierOverlay — 放大镜覆盖层（像素级取色）
-├── color_picker_dialog.py   # ColorPickerDialog — 自定义HSV颜色选择器
 ├── color_picker_button.py   # ColorPickerButton — 颜色选择按钮
 ├── hotkey_edit.py           # HotkeyEdit — 全局快捷键编辑框
 ├── inapp_key_edit.py        # InAppKeyEdit — 应用内快捷键编辑框
