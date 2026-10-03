@@ -65,6 +65,7 @@ def test_apply_saves_without_closing_and_resets_dirty_state(settings, config, qa
     choose(settings, 'capture_fullscreen_crosshair', True)
     choose(settings, 'mouse_capture_quick_save', 'ctrl+middle')
     choose(settings, 'mouse_pin_close', 'ctrl+doublemiddle')
+    settings._update_action_buttons()  # 去抖：点击前显式刷新按钮态
     assert settings._has_unsaved_changes()
     settings._footer_ok_btn.click()
     qapp.processEvents()

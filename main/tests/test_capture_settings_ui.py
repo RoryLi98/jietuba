@@ -220,6 +220,7 @@ def test_apply_button_tracks_settings_dirty_state(qapp, tmp_path):
     assert dialog._footer_ok_btn.isEnabled() is False
 
     dialog.save_toggle.setChecked(not dialog.save_toggle.isChecked())
+    dialog._update_action_buttons()  # 去抖的信号路径在此显式立即刷新
     assert dialog._footer_ok_btn.isEnabled() is True
 
     # A successful apply refreshes the baseline and therefore returns the

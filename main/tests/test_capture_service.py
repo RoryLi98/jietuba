@@ -256,25 +256,41 @@ class TestCaptureWithCursor:
         assert image.width() == 64
 
     def test_refresh_background_reuses_session_cursor(self, qapp):
+        import time
+
         from ui.selection_info.controller import SelectionInfoController
 
         cursor = object()
         new_image = QImage(8, 8, QImage.Format.Format_RGB32)
+        delivered = []
         win = SimpleNamespace(
             _is_closing=False,
             _exclude_from_capture_set=True,
             _capture_cursor=cursor,
             original_image=None,
             scene=SimpleNamespace(background=MagicMock()),
+            # 窗口槽：生产代码里由它转发回控制器（队列投递到 GUI 线程）
+            _on_background_refresh_captured=lambda image: (
+                delivered.append(image),
+                setattr(win, "original_image", image),
+                setattr(controller, "_refresh_in_flight", False)),
         )
-        controller = SimpleNamespace(_parent_window=win)
+        controller = SimpleNamespace(
+            _parent_window=win, _refresh_in_flight=False, _refresh_worker=None)
 
         with patch("ui.selection_info.controller.CaptureService") as service:
             service.return_value.capture_all_screens.return_value = (new_image, QRectF())
             SelectionInfoController._do_refresh_background(controller)
+            # 抓帧在工作线程：轮询等它送回（真实线程 + 队列信号）
+            deadline = time.time() + 2.0
+            while time.time() < deadline and not delivered:
+                qapp.processEvents()
+                time.sleep(0.01)
 
         service.return_value.capture_all_screens.assert_called_once_with(cursor)
+        assert delivered and delivered[0] is new_image
         assert win.original_image is new_image
+        assert controller._refresh_in_flight is False
 
 
 def _system_cursor(idc, hotspot_x, hotspot_y):

@@ -118,6 +118,7 @@ def saved(fixture):
 
 def apply(fixture):
     # The production button invokes apply_settings and emits settings_applied.
+    fixture.dialog._update_action_buttons()  # 控件信号路径已去抖：点击前显式刷新按钮态
     fixture.dialog._footer_ok_btn.click()
     fixture.qapp.processEvents()
     assert fixture.dialog.isVisible()
