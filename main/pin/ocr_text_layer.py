@@ -11,6 +11,8 @@ ocr_text_layer.py - OCR 可交互文字层（钉图专用）
 使用：
 当钉图生成后，自动异步触发 OCR 识别并创建此透明文字层
 """
+from functools import lru_cache
+
 import unicodedata
 from PySide6.QtWidgets import QWidget, QApplication
 from PySide6.QtCore import Qt, QRect, QPoint, QRectF, QThread, Signal
@@ -175,6 +177,41 @@ class OCRTextItem:
         # 扩大检测范围：上下左右各扩展5像素，提高点击容错率
         expanded_rect = rect.adjusted(-5, -5, 5, 5)
         return expanded_rect.contains(point)
+
+
+@lru_cache(maxsize=512)
+def _fit_chip_font_cached(text: str, width: int, height: int) -> QFont:
+    """选择能在贴片矩形内容纳译文的字号（逐级缩小，必要时换行）。
+
+    先按贴片高度逐级缩小；高度很大的整段贴片（译文行数与原文行数对不上
+    时整段译文贴在整体包围盒上）可能任何相对字号都装不下，这时继续降到
+    绝对小字号。兜底必须是小字号——回退到跟随高度的字号会让整段译文以
+    巨字溢出贴片。结果只取决于 (文本, 宽, 高)，paint 每帧每贴片都会来问，
+    lru_cache 把重复的逐档试排挡在缓存里。
+    """
+    area = QRectF(0, 0, width, height).adjusted(3, 1, -3, -1)
+    candidates = [
+        max(9, int(height * factor))
+        for factor in (0.72, 0.62, 0.54, 0.46, 0.40, 0.34,
+                       0.28, 0.22, 0.18, 0.14, 0.11)
+    ]
+    candidates += [16, 14, 12, 10, 9]
+    tried = set()
+    for size in sorted(set(candidates), reverse=True):
+        if size in tried:
+            continue
+        tried.add(size)
+        font = QFont(_UI_FONT_FAMILY)
+        font.setPixelSize(size)
+        metrics = QFontMetricsF(font)
+        bound = metrics.boundingRect(
+            area, Qt.AlignmentFlag.AlignCenter | Qt.TextWordWrap, text
+        )
+        if bound.width() <= area.width() and bound.height() <= area.height():
+            return font
+    font = QFont(_UI_FONT_FAMILY)
+    font.setPixelSize(9)
+    return font
 
 
 class OCRTextLayer(QWidget):
@@ -681,35 +718,11 @@ class OCRTextLayer(QWidget):
     def _fit_chip_font(text: str, rect: QRect) -> QFont:
         """选择能在贴片矩形内容纳译文的字号（逐级缩小，必要时换行）。
 
-        先按贴片高度逐级缩小；高度很大的整段贴片（译文行数与原文行数对不上
-        时整段译文贴在整体包围盒上）可能任何相对字号都装不下，这时继续降到
-        绝对小字号。兜底必须是小字号——回退到跟随高度的字号会让整段译文以
-        巨字溢出贴片。
+        结果只取决于 (文本, 贴片宽高)，paint 每帧每贴片都会来问，交给模块级
+        LRU 缓存（见 _fit_chip_font_cached）。
         """
-        area = QRectF(rect).adjusted(3, 1, -3, -1)
-        candidates = [
-            max(9, int(rect.height() * factor))
-            for factor in (0.72, 0.62, 0.54, 0.46, 0.40, 0.34,
-                           0.28, 0.22, 0.18, 0.14, 0.11)
-        ]
-        candidates += [16, 14, 12, 10, 9]
-        tried = set()
-        for size in sorted(set(candidates), reverse=True):
-            if size in tried:
-                continue
-            tried.add(size)
-            font = QFont(_UI_FONT_FAMILY)
-            font.setPixelSize(size)
-            metrics = QFontMetricsF(font)
-            bound = metrics.boundingRect(
-                area, Qt.AlignmentFlag.AlignCenter | Qt.TextWordWrap, text
-            )
-            if bound.width() <= area.width() and bound.height() <= area.height():
-                return font
-        font = QFont(_UI_FONT_FAMILY)
-        font.setPixelSize(9)
-        return font
-    
+        return _fit_chip_font_cached(text, rect.width(), rect.height())
+
     def has_text(self) -> bool:
         """检查是否有识别到的文字"""
         return bool(self.text_items)

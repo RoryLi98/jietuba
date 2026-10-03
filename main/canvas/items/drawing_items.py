@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+from functools import lru_cache
+
 from PySide6.QtWidgets import (
     QGraphicsPathItem, QGraphicsRectItem, QGraphicsEllipseItem, QGraphicsItem,
 )
@@ -522,6 +524,13 @@ class EllipseItem(DrawingItemMixin, QGraphicsEllipseItem):
 
 
 
+@lru_cache(maxsize=256)
+def _number_font_cached(number: int, radius: float) -> QFont:
+    """(数字, 半径) → 字体。拖动缩放时每帧每个序号都来问，
+    lru_cache 挡掉重复的逐轮宽度收缩。运行时才解析 NumberItem（晚绑定）。"""
+    return NumberItem._number_font_impl(number, radius)
+
+
 class NumberItem(DrawingItemMixin, QGraphicsItem):
     """序号图元"""
     FONT_SCALE = 0.95
@@ -610,14 +619,20 @@ class NumberItem(DrawingItemMixin, QGraphicsItem):
     DIGIT_FONT_SCALE_FALLBACK = 0.50  # 6 位及以上
 
     def _number_font(self) -> QFont:
+        """结果只取决于 (数字, 半径)：拖动缩放时每帧每个序号都来问，
+        交给模块级 LRU 缓存（见 _number_font_cached）。"""
+        return _number_font_cached(int(self.number), self.radius)
+
+    @staticmethod
+    def _number_font_impl(number: int, radius: float) -> QFont:
         # 用像素尺寸而非点尺寸：点尺寸会被系统 DPI 缩放再放大一次
         # （Per-Monitor DPI 感知下 150% 显示缩放 → 点到像素 ×2），数字就会
         # 撑出圆圈、圆环横穿数字。像素尺寸与圆圈半径同一坐标系，永远匹配。
-        digits = len(str(abs(int(self.number))))
-        scale = self.DIGIT_FONT_SCALE.get(
-            digits, self.DIGIT_FONT_SCALE_FALLBACK
+        digits = len(str(abs(int(number))))
+        scale = NumberItem.DIGIT_FONT_SCALE.get(
+            digits, NumberItem.DIGIT_FONT_SCALE_FALLBACK
         )
-        font_px = max(self.MIN_FONT_SIZE, int(self.radius * scale))
+        font_px = max(NumberItem.MIN_FONT_SIZE, int(radius * scale))
         font = QFont("Arial")
         font.setPixelSize(font_px)
         font.setBold(True)
@@ -625,14 +640,14 @@ class NumberItem(DrawingItemMixin, QGraphicsItem):
         # 安全网：超长数字（表外位数）按实测宽度逐步收缩，永不撑出圆圈
         try:
             from PySide6.QtGui import QFontMetricsF
-            usable = self.radius * 2 * 0.9
+            usable = radius * 2 * 0.9
             for _ in range(6):
                 text_width = QFontMetricsF(font).horizontalAdvance(
-                    str(self.number)
+                    str(number)
                 )
-                if text_width <= usable or font.pixelSize() <= self.MIN_FONT_SIZE:
+                if text_width <= usable or font.pixelSize() <= NumberItem.MIN_FONT_SIZE:
                     break
-                font.setPixelSize(max(self.MIN_FONT_SIZE, int(font.pixelSize() * 0.85)))
+                font.setPixelSize(max(NumberItem.MIN_FONT_SIZE, int(font.pixelSize() * 0.85)))
         except Exception:
             pass
         return font

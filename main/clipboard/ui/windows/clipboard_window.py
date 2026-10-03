@@ -1434,7 +1434,16 @@ class ClipboardWindow(QWidget, FramelessMixin):
 
         self._fl_reset()
         self.selection_manager.reset()
-        self.controller.on_window_show()
+        # 显示设置签名：这些值变了就算数据没变也要重建列表（delegate 配置随之变）
+        display_sig = (
+            self.config.get_clipboard_show_metadata(),
+            self.config.get_clipboard_font_size(),
+            self.config.get_clipboard_image_size(),
+            self.display_lines,
+            self.window_opacity,
+            self.current_theme,
+        )
+        self.controller.on_window_show(display_sig=display_sig)
 
         t_show_start = perf_counter()
         super().showEvent(event)

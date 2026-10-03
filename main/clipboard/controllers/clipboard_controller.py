@@ -93,6 +93,10 @@ class ClipboardController(QObject):
         self._has_more = True
         self._last_scroll_value = 0
         self._pending_reload = False
+        # 窗口显示时跳过整表重载的依据：(查询参数+显示设置, 数据指纹)。
+        # 在每次成功加载后记录；插入用合成指纹精确跟进。
+        self._last_load_signature: Optional[tuple] = None
+        self._last_display_sig = None  # 最近一次触发加载的显示设置签名
 
         # 筛选态下新内容的整表重载合并窗口：开着搜索词/筛选时连续复制
         # （粘贴风暴、脚本批量写剪贴板）会每条触发一次 DB 重查 + 全列表
@@ -237,6 +241,15 @@ class ClipboardController(QObject):
             
             # 发送数据加载完成信号
             self.data_loaded.emit(new_items, is_first_page)
+
+            # 记录加载完成时刻的数据指纹，供窗口显示时判"无变化"
+            try:
+                fingerprint = self.manager.get_history_fingerprint()
+            except AttributeError:
+                fingerprint = None
+            if fingerprint is not None:
+                self._last_load_signature = (
+                    (self._query_signature(), self._last_display_sig), fingerprint)
             
         except Exception as e:
             log_error(T("加载数据失败: {e}", e=e), "Clipboard")
@@ -828,12 +841,34 @@ class ClipboardController(QObject):
         """注册哪个窗口不能当粘贴目标——拾取窗口自己。"""
         self._foreground_tracker.set_excluded(predicate)
 
-    def on_window_show(self):
-        """窗口显示时调用"""
+    def on_window_show(self, display_sig=None):
+        """窗口显示时调用
+
+        display_sig: 窗口侧的显示设置签名（元数据/字号/图片档位/透明度等），
+        与查询参数、数据指纹一起构成"数据无变化"判据；三者都没变就跳过
+        整表重载——showEvent 每次开关窗口都会走，全量重查重建是空开空关
+        场景的主要开销。
+        """
         # showEvent 早于窗口取得焦点，此刻前台还是用户原来那个窗口
         self._foreground_tracker.start()
+
+        try:
+            fingerprint = self.manager.get_history_fingerprint()
+        except AttributeError:
+            fingerprint = None  # 旧版 manager 没有指纹查询，回退为总是重载
+        signature = (self._query_signature(), display_sig)
+        if (self._last_load_signature is not None and fingerprint is not None
+                and self._last_load_signature == (signature, fingerprint)):
+            log_debug(T("数据无变化，跳过窗口显示时的整表重载"), "Clipboard")
+            return
         # 重新加载数据
+        self._last_display_sig = display_sig
         self.load_history()
+
+    def _query_signature(self) -> tuple:
+        """影响查询结果的全部控制器状态"""
+        return (self.current_group_id, self._search_text, self._content_type,
+                self._time_range)
 
     def on_window_hide(self):
         """窗口隐藏时调用"""
@@ -874,6 +909,12 @@ class ClipboardController(QObject):
 
         row = self._first_unpinned_row()
         self.current_items.insert(row, item)
+        # 合成新指纹：全局 (count+1, max(id, item.id))——列表已同步，
+        # 下次窗口显示不必因这次插入而整表重载
+        if self._last_load_signature is not None:
+            _sig, (_c, m) = self._last_load_signature
+            self._last_load_signature = (
+                self._last_load_signature[0], (_c + 1, max(m, item.id)))
         # 分页按偏移量取数，头部多一行就必须跟着后移，否则下一页会重复取到交界那条
         self._current_offset += 1
         self.item_inserted.emit(item, row)

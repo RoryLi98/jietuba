@@ -26,6 +26,7 @@ translation_manager.py - 翻译窗口单例管理器
 """
 
 import time
+from collections import OrderedDict
 from typing import Optional
 from PySide6.QtCore import QCoreApplication, QObject, QPoint, QTimer, Signal
 
@@ -58,6 +59,11 @@ class TranslationManager(QObject):
         self._thread = None  # TranslationWorker 实例
         self._threads = set()  # Keep superseded network workers alive until they exit.
         self._request_token = 0
+        # 翻译结果 LRU 缓存：同 (provider, 语言对, 文本, 选项) 的重复翻译
+        # （重按翻译按钮、同一钉图反复识别同段文字）直接秒回，不再走网络。
+        # 只缓存成功结果。全部访问都在 GUI 线程，无需加锁。
+        self._result_cache = OrderedDict()
+        self._active_cache_key = None
         self._request_targets = {}
         self._active_target = "dialog"
         self._target_lang = "ZH"
@@ -530,6 +536,24 @@ class TranslationManager(QObject):
             preserve_formatting=self._preserve_formatting,
             options={"split_sentences": self._split_sentences},
         )
+        cache_key = (
+            provider_name, source_lang, target_lang, text,
+            self._preserve_formatting, self._split_sentences,
+        )
+        cached = self._result_cache.get(cache_key)
+        if cached is not None:
+            self._request_token += 1  # 作废在途请求，缓存的才是最新答案
+            self._result_cache.move_to_end(cache_key)
+            log_info(T("翻译命中缓存（{provider_name}）", provider_name=provider_name), "Translation")
+            self._on_translation_finished(
+                cached.success,
+                cached.translated_text,
+                cached.error_message,
+                cached.detected_source_lang,
+                result_target,
+            )
+            return
+        self._active_cache_key = cache_key
         thread = TranslationWorker(
             self._translation_service,
             request,
@@ -575,6 +599,17 @@ class TranslationManager(QObject):
             log_debug(T("忽略已被新请求替代的翻译结果"), "Translation")
             return
         result_target = self._request_targets.pop(token, self._active_target)
+        if success and self._active_cache_key is not None:
+            from .models import TranslationResult
+
+            self._result_cache[self._active_cache_key] = TranslationResult(
+                success=True,
+                translated_text=translated_text,
+                detected_source_lang=detected_lang,
+            )
+            while len(self._result_cache) > 64:
+                self._result_cache.popitem(last=False)
+        self._active_cache_key = None
         self._on_translation_finished(
             success, translated_text, error, detected_lang, result_target
         )

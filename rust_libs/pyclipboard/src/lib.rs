@@ -1449,6 +1449,13 @@ impl PyClipboardManager {
             .map_err(|e| PyRuntimeError::new_err(e))
     }
 
+    /// 历史指纹 (count, max_id)：窗口显示时判断数据是否变化
+    fn get_history_fingerprint(&self) -> PyResult<(i64, i64)> {
+        let db = self.db.lock();
+        db.get_history_fingerprint()
+            .map_err(|e| PyRuntimeError::new_err(e))
+    }
+
     /// 分组内某条目能否上移/下移（轻量查询，不拉完整记录）
     #[pyo3(signature = (item_id, group_id))]
     fn get_group_move_state(&self, item_id: i64, group_id: i64) -> PyResult<(bool, bool)> {

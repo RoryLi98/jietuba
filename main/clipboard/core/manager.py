@@ -563,6 +563,17 @@ class ClipboardManager:
             log_error(T("按分组查询失败: {e}", e=e), "Clipboard")
             return []
 
+    def get_history_fingerprint(self) -> Optional[tuple[int, int]]:
+        """历史指纹 (总条数, 最大 id)；不可用或查询失败返回 None（跳过优化失效，回退整表重载）"""
+        if not self.is_available:
+            return None
+
+        try:
+            return self._manager.get_history_fingerprint()
+        except (AttributeError, Exception) as e:
+            log_debug(T("查询历史指纹失败: {e}", e=e), "Clipboard")
+            return None
+
     def get_group_move_state(self, item_id: int, group_id: int) -> tuple[bool, bool]:
         """分组内条目能否上移/下移（Rust 侧只扫 id，不拉整组完整记录）"""
         if not self.is_available:

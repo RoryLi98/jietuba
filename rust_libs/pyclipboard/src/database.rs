@@ -665,6 +665,19 @@ impl Database {
         Ok(Some((before, after)))
     }
     
+    /// 历史指纹：(总条数, 最大 id)。剪贴板窗口显示时用它判断"数据无变化"，
+    /// 跳过整表重载。置顶/改内容/移动分组/重排不改这两项——那些操作都同步
+    /// 更新了已加载的列表或触发重载，跳过是安全的。
+    pub fn get_history_fingerprint(&self) -> Result<(i64, i64), String> {
+        self.conn
+            .query_row(
+                "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM clipboard",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|e| format!("查询失败: {e}"))
+    }
+
     /// 增加粘贴次数
     pub fn increment_paste_count(&self, id: i64) -> Result<i64, String> {
         self.conn.execute(
