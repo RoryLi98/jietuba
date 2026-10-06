@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from PySide6.QtCore import Qt, QRect, QRectF
+from PySide6.QtWidgets import QApplication
 
 import ui.screenshot_window as screenshot_window_module
 from core import last_capture_region as region_module

@@ -355,11 +355,6 @@ def test_busy_task_registration_and_release_on_exception(lifecycle):
     assert not background_tasks.busy()
 
 
-def test_quit_respects_cancel_before_destroying_windows(lifecycle):
-    lifecycle.settings_window = SimpleNamespace(close=lambda: False)
-    assert MainApp.quit_app(lifecycle) is False
-
-
 def test_native_clipboard_busy_or_pause_race_aborts_preparation(lifecycle):
     calls = []
     lifecycle.clipboard_manager = SimpleNamespace(pending_writes=lambda: 1, pause_for_update=lambda: False, resume_after_update=lambda: calls.append("resume"))

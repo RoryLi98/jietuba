@@ -47,6 +47,13 @@ class ResourceManager:
         return ResourceManager.get_resource_path(os.path.join("svg", icon_name))
 
     @staticmethod
+    def get_icon_by_name(icon_name: str, size: int = 0):
+        """按 svg/ 下的文件名取图标，等价于 get_icon(get_icon_path(name), size)。"""
+        return ResourceManager.get_icon(
+            ResourceManager.get_icon_path(icon_name), size
+        )
+
+    @staticmethod
     def _rasterize(svg_path: str, size: int = 0):
         """把 SVG 立即渲染成位图 QIcon，之后不再依赖源文件。
 

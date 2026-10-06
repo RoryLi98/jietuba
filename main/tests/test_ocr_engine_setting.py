@@ -14,22 +14,27 @@ def _manager(tmp_path):
     return ToolSettingsManager(qsettings=qsettings)
 
 
-def test_default_is_auto(tmp_path):
-    assert _manager(tmp_path).get_ocr_engine() == "auto"
+_DEFAULT = ToolSettingsManager.APP_DEFAULT_SETTINGS["ocr_engine"]
+
+
+def test_default_matches_configured_default(tmp_path):
+    # 本 fork 的默认引擎是 ppocr_rust（官方版为 auto），以配置为准
+    assert _DEFAULT == "ppocr_rust"
+    assert _manager(tmp_path).get_ocr_engine() == _DEFAULT
 
 
 @pytest.mark.parametrize("stored", ["windos_ocr", "windows_media_ocr", "", "nonsense"])
-def test_unknown_stored_value_reads_as_auto(tmp_path, stored):
+def test_unknown_stored_value_reads_as_default(tmp_path, stored):
     manager = _manager(tmp_path)
     manager.qsettings.setValue("app/ocr_engine", stored)
-    assert manager.get_ocr_engine() == "auto"
+    assert manager.get_ocr_engine() == _DEFAULT
 
 
 def test_unknown_value_is_not_stored(tmp_path):
     manager = _manager(tmp_path)
-    manager.set_ocr_engine("ppocr_rust")
+    manager.set_ocr_engine("oneocr")
     manager.set_ocr_engine("windows_media_ocr")
-    assert manager.get_ocr_engine() == "auto"
+    assert manager.get_ocr_engine() == _DEFAULT
 
 
 def _page(monkeypatch, tmp_path, available, engine):
@@ -109,10 +114,10 @@ def test_saving_a_new_engine_switches_it_at_once(monkeypatch, qapp, tmp_path):
         dialog.apply_settings()
         assert switched == []          # 没改引擎就不动已加载的引擎
 
-        dialog.ocr_engine_combo.setCurrentIndex(OCR_ENGINES.index("ppocr_rust"))
+        dialog.ocr_engine_combo.setCurrentIndex(OCR_ENGINES.index("oneocr"))
         dialog.apply_settings()
-        assert manager.get_ocr_engine() == "ppocr_rust"
-        assert switched == ["ppocr_rust"]
+        assert manager.get_ocr_engine() == "oneocr"
+        assert switched == ["oneocr"]
         assert len(trims) == 1
     finally:
         dialog.deleteLater()
