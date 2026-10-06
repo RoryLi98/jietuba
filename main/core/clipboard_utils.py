@@ -143,8 +143,8 @@ def deliver_image_async(
         except Exception as exc:
             log_warning(T("图像投递: 后台任务失败 ({exc})", exc=exc), "Clipboard")
 
-    thread = threading.Thread(target=worker, daemon=True, name="ClipboardDeliver")
-    thread.start()
+    from core.background_tasks import start_thread
+    thread = start_thread(worker, name="ClipboardDeliver")
     return thread
 
 

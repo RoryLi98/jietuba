@@ -254,6 +254,8 @@ class PreloadManager:
                 self._steps.append(self._preload_hdr_session)
         if cfg.get_app_setting("preload_toolbar", True):
             self._steps.append(self._preload_toolbar_assets)
+        # 引擎偏好在主线程读好交给 OCR 模块，识别线程里就不用再读设置
+        self._steps.append(self._apply_ocr_engine_setting)
         if cfg.get_app_setting("preload_ocr", True):
             self._steps.append(self._preload_ocr_engine)
         if cfg.get_app_setting("preload_settings", True):
@@ -427,6 +429,10 @@ class PreloadManager:
         self.app._screenshot_preload_thread.start()
         return True  # 异步任务
     
+    def _apply_ocr_engine_setting(self):
+        from ocr import set_ocr_engine
+        set_ocr_engine(self.config.get_ocr_engine())
+
     def _preload_ocr_engine(self):
         """预加载 OCR 模块和引擎（在后台线程中完成，避免阻塞主线程）"""
         from core.logger import log_debug, log_info, log_warning, T
@@ -498,10 +504,11 @@ class PreloadManager:
 
             # 首次运行：显示欢迎向导
             if self.config.is_first_run():
+                from ui.dialogs import exec_dialog
                 from ui.welcome import WelcomeWizard
                 self.app.hotkey_system.unregister_all()
                 wizard = WelcomeWizard(self.config)
-                wizard.exec()
+                exec_dialog(wizard)
                 # 向导中可能修改了热键配置，结束后按最终配置注册
                 self.app.update_hotkey()
                 return
