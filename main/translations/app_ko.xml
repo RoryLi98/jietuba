@@ -1258,8 +1258,6 @@ Replace it?</source>
         <source>jietuba</source>
         <translation>jietuba</translation>
     </message>
-
-    <message><source>Clipboard data location changed successfully, but the old files are still in use and could not be deleted. You can remove them after restarting the app.\n{error}</source><translation>클립보드 데이터 위치가 변경되었지만, 이전 파일이 아직 사용 중이라 삭제하지 못했습니다. 앱을 다시 시작한 뒤 삭제할 수 있습니다.\n{error}</translation></message>
     <message>
         <source>Startup Speed</source>
         <translation>시작 속도</translation>
@@ -1753,6 +1751,11 @@ Replace it?</source>
     <message><source>Choose folder to save pinned images</source><translation>고정 이미지를 저장할 폴더 선택</translation></message>
     <message><source>Save Failed</source><translation>저장 실패</translation></message>
     <message><source>Saved {saved} pinned images, failed {failed}.</source><translation>고정 이미지 {saved}개 저장, {failed}개 실패.</translation></message>
+
+    <message>
+        <source>Pin latest clipboard</source>
+        <translation>최근 클립보드 고정</translation>
+    </message>
 </context>
 
 <!-- ========== Main App (Tray Menu) ========== -->
@@ -1849,6 +1852,15 @@ Replace it?</source>
 <message>
         <source>Settings could not be saved. Update cancelled.</source>
         <translation>설정을 저장할 수 없어 업데이트를 취소했습니다.</translation>
+    </message>
+
+    <message>
+        <source>截图失败</source>
+        <translation>스크린샷 캡처 실패</translation>
+    </message>
+    <message>
+        <source>抓取屏幕失败，请重试</source>
+        <translation>화면 캡처에 실패했습니다. 다시 시도해 주세요</translation>
     </message>
 </context>
 

@@ -1265,8 +1265,6 @@ Replace it?</source>
         <source>jietuba</source>
         <translation>jietuba</translation>
     </message>
-
-    <message><source>Clipboard data location changed successfully, but the old files are still in use and could not be deleted. You can remove them after restarting the app.\n{error}</source><translation>クリップボードデータの場所を変更しましたが、古いファイルはまだ使用中のため削除できませんでした。アプリを再起動した後で削除できます。\n{error}</translation></message>
     <message>
         <source>Startup Speed</source>
         <translation>起動速度</translation>
@@ -1766,6 +1764,11 @@ Replace it?</source>
     <message><source>Choose folder to save pinned images</source><translation>ピン留め画像の保存先フォルダーを選択</translation></message>
     <message><source>Save Failed</source><translation>保存に失敗しました</translation></message>
     <message><source>Saved {saved} pinned images, failed {failed}.</source><translation>{saved} 個のピン留め画像を保存し、{failed} 個失敗しました。</translation></message>
+
+    <message>
+        <source>Pin latest clipboard</source>
+        <translation>最新のクリップボードをピン留め</translation>
+    </message>
 </context>
 
 <!-- ========== Main App (Tray Menu) ========== -->
@@ -1862,6 +1865,15 @@ Replace it?</source>
 <message>
         <source>Settings could not be saved. Update cancelled.</source>
         <translation>設定を保存できなかったため、更新をキャンセルしました。</translation>
+    </message>
+
+    <message>
+        <source>截图失败</source>
+        <translation>スクリーンショットのキャプチャに失敗しました</translation>
+    </message>
+    <message>
+        <source>抓取屏幕失败，请重试</source>
+        <translation>画面のキャプチャに失敗しました。もう一度お試しください</translation>
     </message>
 </context>
 

@@ -1143,8 +1143,6 @@ Replace it?</translation>
         <source>jietuba</source>
         <translation>jietuba</translation>
     </message>
-
-    <message><source>Clipboard data location changed successfully, but the old files are still in use and could not be deleted. You can remove them after restarting the app.\n{error}</source><translation>Clipboard data location changed successfully, but the old files are still in use and could not be deleted. You can remove them after restarting the app.\n{error}</translation></message>
     <message>
         <source>Startup Speed</source>
         <translation>Startup Speed</translation>
@@ -1638,6 +1636,11 @@ Replace it?</translation>
     <message><source>Choose folder to save pinned images</source><translation>Choose folder to save pinned images</translation></message>
     <message><source>Save Failed</source><translation>Save Failed</translation></message>
     <message><source>Saved {saved} pinned images, failed {failed}.</source><translation>Saved {saved} pinned images, failed {failed}.</translation></message>
+
+    <message>
+        <source>Pin latest clipboard</source>
+        <translation>Pin latest clipboard</translation>
+    </message>
 </context>
 
 <!-- ========== Main App (Tray Menu) ========== -->
@@ -1702,6 +1705,15 @@ Replace it?</translation>
 <message>
         <source>Settings could not be saved. Update cancelled.</source>
         <translation>Settings could not be saved. Update cancelled.</translation>
+    </message>
+
+    <message>
+        <source>截图失败</source>
+        <translation>Screenshot capture failed</translation>
+    </message>
+    <message>
+        <source>抓取屏幕失败，请重试</source>
+        <translation>Failed to capture the screen, please try again</translation>
     </message>
 </context>
 

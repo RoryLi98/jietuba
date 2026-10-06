@@ -1267,8 +1267,6 @@ Replace it?</source>
         <source>jietuba</source>
         <translation>jietuba</translation>
     </message>
-
-    <message><source>Clipboard data location changed successfully, but the old files are still in use and could not be deleted. You can remove them after restarting the app.\n{error}</source><translation>剪贴板数据位置已更改，但旧文件仍被占用，暂时无法删除。重启应用后可以手动删除。\n{error}</translation></message>
     <message>
         <source>Startup Speed</source>
         <translation>启动速度</translation>
@@ -1767,6 +1765,11 @@ Replace it?</source>
     <message><source>Choose folder to save pinned images</source><translation>选择保存钉图的文件夹</translation></message>
     <message><source>Save Failed</source><translation>保存失败</translation></message>
     <message><source>Saved {saved} pinned images, failed {failed}.</source><translation>已保存 {saved} 个钉图，失败 {failed} 个。</translation></message>
+
+    <message>
+        <source>Pin latest clipboard</source>
+        <translation>钉选最新剪贴板</translation>
+    </message>
 </context>
 
 <!-- ========== Main App (Tray Menu) ========== -->
@@ -1863,6 +1866,15 @@ Replace it?</source>
 <message>
         <source>Settings could not be saved. Update cancelled.</source>
         <translation>设置保存失败，已取消更新。</translation>
+    </message>
+
+    <message>
+        <source>截图失败</source>
+        <translation>截图失败</translation>
+    </message>
+    <message>
+        <source>抓取屏幕失败，请重试</source>
+        <translation>抓取屏幕失败，请重试</translation>
     </message>
 </context>
 
