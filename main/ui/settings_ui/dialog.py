@@ -32,6 +32,7 @@ from core.constants import CSS_FONT_FAMILY, DEFAULT_FONT_FAMILY
 from core.resource_manager import ResourceManager
 from core.ui_scale import configure_dialog_control, configure_dialog_controls, dialog_scaled
 from settings.tool_settings import CAPTURE_ENGINES, SMART_SELECTION_MODES
+from ui.toolbar_layout import SETTING_KEY as TOOLBAR_LAYOUT_KEY
 
 # 页面创建函数
 from .page_hotkey import create_hotkey_page, validate_global_hotkey_edits
@@ -132,6 +133,8 @@ class SettingsDialog(FrostedFramelessDialog):
         self._skip_unsaved_close_prompt = False
         # 导入的设置已填进界面、还没应用；有些选项不在未保存检测的快照里
         self._import_unsaved = False
+        # 导入文件里的工具栏排布（配置里存的 JSON 文本）：设置页上没有对应控件，点应用时才写入
+        self._imported_toolbar_layout = None
         if self.config_manager is None:
             from .mock_config import MockConfig
             self.config_manager = MockConfig()
@@ -752,8 +755,6 @@ class SettingsDialog(FrostedFramelessDialog):
             index = self.engine_combo.findData(defaults["long_stitch_engine"])
             if index >= 0:
                 self.engine_combo.setCurrentIndex(index)
-        if hasattr(self, 'cooldown_spinbox'):
-            self.cooldown_spinbox.setValue(defaults["scroll_cooldown"])
         if hasattr(self, 'ignore_top_pixels_spinbox'):
             self.ignore_top_pixels_spinbox.setValue(defaults["long_stitch_ignore_top_pixels"])
         for key in (
@@ -878,6 +879,10 @@ class SettingsDialog(FrostedFramelessDialog):
             index = self.ocr_engine_combo.findData(defaults["ocr_engine"])
             if index >= 0:
                 self.ocr_engine_combo.setCurrentIndex(index)
+        if hasattr(self, 'ocr_result_position_combo'):
+            index = self.ocr_result_position_combo.findData(defaults["ocr_result_position"])
+            if index >= 0:
+                self.ocr_result_position_combo.setCurrentIndex(index)
 
     def _reset_log_page(self):
         defaults = self.config_manager.APP_DEFAULT_SETTINGS
@@ -1105,6 +1110,8 @@ class SettingsDialog(FrostedFramelessDialog):
                 from core.platform_utils import request_trim_working_set
                 set_ocr_engine(engine)
                 request_trim_working_set()
+        if hasattr(self, 'ocr_result_position_combo'):
+            self.config_manager.set_ocr_result_position(self.ocr_result_position_combo.currentData())
         if hasattr(self, 'ocr_grayscale_toggle'):
             self.config_manager.set_ocr_grayscale_enabled(self.ocr_grayscale_toggle.isChecked())
         if hasattr(self, 'ocr_upscale_toggle'):
@@ -1202,8 +1209,6 @@ class SettingsDialog(FrostedFramelessDialog):
             self.config_manager.set_capture_engine(self.capture_engine_combo.currentData())
         if hasattr(self, 'engine_combo'):
             self.config_manager.set_long_stitch_engine(self.engine_combo.currentData())
-        if hasattr(self, 'cooldown_spinbox'):
-            self.config_manager.set_scroll_cooldown(self.cooldown_spinbox.value())
         if hasattr(self, 'ignore_top_pixels_spinbox'):
             self.config_manager.set_long_stitch_ignore_top_pixels(self.ignore_top_pixels_spinbox.value())
 
@@ -1266,8 +1271,12 @@ class SettingsDialog(FrostedFramelessDialog):
         if hasattr(self, '_selection_handle_size_combo'):
             theme.set_selection_handle_size(self._selection_handle_size_combo.currentData())
 
+        if self._imported_toolbar_layout is not None:
+            self.config_manager.set_app_setting(TOOLBAR_LAYOUT_KEY, self._imported_toolbar_layout)
+
         log_info(T("所有设置已保存"), "Settings")
         self._import_unsaved = False
+        self._imported_toolbar_layout = None
         self._settings_snapshot = self._snapshot_settings()
         self._update_action_buttons()
         self.config_manager.qsettings.sync()
@@ -1423,7 +1432,7 @@ class SettingsDialog(FrostedFramelessDialog):
             if w is not None:
                 snap[attr] = w.isChecked()
         # 下拉框类
-        for attr in ('screenshot_format_combo', 'ocr_engine_combo',
+        for attr in ('screenshot_format_combo', 'ocr_engine_combo', 'ocr_result_position_combo',
                       'translation_provider_combo', 'translation_target_combo',
                       'log_level_combo',
                       'language_combo', 'engine_combo', 'cursor_move_combo', 'clipboard_pick_combo',
@@ -1438,7 +1447,7 @@ class SettingsDialog(FrostedFramelessDialog):
                 snap[attr] = w.currentIndex()
         # 数值类
         for attr in ('clipboard_history_limit_spin',
-                      'cooldown_spinbox', 'ignore_top_pixels_spinbox',
+                      'ignore_top_pixels_spinbox',
                       'ocr_scale_spinbox'):
             w = getattr(self, attr, None)
             if w is not None:
@@ -1585,6 +1594,7 @@ class SettingsDialog(FrostedFramelessDialog):
     def refresh_settings(self):
         """从配置管理器重新读取所有设置并更新界面"""
         self._import_unsaved = False
+        self._imported_toolbar_layout = None
         SettingsDialog._refresh_behavior_controls(self)
         if hasattr(self, 'hotkey_input'):
             self.hotkey_input.setText(self.config_manager.get_hotkey())
@@ -1635,8 +1645,6 @@ class SettingsDialog(FrostedFramelessDialog):
             index = self.engine_combo.findData(engine)
             if index >= 0:
                 self.engine_combo.setCurrentIndex(index)
-        if hasattr(self, 'cooldown_spinbox'):
-            self.cooldown_spinbox.setValue(self.config_manager.get_scroll_cooldown())
         if hasattr(self, 'ignore_top_pixels_spinbox'):
             self.ignore_top_pixels_spinbox.setValue(self.config_manager.get_long_stitch_ignore_top_pixels())
 
@@ -1696,6 +1704,12 @@ class SettingsDialog(FrostedFramelessDialog):
             index = self.ocr_engine_combo.findData(self.config_manager.get_ocr_engine())
             if index >= 0:
                 self.ocr_engine_combo.setCurrentIndex(index)
+        if hasattr(self, 'ocr_result_position_combo'):
+            index = self.ocr_result_position_combo.findData(self.config_manager.get_ocr_result_position())
+            if index >= 0:
+                self.ocr_result_position_combo.setCurrentIndex(index)
+        if hasattr(self, 'ocr_grayscale_toggle'):
+            self.ocr_grayscale_toggle.setChecked(self.config_manager.get_ocr_grayscale_enabled())
         if hasattr(self, 'ocr_upscale_toggle'):
             self.ocr_upscale_toggle.setChecked(self.config_manager.get_ocr_upscale_enabled())
         if hasattr(self, 'ocr_scale_spinbox'):
@@ -1897,6 +1911,9 @@ class SettingsDialog(FrostedFramelessDialog):
             finally:
                 self.config_manager = config
             del preview
+        layout = values.get(f"app/{TOOLBAR_LAYOUT_KEY}")
+        # 文件里没有，或不是文本（手改过），就不动现有排布
+        self._imported_toolbar_layout = layout if isinstance(layout, str) else None
         self._import_unsaved = True
         self._update_action_buttons()
 
@@ -1935,4 +1952,5 @@ class SettingsDialog(FrostedFramelessDialog):
             SettingsDialog._refresh_appearance_controls(
                 self, SettingsDialog._configured_appearance(self.config_manager)
             )
-        return keys
+        # 工具栏排布在工具栏自己的对话框里改，设置页读不到它，却是要带走的自定义
+        return keys | {f"app/{TOOLBAR_LAYOUT_KEY}"}

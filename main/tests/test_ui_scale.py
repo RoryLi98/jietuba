@@ -121,31 +121,34 @@ def test_sizes_are_recomputed_from_the_base_not_from_the_last_result():
 
 
 # ======================================================================
-# 100% 基线 —— 吸收 0.90 之后的实际像素，和改造前一致
+# 100% 基线 —— 设计尺寸，改比例都从这里算
 # ======================================================================
 
-def test_toolbar_keeps_its_previous_size_at_100_percent(qapp):
+def test_toolbar_matches_its_design_size_at_100_percent(qapp):
     from ui.toolbar import Toolbar
 
     get_ui_scale().set_percent(100)
     toolbar = Toolbar()
     try:
-        # 缩放基准重定义：100% = 旧 150%（×1.5）
-        assert toolbar._btn_height == 60
-        assert toolbar._button_widths["pen"] == 60
-        assert toolbar._button_widths["save"] == 68  # round(45 * 1.5)
+        # 缩放基准重定义：100% = 旧 150%（×1.5）；按钮基准尺寸沿用官方 2.1.5 新值
+        assert toolbar._btn_height == 60          # round(40 * 1.5)
+        assert toolbar._button_widths["pen"] == 57   # round(38 * 1.5)
+        assert toolbar._button_widths["save"] == 63  # round(42 * 1.5)
     finally:
         toolbar.deleteLater()
 
 
-def test_settings_panel_keeps_its_previous_size_at_100_percent(qapp):
+def test_settings_panel_matches_its_design_size_at_100_percent(qapp):
+    """数值控件是「图标列 18 + 胶囊」，面板和主工具栏同高 40"""
     from ui.shape_settings_panel import ShapeSettingsPanel
 
     get_ui_scale().set_percent(100)
     panel = ShapeSettingsPanel()
     try:
-        assert panel.size_spin.width() == 81   # round(54 * 1.5)
-        assert panel.opacity_spin.width() == 98  # round(65 * 1.5)
+        # 缩放基准重定义：100% = 旧 150%（×1.5）；面板基准尺寸沿用官方 2.1.5 新值
+        assert panel.size_spin.width() == 102  # round(68 * 1.5)
+        assert panel.opacity_spin.width() == 120  # round(80 * 1.5)
+        assert panel.height() == 60  # round(40 * 1.5)
     finally:
         panel.deleteLater()
 

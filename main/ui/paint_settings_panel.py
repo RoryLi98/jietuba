@@ -2,12 +2,14 @@
 画笔类工具设置面板
 适用于：画笔 (pen) 和 荧光笔 (highlighter)
 """
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QPushButton, QButtonGroup, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QPushButton, QButtonGroup, QWidget
 from PySide6.QtCore import Signal, QSize
 from core.resource_manager import ResourceManager
 from core.ui_scale import scaled
-from .base_settings_panel import BaseSettingsPanel, StepperWidget, build_settings_panel_stylesheet
-from .color_picker_button import ColorPickerButton
+from .base_settings_panel import (
+    BaseSettingsPanel, PillComboBox, build_settings_panel_stylesheet, make_separator,
+    paint_line_style_preview,
+)
 
 def _cached_icon(svg_name):
     """获取缓存的 QIcon"""
@@ -60,8 +62,6 @@ class PaintSettingsPanel(BaseSettingsPanel):
 
     def _init_ui(self):
         """重写初始化UI以添加线条样式选择"""
-        from PySide6.QtWidgets import QFrame
-
         layout = QHBoxLayout(self)
 
         # === 0. 荧光笔模式切换 ===
@@ -93,7 +93,8 @@ class PaintSettingsPanel(BaseSettingsPanel):
         layout.addWidget(self.mode_widget)
         
         # === 1. 线条样式选择 ===
-        self.line_style_combo = QComboBox()
+        self.line_style_combo = PillComboBox()
+        self.line_style_combo.set_preview_painter(paint_line_style_preview)
         # 添加实线和虚线选项
         from pathlib import Path
         solid_icon_path = ResourceManager.get_icon_path("line_solid.svg")
@@ -121,13 +122,7 @@ class PaintSettingsPanel(BaseSettingsPanel):
         layout.addWidget(self.line_style_combo)
 
         # === 2. 基础控件（尺寸、透明度等）===
-        self.size_spin = StepperWidget(self.current_size, self.SIZE_RANGE[0], self.SIZE_RANGE[1])
-        self.size_spin.setToolTip(self._tr(self.SIZE_TOOLTIP))
-        layout.addWidget(self.size_spin)
-
-        self.opacity_spin = StepperWidget(self._opacity_to_percent(self.current_opacity), 0, 100, "%")
-        self.opacity_spin.setToolTip(self._tr(self.OPACITY_TOOLTIP))
-        layout.addWidget(self.opacity_spin)
+        self._build_size_and_opacity(layout)
 
         # === 3. 颜色选择（连同前面的分隔线收成一组，聚光灯借用本面板时整组隐藏）===
         self.color_widget = QWidget()
@@ -135,35 +130,8 @@ class PaintSettingsPanel(BaseSettingsPanel):
         color_layout.setContentsMargins(0, 0, 0, 0)
         self._color_layout = color_layout
         layout.addWidget(self.color_widget)
-
-        line1 = QFrame()
-        line1.setObjectName("separator")
-        line1.setFrameShape(QFrame.Shape.VLine)
-        line1.setFixedWidth(1)
-        color_layout.addWidget(line1)
-
-        self.color_picker_btn = ColorPickerButton(
-            self.current_color, size=scaled(self.BASE_COLOR_BTN), show_alpha=True
-        )
-        self.color_picker_btn.setToolTip(self._tr("Custom Color"))
-        color_layout.addWidget(self.color_picker_btn)
-
-        preset_colors = [
-            "#FF0000",
-            "#FFFF00",
-            "#00FF00",
-            "#0000FF",
-            "#000000",
-            "#FFFFFF",
-        ]
-
-        self._preset_buttons = []
-        for color_str in preset_colors:
-            btn = QPushButton()
-            btn.setToolTip(color_str)
-            btn.clicked.connect(lambda checked, c=color_str: self._apply_preset_color(c))
-            color_layout.addWidget(btn)
-            self._preset_buttons.append((btn, color_str))
+        color_layout.addWidget(make_separator())
+        color_layout.addWidget(self._build_color_row())
 
         layout.addStretch()
 
@@ -259,24 +227,32 @@ class PaintSettingsPanel(BaseSettingsPanel):
 
         self.blockSignals(False)
 
+    def _set_control_visible(self, widget, visible: bool):
+        """显示或隐藏控件，面板宽度随可见内容重算，右侧不留被隐藏控件的空位"""
+        visible = bool(visible)
+        if (not widget.isHidden()) == visible:
+            return
+        widget.setVisible(visible)
+        self.adjustSize()
+
     def set_line_style_visible(self, visible: bool):
         """控制线条样式控件显示（高亮笔不显示）"""
         if hasattr(self, "line_style_combo"):
-            self.line_style_combo.setVisible(bool(visible))
+            self._set_control_visible(self.line_style_combo, visible)
 
     def set_size_visible(self, visible: bool):
         """控制线宽控件显示（聚光灯借用本面板，它的孔没有线宽）"""
         if hasattr(self, "size_spin"):
-            self.size_spin.setVisible(bool(visible))
+            self._set_control_visible(self.size_spin, visible)
 
     def set_color_visible(self, visible: bool):
         """控制颜色控件显示（聚光灯借用本面板，它的幕布固定为黑色）"""
         if hasattr(self, "color_widget"):
-            self.color_widget.setVisible(bool(visible))
+            self._set_control_visible(self.color_widget, visible)
 
     def set_highlighter_mode_visible(self, visible: bool):
         if hasattr(self, "mode_widget"):
-            self.mode_widget.setVisible(bool(visible))
+            self._set_control_visible(self.mode_widget, visible)
 
     def set_highlighter_mode(self, mode: str):
         if mode not in ("freehand", "rect"):

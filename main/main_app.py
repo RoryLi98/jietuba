@@ -8,12 +8,17 @@ import sys
 import os
 import time
 
+# 录制子进程必须在 Qt、配置、数据库和单实例逻辑初始化前分流。
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--video-recorder-worker":
+    from video_worker import main as run_video_worker
+    raise SystemExit(run_video_worker(sys.argv[2:]))
+
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QBrush, QFont
 from PySide6.QtCore import QObject, QThread, Qt, QTimer, Signal, Slot
 from ui.dialogs import show_warning_dialog, show_error_dialog
 
-from core.qt_utils import blocking_modal
+from core.qt_utils import blocking_modal, close_active_popups
 from core.shortcut_manager import HotkeySystem
 from settings import get_tool_settings_manager
 from ui.tray_menu import create_tray_menu
@@ -23,7 +28,7 @@ from core.logger import (
 )
 
 # ── 全局版本号 ────────────────────────────────────────────
-APP_VERSION = "2.1.4"
+APP_VERSION = "2.1.5"
 
 
 def create_fallback_app_icon():
@@ -769,6 +774,10 @@ class MainApp(QObject):
         # 从排队到截完这段时间里也可能弹出模态窗口，避免创建一个被锁死的界面。
         if self._activate_blocking_modal():
             return
+
+        # 托盘菜单、钉图右键菜单等弹出层还开着的话，截图窗口收不到鼠标移动，智能选区不跟手。
+        # 画面已经截下，此时关掉不影响截图内容。
+        close_active_popups()
         
         self.quick_capture.set_capture_pending(True)
         try:
@@ -1086,6 +1095,15 @@ class MainApp(QObject):
         放在 aboutToQuit 的 _on_about_to_quit 里做一次——那里是唯一能覆盖所有
         退出路径（托盘、系统注销/关机、会话结束）的位置，这里只负责退出事件循环。
         """
+        # MP4 需要先完成封装并退出 helper，才能清理 onefile 资源目录。
+        recording = getattr(self.app, '_gif_window', None)
+        if recording is not None and recording.video_busy:
+            if getattr(self, '_recording_quit_pending', None) is not recording:
+                self._recording_quit_pending = recording
+                recording.closed.connect(self.quit_app)
+            recording.close_all()
+            return
+        self._recording_quit_pending = None
         if getattr(self, "quick_capture", None):
             self.quick_capture.close()
         self.app.quit()
